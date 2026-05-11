@@ -6,5 +6,5 @@
 - Do not add package-manager-specific behavior unless tests prove the published tarball invariant.
 - Split CLI args at `--` before parsing; everything after it belongs to `pnpm publish`.
 - Keep npm publication in `.github/workflows/release.yml`; npm trusted publishing is keyed by workflow filename.
-- After first npm publication, install this package into itself and republish a minor bump through it to prove the real published CLI path.
+- After each successful npm publication, update this repo to use the just-published package, regenerate and commit the lockfile, then publish the next bump through that installed CLI. Use the explicit `latest` tag only when it is the intended proven release channel.
 - Run `bun run check` before committing.
