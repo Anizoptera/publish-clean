@@ -11,21 +11,38 @@ interface Fixture {
   root: string;
 }
 
-function runCli(args: readonly string[], cwd: string, env?: Record<string, string>): SpawnSyncReturns<string> {
-  return spawnSync("node", [CLI, ...args], { cwd, encoding: "utf8", env: { ...process.env, ...env } });
+function runCli(
+  args: readonly string[],
+  cwd: string,
+  env?: Record<string, string>,
+): SpawnSyncReturns<string> {
+  return spawnSync("node", [CLI, ...args], {
+    cwd,
+    encoding: "utf8",
+    env: { ...process.env, ...env },
+  });
 }
 
-async function fixture(pkg: Record<string, unknown>, files: Record<string, string>): Promise<Fixture> {
+async function fixture(
+  pkg: Record<string, unknown>,
+  files: Record<string, string>,
+): Promise<Fixture> {
   const root = await mkdtemp(path.join(tmpdir(), "publish-clean-test-"));
   const dir = path.join(root, "pkg");
   await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, "package.json"), `${JSON.stringify(pkg, null, 2)}\n`);
+  await writeFile(
+    path.join(dir, "package.json"),
+    `${JSON.stringify(pkg, null, 2)}\n`,
+  );
   for (const [name, content] of Object.entries(files)) {
     const file = path.join(dir, name);
     await mkdir(path.dirname(file), { recursive: true });
     await writeFile(file, content);
   }
-  await writeFile(path.join(root, "pnpm-workspace.yaml"), "packages:\n  - pkg\n");
+  await writeFile(
+    path.join(root, "pnpm-workspace.yaml"),
+    "packages:\n  - pkg\n",
+  );
   return { dir, root };
 }
 
@@ -54,9 +71,17 @@ describe("publish-clean", () => {
       { "index.js": "export const ok = true;\n" },
     );
     try {
-      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+      const result = runCli(
+        ["--dry-run", "--no-git-checks", fx.dir],
+        process.cwd(),
+      );
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      const pkg = JSON.parse(await readFile(path.join(extractedPath(result.stdout), "package.json"), "utf8")) as Record<string, unknown>;
+      const pkg = JSON.parse(
+        await readFile(
+          path.join(extractedPath(result.stdout), "package.json"),
+          "utf8",
+        ),
+      ) as Record<string, unknown>;
       expect(pkg.devDependencies).toBeUndefined();
       expect(pkg.scripts).toEqual({ postinstall: "node index.js" });
     } finally {
@@ -70,7 +95,10 @@ describe("publish-clean", () => {
       { "index.js": "module.exports = 1;\n", ".env": "TOKEN=secret\n" },
     );
     try {
-      const result = runCli(["--dry-run", "--no-git-checks", "--skip-file-check", fx.dir], process.cwd());
+      const result = runCli(
+        ["--dry-run", "--no-git-checks", "--skip-file-check", fx.dir],
+        process.cwd(),
+      );
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("Critical files must not be published");
     } finally {
@@ -89,9 +117,14 @@ describe("publish-clean", () => {
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+      const result = runCli(
+        ["--dry-run", "--no-git-checks", fx.dir],
+        process.cwd(),
+      );
       expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain("unresolved monorepo-only dependency specs");
+      expect(result.stderr).toContain(
+        "unresolved monorepo-only dependency specs",
+      );
       expect(result.stderr).toContain("uses pnpm pack intentionally");
     } finally {
       await cleanup(fx.root);
@@ -104,9 +137,13 @@ describe("publish-clean", () => {
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd(), {
-        npm_config_user_agent: "npm/11.0.0 node/v24",
-      });
+      const result = runCli(
+        ["--dry-run", "--no-git-checks", fx.dir],
+        process.cwd(),
+        {
+          npm_config_user_agent: "npm/11.0.0 node/v24",
+        },
+      );
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       expect(result.stderr).toContain("uses pnpm pack intentionally");
       expect(result.stderr).toContain("npm/11.0.0");
