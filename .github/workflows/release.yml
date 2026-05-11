@@ -48,6 +48,4 @@ jobs:
           node-version: "24"
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
-      - run: node dist/cli.js -- --access public --tag "${NPM_DIST_TAG}" --provenance
-        env:
-          NPM_DIST_TAG: ${{ github.ref_name == 'main' && 'latest' || github.ref_name }}
+      - run: node dist/cli.js -- --access public --tag latest --provenance

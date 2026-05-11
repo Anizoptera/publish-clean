@@ -47,7 +47,7 @@
     "format": "bunx prettier --write .",
     "format:check": "bunx prettier --check .",
     "prepublishOnly": "bun run check && node dist/cli.js --guard-only",
-    "publish:clean": "bun run check && node dist/cli.js -- --access public",
+    "publish:clean": "bun run check && node dist/cli.js -- --access public --tag latest",
     "test": "bun run build && bun run test:built",
     "test:built": "bunx vitest run && bun test test/*.bun.test.ts",
     "tracked-artifacts:check": "test -z \"$(git ls-files dist)\"",
