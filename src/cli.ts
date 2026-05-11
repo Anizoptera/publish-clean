@@ -400,7 +400,7 @@ async function main(): Promise<void> {
 
   if (parsed.values.help) {
     console.log(
-      "publish-clean [--dry-run] [--guard-only] [--registry URL] [--skip-file-check] [package-dir] [-- pnpm-publish-args]",
+      "publish-clean [--dry-run] [--guard-only] [--no-git-checks] [--registry URL] [--skip-file-check] [package-dir] [-- pnpm-publish-args]",
     );
     return;
   }

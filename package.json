@@ -3,6 +3,28 @@
   "version": "0.1.0",
   "description": "Publish pnpm workspace packages from a cleaned, validated package tarball.",
   "license": "Apache-2.0",
+  "author": "Anizoptera",
+  "contributors": [
+    "Art Shendrik"
+  ],
+  "homepage": "https://github.com/Anizoptera/publish-clean#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Anizoptera/publish-clean.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Anizoptera/publish-clean/issues"
+  },
+  "keywords": [
+    "npm",
+    "publish",
+    "pnpm",
+    "pack",
+    "package",
+    "provenance",
+    "monorepo",
+    "bun"
+  ],
   "type": "module",
   "sideEffects": false,
   "bin": {
@@ -14,9 +36,7 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE",
-    "NOTICE",
-    "AGENTS.md"
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && chmod +x dist/cli.js",

@@ -57,6 +57,12 @@ function extractedPath(stdout: string): string {
 }
 
 describe("publish-clean", () => {
+  it("prints all supported options in help", () => {
+    const result = runCli(["--help"], process.cwd());
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    expect(result.stdout).toContain("--no-git-checks");
+  });
+
   it("strips author-only manifest fields and validates declared files", async () => {
     const fx = await fixture(
       {
