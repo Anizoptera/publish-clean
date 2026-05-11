@@ -1,5 +1,12 @@
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -56,11 +63,42 @@ function extractedPath(stdout: string): string {
   return match[1].trim();
 }
 
+async function cleanupExtracted(stdout: string): Promise<void> {
+  await cleanup(path.dirname(extractedPath(stdout)));
+}
+
 describe("publish-clean", () => {
   it("prints all supported options in help", () => {
     const result = runCli(["--help"], process.cwd());
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
     expect(result.stdout).toContain("--no-git-checks");
+  });
+
+  it("rejects unknown CLI options before publish args", () => {
+    const result = runCli(["--dryrun"], process.cwd());
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Unknown option");
+  });
+
+  it("rejects extra package positionals before publish args", async () => {
+    const fx = await fixture(
+      {
+        name: "fixture-extra-positionals",
+        version: "1.0.0",
+        files: ["index.js"],
+      },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    try {
+      const result = runCli(
+        ["--dry-run", "--no-git-checks", fx.dir, "stray"],
+        process.cwd(),
+      );
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("Unexpected positional arguments");
+    } finally {
+      await cleanup(fx.root);
+    }
   });
 
   it("strips author-only manifest fields and validates declared files", async () => {
@@ -90,6 +128,59 @@ describe("publish-clean", () => {
       ) as Record<string, unknown>;
       expect(pkg.devDependencies).toBeUndefined();
       expect(pkg.scripts).toEqual({ postinstall: "node index.js" });
+      await cleanupExtracted(result.stdout);
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
+
+  it("does not treat publish args after -- as the package directory", async () => {
+    const fx = await fixture(
+      { name: "fixture-publish-args", version: "1.0.0", files: ["index.js"] },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    try {
+      const result = runCli(
+        ["--dry-run", "--no-git-checks", "--", "--tag", "next"],
+        fx.dir,
+      );
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expect(result.stdout).toContain("[dry-run] Extracted package at:");
+      await cleanupExtracted(result.stdout);
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
+
+  it("reports the malformed JSON file path", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "publish-clean-test-"));
+    const dir = path.join(root, "pkg");
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, "package.json"), "{\n");
+    try {
+      const result = runCli(
+        ["--dry-run", "--no-git-checks", dir],
+        process.cwd(),
+      );
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(path.join(dir, "package.json"));
+    } finally {
+      await cleanup(root);
+    }
+  });
+
+  it("surfaces package-manager diagnostics emitted on stdout", async () => {
+    const fx = await fixture(
+      { name: "bad name", version: "1.0.0", files: ["index.js"] },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    try {
+      const result = runCli(
+        ["--dry-run", "--no-git-checks", fx.dir],
+        process.cwd(),
+      );
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("ERR_PNPM_INVALID_PACKAGE_NAME");
     } finally {
       await cleanup(fx.root);
     }
@@ -107,6 +198,93 @@ describe("publish-clean", () => {
       );
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("Critical files must not be published");
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
+
+  it("refuses critical leaked files in nested package paths", async () => {
+    const fx = await fixture(
+      {
+        name: "fixture-nested-leak",
+        version: "1.0.0",
+        files: ["index.js", "config/.npmrc"],
+      },
+      { "index.js": "module.exports = 1;\n", "config/.npmrc": "//token\n" },
+    );
+    try {
+      const result = runCli(
+        ["--dry-run", "--no-git-checks", "--skip-file-check", fx.dir],
+        process.cwd(),
+      );
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("config/.npmrc");
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
+
+  it("removes temporary package extraction after validation failure", async () => {
+    const fx = await fixture(
+      {
+        name: "fixture-temp-cleanup",
+        version: "1.0.0",
+        files: ["index.js", ".env"],
+      },
+      { "index.js": "module.exports = 1;\n", ".env": "TOKEN=secret\n" },
+    );
+    const temp = await mkdtemp(path.join(tmpdir(), "publish-clean-tmp-"));
+    try {
+      const result = runCli(
+        ["--dry-run", "--no-git-checks", "--skip-file-check", fx.dir],
+        process.cwd(),
+        { TMPDIR: temp },
+      );
+      expect(result.status).not.toBe(0);
+      const leftovers = (await readdir(temp)).filter((name) =>
+        name.startsWith("publish-clean-"),
+      );
+      expect(leftovers).toEqual([]);
+    } finally {
+      await cleanup(fx.root);
+      await cleanup(temp);
+    }
+  });
+
+  it("removes temporary package extraction after guard-only success", async () => {
+    const fx = await fixture(
+      { name: "fixture-guard-cleanup", version: "1.0.0", files: ["index.js"] },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    const temp = await mkdtemp(path.join(tmpdir(), "publish-clean-tmp-"));
+    try {
+      const result = runCli(
+        ["--guard-only", "--no-git-checks", fx.dir],
+        process.cwd(),
+        { TMPDIR: temp },
+      );
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expect(result.stdout).not.toContain("[dry-run]");
+      const leftovers = (await readdir(temp)).filter((name) =>
+        name.startsWith("publish-clean-"),
+      );
+      expect(leftovers).toEqual([]);
+    } finally {
+      await cleanup(fx.root);
+      await cleanup(temp);
+    }
+  });
+
+  it("keeps guard-only subject to source git cleanliness", async () => {
+    const fx = await fixture(
+      { name: "fixture-guard-git", version: "1.0.0", files: ["index.js"] },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    try {
+      spawnSync("git", ["init"], { cwd: fx.dir, stdio: "ignore" });
+      const result = runCli(["--guard-only", fx.dir], process.cwd());
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("Source package has uncommitted changes");
     } finally {
       await cleanup(fx.root);
     }
@@ -137,6 +315,81 @@ describe("publish-clean", () => {
     }
   });
 
+  it("rejects devFields entries that would remove runtime manifest fields", async () => {
+    const fx = await fixture(
+      {
+        name: "fixture-protected-devfield",
+        version: "1.0.0",
+        files: ["index.js"],
+        dependencies: { bad: "link:../bad" },
+        "publish-clean": { devFields: ["dependencies"] },
+      },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    try {
+      const result = runCli(
+        ["--dry-run", "--no-git-checks", fx.dir],
+        process.cwd(),
+      );
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("publish-clean.devFields");
+      expect(result.stderr).toContain("dependencies");
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
+
+  it("validates non-dot-slash main, bin, and typesVersions paths", async () => {
+    const fx = await fixture(
+      {
+        name: "fixture-declared-paths",
+        version: "1.0.0",
+        files: ["index.js"],
+        main: "missing.js",
+        bin: { fixture: "bin/missing.js" },
+        typesVersions: { "*": { "*": ["missing.d.ts"] } },
+      },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    try {
+      const result = runCli(
+        ["--dry-run", "--no-git-checks", fx.dir],
+        process.cwd(),
+      );
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("missing.js");
+      expect(result.stderr).toContain("bin/missing.js");
+      expect(result.stderr).toContain("missing.d.ts");
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
+
+  it("rejects manifest paths that escape the packed package root", async () => {
+    const fx = await fixture(
+      {
+        name: "fixture-path-traversal",
+        version: "1.0.0",
+        files: ["index.js"],
+        exports: "./../fixture-path-traversal-1.0.0.tgz",
+      },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    try {
+      const result = runCli(
+        ["--dry-run", "--no-git-checks", fx.dir],
+        process.cwd(),
+      );
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "Manifest declares invalid package paths",
+      );
+      expect(result.stderr).toContain("../fixture-path-traversal-1.0.0.tgz");
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
+
   it("warns when invoked from a non-pnpm lifecycle", async () => {
     const fx = await fixture(
       { name: "fixture-user-agent", version: "1.0.0", files: ["index.js"] },
@@ -153,6 +406,7 @@ describe("publish-clean", () => {
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       expect(result.stderr).toContain("uses pnpm pack intentionally");
       expect(result.stderr).toContain("npm/11.0.0");
+      await cleanupExtracted(result.stdout);
     } finally {
       await cleanup(fx.root);
     }
