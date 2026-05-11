@@ -66,7 +66,7 @@ Bun are not treated as equivalent pack/publish backends.
   "scripts": {
     "check": "bun run typecheck && bun run test && bun run build",
     "prepublishOnly": "bun run check && publish-clean --guard-only",
-    "publish:clean": "bun run check && publish-clean -- --access public"
+    "publish:clean": "bun run check && publish-clean -- --access public --tag latest"
   },
   "devDependencies": {
     "@anizoptera/publish-clean": "^0.1.0"
@@ -88,7 +88,7 @@ that collides too easily with npm lifecycle behavior.
 ```bash
 publish-clean --dry-run
 publish-clean --guard-only
-publish-clean --registry https://registry.npmjs.org -- --access public
+publish-clean --registry https://registry.npmjs.org -- --access public --tag latest
 publish-clean packages/my-lib -- --access public --tag next
 ```
 
@@ -124,6 +124,9 @@ publish-clean [options] [package-dir] [-- pnpm-publish-args]
 
 Arguments after `--` go to `pnpm publish`, run from the cleaned extracted
 package.
+
+Pass the npm dist-tag explicitly. For normal public releases, use
+`--tag latest`.
 
 ## Package config
 

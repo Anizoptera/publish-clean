@@ -7,5 +7,6 @@
 - Split CLI args at `--` before parsing; everything after it belongs to `pnpm publish`.
 - Keep npm publication in `.github/workflows/release.yml`; npm trusted publishing is keyed by workflow filename.
 - Publish commands must pass `--tag latest` explicitly unless intentionally proving another npm dist-tag.
-- After each successful npm publication, update this repo to use the just-published package, regenerate and commit the lockfile, then publish the next bump through that installed CLI.
+- The primary pre-publish self-application check is the freshly built `dist/cli.js` against its cleaned artifact.
+- After npm publication, registry-install smoke checks may update this repo to the published package and regenerate the lockfile, but they do not replace the built-current CLI gate.
 - Run `bun run check` before committing.
