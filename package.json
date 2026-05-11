@@ -20,7 +20,8 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && chmod +x dist/cli.js",
-    "check": "bun run format:check && bun run typecheck && bun run test && bun run build && bun run tracked-artifacts:check && bunx publint && bunx @arethetypeswrong/cli --pack .",
+    "check": "bun run format:check && bun run claude-link:check && bun run typecheck && bun run test && bun run build && bun run tracked-artifacts:check && bunx publint && bunx @arethetypeswrong/cli --pack .",
+    "claude-link:check": "test -L CLAUDE.md && test \"$(readlink CLAUDE.md)\" = AGENTS.md",
     "clean": "rm -rf dist",
     "format": "bunx prettier --write .",
     "format:check": "bunx prettier --check .",
