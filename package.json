@@ -20,13 +20,14 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && chmod +x dist/cli.js",
-    "check": "bun run format:check && bun run typecheck && bun run test && bun run build && bunx publint && bunx @arethetypeswrong/cli --pack .",
+    "check": "bun run format:check && bun run typecheck && bun run test && bun run build && bun run tracked-artifacts:check && bunx publint && bunx @arethetypeswrong/cli --pack .",
     "clean": "rm -rf dist",
     "format": "bunx prettier --write .",
     "format:check": "bunx prettier --check .",
     "prepublishOnly": "bun run check && node dist/cli.js --guard-only",
     "publish:clean": "bun run clean && bun run build && node dist/cli.js -- --access public",
     "test": "bun run build && bunx vitest run && bun test test/*.bun.test.ts",
+    "tracked-artifacts:check": "test -z \"$(git ls-files dist)\"",
     "typecheck": "bunx tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
