@@ -1,26 +1,36 @@
 # @anizoptera/publish-clean
 
-Publish pnpm workspace packages from a cleaned, validated package artifact.
+Publish a pnpm package from the tarball you actually intend to ship.
 
-`publish-clean` packs the package first, inspects the exact tarball contents,
-rewrites only the extracted publish copy, and publishes from that cleaned
-artifact. The source tree is not rewritten.
+`publish-clean` runs `pnpm pack`, opens the packed package, checks it for common
+release mistakes, removes development-only metadata from the extracted copy, and
+publishes that cleaned copy with `pnpm publish`.
 
-## Why
+Your working tree is left alone.
 
-Package publication has several independent failure modes:
+## Why use this
 
-- `pnpm pack` understands pnpm workspaces, catalogs, and publish-time package
-  projection, but it does not remove author-only manifest fields.
-- Generic cleanup tools can remove fields, but they may drift from the package
-  manager's actual `files` and ignore semantics.
-- Release tools can version, tag, and publish packages, but they usually do not
-  prove that the final tarball is free of monorepo-only specs, critical leaks,
-  or broken declared entrypoints.
+`pnpm pack` is good at workspace packages. It understands pnpm's workspace and
+catalog behavior in a way generic cleanup scripts usually do not.
 
-`publish-clean` is deliberately narrower: use pnpm's packed artifact as the
-source of truth, fail on dangerous contents, strip development-only metadata
-from the extracted package, and then publish from that cleaned package.
+The problem is that the packed manifest can still contain fields that are useful
+to maintainers but meaningless or noisy for consumers: dev dependencies, test
+runner config, workspace tooling, local overrides, and similar project-only
+metadata.
+
+`publish-clean` keeps pnpm in charge of deciding what the package is, then
+cleans and validates the packed result before publication.
+
+It is for packages that want the npm artifact to be boring:
+
+- built files
+- README
+- license
+- package metadata
+- any other files the package intentionally exposes
+
+No accidental tests, CI config, local agent docs, lockfiles, private keys, or
+workspace-only dependency specs.
 
 ## Install
 
@@ -31,13 +41,10 @@ pnpm add -D @anizoptera/publish-clean
 Requirements:
 
 - Node.js 20 or newer
-- `pnpm` and `tar` available in `PATH`
-- Bun is recommended for this repository's own checks, but the published CLI
-  runs on Node.js
+- `pnpm`
+- `tar`
 
-## Usage
-
-Recommended package scripts:
+## Basic setup
 
 ```json
 {
@@ -52,7 +59,16 @@ Recommended package scripts:
 }
 ```
 
-Common commands:
+Then publish with:
+
+```bash
+pnpm run publish:clean
+```
+
+Use a script name like `publish:clean` or `release`. Avoid naming it `publish`;
+that collides too easily with npm lifecycle behavior.
+
+## Commands
 
 ```bash
 publish-clean --dry-run
@@ -61,35 +77,29 @@ publish-clean --registry https://registry.npmjs.org -- --access public
 publish-clean packages/my-lib -- --access public --tag next
 ```
 
-Use `publish:clean`, `release`, or another explicit script name for real
-publication. Avoid naming the script `publish`; npm lifecycle names are easy to
-trigger unintentionally.
+`--dry-run` is the first command to reach for. It prints the temporary extracted
+package path, so you can inspect the exact package that would be published.
 
-## CLI
+## Options
 
 ```bash
 publish-clean [options] [package-dir] [-- pnpm-publish-args]
 ```
 
-Options:
-
-- `--dry-run`: pack, extract, validate, sanitize, and print the extracted
-  package path without publishing.
-- `--guard-only`: run the same guard path without requiring a clean git state
-  and without publishing.
-- `--registry URL`: set `publishConfig.registry` on the cleaned manifest before
-  publishing.
+- `--dry-run`: pack, check, clean, and print the extracted package path.
+- `--guard-only`: run the guard path without publishing.
+- `--registry URL`: set `publishConfig.registry` on the cleaned manifest.
 - `--skip-file-check`: skip suspicious-file checks and the required `files`
-  array check; critical leak checks still run.
+  array check. Critical leak checks still run.
 - `--no-git-checks`: skip the source git cleanliness check.
 - `-h`, `--help`: print usage.
 
-Arguments after `--` are passed to `pnpm publish` from the cleaned extracted
+Arguments after `--` go to `pnpm publish`, run from the cleaned extracted
 package.
 
-## Configuration
+## Package config
 
-Optional package configuration lives in `package.json`:
+Stable project defaults can live in `package.json`:
 
 ```json
 {
@@ -102,73 +112,71 @@ Optional package configuration lives in `package.json`:
 }
 ```
 
-Use config only for stable project policy. Prefer CLI flags for one-off
-publication choices such as dist-tags.
+Keep one-off choices on the command line. Dist-tags are a good example.
 
-## Guarantees
+## What it checks
 
-`publish-clean`:
+`publish-clean` refuses to continue when:
 
-- refuses `private: true`
-- validates the source package is clean unless disabled
-- requires a non-empty `files` array unless disabled
-- always rejects critical leaks such as `.env`, `.npmrc`, `.git`,
-  `node_modules`, and private-key files
-- rejects common suspicious publish contents unless disabled
-- strips development-only manifest fields from the extracted package
-- preserves only consumer install lifecycle scripts
-- fails unresolved `catalog:`, `workspace:`, `link:`, and `portal:` specs
-- verifies declared export, type, import, browser, bin, and side-effect paths
-  exist in the cleaned artifact
-- warns when invoked from a non-pnpm lifecycle because pnpm is the intended pack
-  and publish source of truth
+- the package is `private: true`
+- the source package has uncommitted changes, unless disabled
+- the package has no non-empty `files` array, unless disabled
+- the tarball contains critical leaks like `.env`, `.npmrc`, `.git`,
+  `node_modules`, or private-key files
+- dependency specs still use `catalog:`, `workspace:`, `link:`, or `portal:`
+- declared export, type, import, browser, bin, or side-effect paths are missing
+  from the cleaned package
 
-Critical leak checks are not bypassable.
+It also warns when a package-manager lifecycle looks like npm, Yarn, or Bun.
+That warning is intentional: this tool relies on pnpm's pack and publish
+behavior.
 
-## Non-goals
+Critical leak checks cannot be disabled.
 
-`publish-clean` does not manage:
+## What it removes
 
-- versions, changelogs, tags, commits, pushes, or GitHub Releases
-- npm account setup, trusted publishing setup, OTP, or registry credentials
-- package compatibility linting beyond artifact invariants
-- a custom ignore language
-- source documentation or comment rewriting
+From the extracted package manifest, `publish-clean` removes maintainer-only
+fields such as:
 
-Use dedicated release tools for release orchestration and dedicated validators
-for ecosystem compatibility.
+- `devDependencies`
+- `workspaces`
+- `pnpm`
+- test, lint, format, coverage, build-system, and release-tool config fields
+- scripts except consumer install lifecycle scripts
 
-## Prior art and boundaries
+The repository files are not changed.
 
-`publish-clean` is built around existing publication semantics instead of
-replacing them:
+## What it does not do
 
-- [`clean-publish`](https://github.com/shashkovdanil/clean-publish) proved the
-  value of publishing from a cleaned copy. `publish-clean` keeps that shape but
-  stays focused on artifact sanitation, not broad content rewriting.
-- [`npm-packlist`](https://github.com/npm/npm-packlist),
-  [`npm pack`](https://docs.npmjs.com/cli/v11/commands/npm-pack/), and
-  [`npm publish`](https://docs.npmjs.com/cli/v11/commands/npm-publish/) define
-  the baseline package-file model.
-- [`pnpm pack`](https://pnpm.io/cli/pack),
-  [`pnpm publish`](https://pnpm.io/cli/publish), and
-  [`publishConfig`](https://pnpm.io/package_json#publishconfig) are the primary
-  target because pnpm workspaces and catalogs need pnpm-aware packing.
-- [`publint`](https://publint.dev/) and
-  [`@arethetypeswrong/cli`](https://github.com/arethetypeswrong/arethetypeswrong.github.io)
-  should run beside this tool; `publish-clean` does not reimplement their
-  compatibility checks.
-- [`pkg-pr-new`](https://github.com/stackblitz-labs/pkg.pr.new) is the right
-  model for previewing installable package artifacts before npm publication.
-- [`changesets`](https://github.com/changesets/changesets),
-  [`release-please`](https://github.com/googleapis/release-please),
-  [`semantic-release`](https://github.com/semantic-release/semantic-release),
-  [`release-it`](https://github.com/release-it/release-it), and
-  [`np`](https://github.com/sindresorhus/np) own release orchestration. Use
-  `publish-clean` as a guard or publish hook in those flows.
-- [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/) and
-  provenance prove package origin; they do not prove the tarball contents are
-  correct.
+This is not a release manager. It does not choose versions, write changelogs,
+create tags, push commits, create GitHub releases, set up npm trusted
+publishing, or decide your dist-tag policy.
+
+Use tools like Changesets, release-please, semantic-release, release-it, or np
+for that. Use `publish-clean` as the guard or final publish command.
+
+It also does not replace package validators. Run `publint` and
+`@arethetypeswrong/cli` for package compatibility checks.
+
+## Related tools
+
+This package borrows the useful part of
+[`clean-publish`](https://github.com/shashkovdanil/clean-publish): publish from
+a cleaned copy, not from a rewritten source tree.
+
+It deliberately stays close to package-manager behavior instead of inventing its
+own file-selection rules. The relevant tools and specs are
+[`npm-packlist`](https://github.com/npm/npm-packlist),
+[`npm pack`](https://docs.npmjs.com/cli/v11/commands/npm-pack/),
+[`npm publish`](https://docs.npmjs.com/cli/v11/commands/npm-publish/),
+[`pnpm pack`](https://pnpm.io/cli/pack),
+[`pnpm publish`](https://pnpm.io/cli/publish), and pnpm
+[`publishConfig`](https://pnpm.io/package_json#publishconfig).
+
+For preview installs, see
+[`pkg-pr-new`](https://github.com/stackblitz-labs/pkg.pr.new). For provenance,
+use [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/). Both
+are useful layers. Neither one cleans the package contents.
 
 ## Development
 
@@ -177,13 +185,13 @@ bun install --frozen-lockfile
 bun run check
 ```
 
-Before committing workflow changes, run:
+Before committing workflow changes:
 
 ```bash
 actions-up --yes
 ```
 
-This package intentionally has no runtime dependencies.
+This package has no runtime dependencies.
 
 ## License
 

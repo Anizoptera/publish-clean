@@ -1,7 +1,8 @@
 # Related Tools
 
-`publish-clean` sits between package-manager packing and release automation. It
-does not try to replace either side.
+`publish-clean` sits between package-manager packing and release automation.
+That is a small lane, but it matters: by the time a package is published, the
+tarball is the truth.
 
 ## Package packing
 
@@ -15,17 +16,17 @@ does not try to replace either side.
   commands for this project because pnpm workspaces, catalogs, and
   `publishConfig` handling need pnpm-aware packing.
 
-`publish-clean` uses the package-manager artifact as input instead of building
-its own package-file selection rules.
+`publish-clean` starts from the package-manager artifact instead of maintaining
+a second set of file-selection rules.
 
 ## Cleanup
 
 - [`clean-publish`](https://github.com/shashkovdanil/clean-publish) is the
   closest related package. It publishes from a cleaned copy of the project.
 
-`publish-clean` follows the same source-tree-preserving idea, but keeps the
-cleanup scope narrow: package metadata, dependency specs, declared files, and
-dangerous package contents.
+`publish-clean` keeps that source-tree-preserving idea, but narrows the cleanup
+to package metadata, dependency specs, declared files, and dangerous package
+contents.
 
 ## Validation
 
@@ -34,8 +35,8 @@ dangerous package contents.
 - [`@arethetypeswrong/cli`](https://github.com/arethetypeswrong/arethetypeswrong.github.io)
   checks TypeScript declaration and module-resolution behavior.
 
-These tools should run alongside `publish-clean`. They cover ecosystem
-compatibility; `publish-clean` covers publication artifact hygiene.
+Run these alongside `publish-clean`. They answer different questions:
+compatibility for consumers, not package cleanup.
 
 ## Release automation
 
@@ -56,5 +57,5 @@ command inside those flows.
 - [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/) and npm
   provenance identify where a package was built and published.
 
-Preview releases and provenance complement `publish-clean`; they do not inspect
+Preview releases and provenance complement `publish-clean`. They do not inspect
 or sanitize the package contents themselves.
