@@ -1,5 +1,13 @@
 # @anizoptera/publish-clean
 
+[![npm version](https://img.shields.io/npm/v/@anizoptera/publish-clean?label=npm)](https://www.npmjs.com/package/@anizoptera/publish-clean)
+[![CI](https://github.com/Anizoptera/publish-clean/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/Anizoptera/publish-clean/actions/workflows/check.yml)
+[![Node >=20](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](package.json)
+[![pnpm pack + publish](https://img.shields.io/badge/pnpm-pack%20%2B%20publish-f69220?logo=pnpm&logoColor=white)](https://pnpm.io/cli/pack)
+[![Bun checked](https://img.shields.io/badge/Bun-checked-000000?logo=bun&logoColor=white)](https://bun.sh/docs/cli/test)
+[![Runtime deps](https://img.shields.io/badge/runtime_deps-0-2ea44f)](package.json)
+[![License](https://img.shields.io/github/license/Anizoptera/publish-clean)](LICENSE)
+
 Publish a pnpm package from the tarball you actually intend to ship.
 
 `publish-clean` runs `pnpm pack`, opens the packed package, checks it for common
@@ -44,6 +52,9 @@ Requirements:
 - `pnpm`
 - `tar`
 
+The CLI runs on Node. This repository uses Bun for fast local checks and tests.
+Package creation and publication intentionally go through pnpm.
+
 ## Basic setup
 
 ```json
@@ -79,6 +90,19 @@ publish-clean packages/my-lib -- --access public --tag next
 
 `--dry-run` is the first command to reach for. It prints the temporary extracted
 package path, so you can inspect the exact package that would be published.
+
+## What happens
+
+```text
+source package
+  -> pnpm pack
+  -> inspect tarball contents
+  -> clean extracted package.json
+  -> validate declared package paths
+  -> pnpm publish from the cleaned package
+```
+
+With `--dry-run` or `--guard-only`, the last step is skipped.
 
 ## Options
 
