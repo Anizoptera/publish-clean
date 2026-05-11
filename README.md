@@ -10,6 +10,9 @@
 
 Publish a pnpm package from the tarball you actually intend to ship.
 
+This is pnpm-first on purpose. `publish-clean` is built for packages that rely on
+pnpm workspace, catalog, and publish behavior.
+
 `publish-clean` runs `pnpm pack`, opens the packed package, checks it for common
 release mistakes, removes development-only metadata from the extracted copy, and
 publishes that cleaned copy with `pnpm publish`.
@@ -53,7 +56,8 @@ Requirements:
 - `tar`
 
 The CLI runs on Node. This repository uses Bun for fast local checks and tests.
-Package creation and publication intentionally go through pnpm.
+Package creation and publication intentionally go through pnpm; npm, Yarn, and
+Bun are not treated as equivalent pack/publish backends.
 
 ## Basic setup
 
