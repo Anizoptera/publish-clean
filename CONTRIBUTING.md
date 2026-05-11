@@ -1,7 +1,7 @@
 # Contributing
 
-`publish-clean` is a small CLI with one job: publish from a checked package
-artifact. Keep changes close to that job.
+`publish-clean` has one job: publish from a checked package artifact. Keep
+changes close to that.
 
 ## Local checks
 

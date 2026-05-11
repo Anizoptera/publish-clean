@@ -24,8 +24,8 @@ a second set of file-selection rules.
 - [`clean-publish`](https://github.com/shashkovdanil/clean-publish) is the
   closest related package. It publishes from a cleaned copy of the project.
 
-`publish-clean` keeps that source-tree-preserving idea, but narrows the cleanup
-to package metadata, dependency specs, declared files, and dangerous package
+`publish-clean` keeps the cleaned-copy approach, but narrows the cleanup to
+package metadata, dependency specs, declared files, and dangerous package
 contents.
 
 ## Validation
@@ -46,9 +46,8 @@ compatibility for consumers, not package cleanup.
 - [`release-it`](https://github.com/release-it/release-it)
 - [`np`](https://github.com/sindresorhus/np)
 
-Those tools manage release intent, versions, changelogs, tags, GitHub releases,
-and registry publication flows. `publish-clean` is useful as a guard or publish
-command inside those flows.
+Those tools manage versions, changelogs, tags, GitHub releases, and registry
+flows. `publish-clean` fits as a guard or publish command inside them.
 
 ## Preview and provenance
 

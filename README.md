@@ -13,9 +13,9 @@ Publish a pnpm package from the tarball you actually intend to ship.
 This is pnpm-first on purpose. `publish-clean` is built for packages that rely on
 pnpm workspace, catalog, and publish behavior.
 
-`publish-clean` runs `pnpm pack`, opens the packed package, checks it for common
-release mistakes, removes development-only metadata from the extracted copy, and
-publishes that cleaned copy with `pnpm publish`.
+`publish-clean` runs `pnpm pack`, opens the packed package, checks for files and
+manifest entries that should not ship, removes development-only metadata from
+the extracted copy, and publishes that cleaned copy with `pnpm publish`.
 
 Your working tree is left alone.
 
@@ -24,15 +24,15 @@ Your working tree is left alone.
 `pnpm pack` is good at workspace packages. It understands pnpm's workspace and
 catalog behavior in a way generic cleanup scripts usually do not.
 
-The problem is that the packed manifest can still contain fields that are useful
-to maintainers but meaningless or noisy for consumers: dev dependencies, test
-runner config, workspace tooling, local overrides, and similar project-only
-metadata.
+The rough edge is the packed manifest. It can still carry maintainer-only
+fields: dev dependencies, test runner config, workspace tooling, local
+overrides, and other project metadata consumers do not need.
 
 `publish-clean` keeps pnpm in charge of deciding what the package is, then
 cleans and validates the packed result before publication.
 
-It is for packages that want the npm artifact to be boring:
+It is for packages that want the npm artifact to contain only what was meant to
+ship:
 
 - built files
 - README
@@ -92,8 +92,8 @@ publish-clean --registry https://registry.npmjs.org -- --access public
 publish-clean packages/my-lib -- --access public --tag next
 ```
 
-`--dry-run` is the first command to reach for. It prints the temporary extracted
-package path, so you can inspect the exact package that would be published.
+Start with `--dry-run`. It prints the temporary extracted package path, so you
+can inspect the exact package that would be published.
 
 ## What happens
 
@@ -101,7 +101,7 @@ package path, so you can inspect the exact package that would be published.
 source package
   -> pnpm pack
   -> inspect tarball contents
-  -> clean extracted package.json
+  -> write cleaned package.json
   -> validate declared package paths
   -> pnpm publish from the cleaned package
 ```

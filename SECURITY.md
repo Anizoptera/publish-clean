@@ -1,7 +1,7 @@
 # Security
 
-Report vulnerabilities through GitHub private vulnerability reporting for this
-repository when it is available.
+Report vulnerabilities through GitHub private vulnerability reporting when it is
+available for this repository.
 
 Do not put secrets, exploit details, or unpatched vulnerabilities in public
 issues. If private reporting is unavailable, open a public issue asking for a
