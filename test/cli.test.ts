@@ -1,5 +1,6 @@
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import {
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -63,8 +64,27 @@ function extractedPath(stdout: string): string {
   return match[1].trim();
 }
 
+function finalTarballPath(stdout: string): string {
+  const match = /\[dry-run\] Final tarball at: (.+)$/m.exec(stdout);
+  if (!match?.[1]) throw new Error(`missing final tarball path in ${stdout}`);
+  return match[1].trim();
+}
+
 async function cleanupExtracted(stdout: string): Promise<void> {
   await cleanup(path.dirname(extractedPath(stdout)));
+}
+
+async function writeShim(file: string, script: string): Promise<void> {
+  await writeFile(file, script);
+  await chmod(file, 0o755);
+}
+
+function readTarballFile(tarball: string, file: string): string {
+  const result = spawnSync("tar", ["xOzf", tarball, `package/${file}`], {
+    encoding: "utf8",
+  });
+  if (result.status !== 0) throw new Error(result.stderr);
+  return result.stdout;
 }
 
 describe("publish-clean", () => {
@@ -72,6 +92,7 @@ describe("publish-clean", () => {
     const result = runCli(["--help"], process.cwd());
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
     expect(result.stdout).toContain("--no-git-checks");
+    expect(result.stdout).toContain("npm-publish-args");
   });
 
   it("rejects unknown CLI options before publish args", () => {
@@ -147,6 +168,227 @@ describe("publish-clean", () => {
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       expect(result.stdout).toContain("[dry-run] Extracted package at:");
       await cleanupExtracted(result.stdout);
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
+
+  it("reports and keeps the final npm tarball in dry-run output", async () => {
+    const fx = await fixture(
+      { name: "fixture-final-tarball", version: "1.0.0", files: ["index.js"] },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    try {
+      const result = runCli(
+        ["--dry-run", "--no-git-checks", fx.dir],
+        process.cwd(),
+      );
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expect(finalTarballPath(result.stdout)).toMatch(/\.tgz$/);
+      await cleanupExtracted(result.stdout);
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
+
+  it("keeps the final npm tarball manifest cleaned", async () => {
+    const fx = await fixture(
+      {
+        name: "fixture-final-manifest",
+        version: "1.0.0",
+        files: ["index.js"],
+        devDependencies: { typescript: "^5.0.0" },
+        scripts: { build: "tsc" },
+      },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    try {
+      const result = runCli(
+        ["--dry-run", "--no-git-checks", fx.dir],
+        process.cwd(),
+      );
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      const pkg = JSON.parse(
+        readTarballFile(finalTarballPath(result.stdout), "package.json"),
+      ) as Record<string, unknown>;
+      expect(pkg.devDependencies).toBeUndefined();
+      expect(pkg.scripts).toBeUndefined();
+      await cleanupExtracted(result.stdout);
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
+
+  it("parses pnpm and npm pack JSON output even when npm config requests JSON", async () => {
+    const fx = await fixture(
+      { name: "fixture-json-pack", version: "1.0.0", files: ["index.js"] },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    try {
+      const result = runCli(
+        ["--dry-run", "--no-git-checks", fx.dir],
+        process.cwd(),
+        { NPM_CONFIG_JSON: "true" },
+      );
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expect(finalTarballPath(result.stdout)).toMatch(/\.tgz$/);
+      await cleanupExtracted(result.stdout);
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
+
+  it("publishes the final npm tarball with npm, not the cleaned directory with pnpm", async () => {
+    const fx = await fixture(
+      { name: "fixture-npm-publish", version: "1.0.0", files: ["index.js"] },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    const bin = path.join(fx.root, "bin");
+    const log = path.join(fx.root, "commands.log");
+    const realNpm = spawnSync("which", ["npm"], {
+      encoding: "utf8",
+    }).stdout.trim();
+    try {
+      await mkdir(bin);
+      await writeShim(
+        path.join(bin, "npm"),
+        `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "11.5.1"; exit 0; fi
+if [ "$1" = "pack" ]; then
+  shift
+  exec "$REAL_NPM" pack "$@"
+fi
+if [ "$1" = "publish" ]; then
+  printf '%s\\n' "$*" > "${log}"
+  exit 0
+fi
+echo "unexpected npm $*" >&2
+exit 1
+`,
+      );
+      const result = runCli(
+        [
+          "--no-git-checks",
+          fx.dir,
+          "--",
+          "--access",
+          "public",
+          "--tag",
+          "latest",
+        ],
+        process.cwd(),
+        { PATH: `${bin}:${process.env.PATH ?? ""}`, REAL_NPM: realNpm },
+      );
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      const published = await readFile(log, "utf8");
+      expect(published).toContain("publish ");
+      expect(published).toContain(".tgz");
+      expect(published).toContain("--tag latest");
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
+
+  it("rejects provenance publish when npm is too old for trusted publishing", async () => {
+    const fx = await fixture(
+      { name: "fixture-old-npm", version: "1.0.0", files: ["index.js"] },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    const bin = path.join(fx.root, "bin");
+    try {
+      await mkdir(bin);
+      await writeShim(
+        path.join(bin, "npm"),
+        `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "11.5.0"; exit 0; fi
+echo "unexpected npm $*" >&2
+exit 1
+`,
+      );
+      const result = runCli(
+        ["--no-git-checks", fx.dir, "--", "--provenance"],
+        process.cwd(),
+        { PATH: `${bin}:${process.env.PATH ?? ""}` },
+      );
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("requires npm 11.5.1");
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
+
+  it("treats publishConfig provenance as trusted publishing", async () => {
+    const fx = await fixture(
+      {
+        name: "fixture-publish-config-provenance",
+        version: "1.0.0",
+        files: ["index.js"],
+        publishConfig: { provenance: true },
+      },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    const bin = path.join(fx.root, "bin");
+    try {
+      await mkdir(bin);
+      await writeShim(
+        path.join(bin, "npm"),
+        `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "11.5.0"; exit 0; fi
+echo "unexpected npm $*" >&2
+exit 1
+`,
+      );
+      const result = runCli(["--no-git-checks", fx.dir], process.cwd(), {
+        PATH: `${bin}:${process.env.PATH ?? ""}`,
+      });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("requires npm 11.5.1");
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
+
+  it("rejects GitHub trusted publishing when repository metadata does not match", async () => {
+    const fx = await fixture(
+      {
+        name: "fixture-bad-repo",
+        version: "1.0.0",
+        files: ["index.js"],
+        repository: {
+          type: "git",
+          url: "git+https://github.com/Other/repo.git",
+        },
+      },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    const bin = path.join(fx.root, "bin");
+    const realNpm = spawnSync("which", ["npm"], {
+      encoding: "utf8",
+    }).stdout.trim();
+    try {
+      await mkdir(bin);
+      await writeShim(
+        path.join(bin, "npm"),
+        `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "11.5.1"; exit 0; fi
+if [ "$1" = "pack" ]; then shift; exec "$REAL_NPM" pack "$@"; fi
+if [ "$1" = "publish" ]; then exit 0; fi
+echo "unexpected npm $*" >&2
+exit 1
+`,
+      );
+      const result = runCli(
+        ["--no-git-checks", fx.dir, "--", "--provenance"],
+        process.cwd(),
+        {
+          PATH: `${bin}:${process.env.PATH ?? ""}`,
+          REAL_NPM: realNpm,
+          GITHUB_ACTIONS: "true",
+          GITHUB_REPOSITORY: "Anizoptera/publish-clean",
+        },
+      );
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("repository.url must match");
     } finally {
       await cleanup(fx.root);
     }
@@ -245,6 +487,7 @@ describe("publish-clean", () => {
         name.startsWith("publish-clean-"),
       );
       expect(leftovers).toEqual([]);
+      expect(result.stdout).not.toContain("Final tarball");
     } finally {
       await cleanup(fx.root);
       await cleanup(temp);

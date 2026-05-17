@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync } from "node:fs";
 import path from "node:path";
 
 function run(command: string, args: readonly string[]): string {
@@ -23,17 +22,16 @@ const stdout = run(process.execPath, [
 const match = /^\[dry-run\] Extracted package at: (.+)$/m.exec(stdout);
 if (!match?.[1])
   throw new Error(`publish-clean did not report the cleaned artifact path.`);
+const tarballMatch = /^\[dry-run\] Final tarball at: (.+)$/m.exec(stdout);
+if (!tarballMatch?.[1])
+  throw new Error(`publish-clean did not report the final npm tarball path.`);
 
 const artifact = match[1].trim();
 const root = path.dirname(artifact);
-const packRoot = mkdtempSync(path.join(tmpdir(), "publish-clean-final-pack-"));
+const tarball = tarballMatch[1].trim();
 try {
   run("bunx", ["publint", "run", artifact, "--pack", "false"]);
-  run("pnpm", ["pack", "--pack-destination", packRoot, "--dir", artifact]);
-  const tarball = readdirSync(packRoot).find((file) => file.endsWith(".tgz"));
-  if (!tarball) throw new Error("pnpm pack did not create a tarball.");
-  run("bunx", ["@arethetypeswrong/cli", path.join(packRoot, tarball)]);
+  run("bunx", ["@arethetypeswrong/cli", tarball]);
 } finally {
   rmSync(root, { recursive: true, force: true });
-  rmSync(packRoot, { recursive: true, force: true });
 }

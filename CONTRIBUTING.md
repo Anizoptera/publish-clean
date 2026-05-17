@@ -18,7 +18,9 @@ Bun tests, builds, rejects tracked `dist/`, runs `publint`, and runs
 
 - Keep runtime dependencies at zero.
 - Use `pnpm pack` as the package artifact source of truth.
-- Validate the packed artifact, not only the repository tree.
+- Use `npm publish` for the final registry upload.
+- Validate the final npm tarball, not only the repository tree or cleaned
+  directory.
 - Preserve the source tree; sanitize only the extracted publish copy.
 - Do not turn this into a release manager. Versioning, changelogs, tags, GitHub
   Releases, and dist-tag policy belong to release tools.

@@ -11,13 +11,13 @@ tarball is the truth.
 - [`npm pack`](https://docs.npmjs.com/cli/v11/commands/npm-pack/) and
   [`npm publish`](https://docs.npmjs.com/cli/v11/commands/npm-publish/) define
   the baseline npm tarball and publish behavior.
-- [`pnpm pack`](https://pnpm.io/cli/pack) and
-  [`pnpm publish`](https://pnpm.io/cli/publish) are the target package-manager
-  commands for this project because pnpm workspaces, catalogs, and
-  `publishConfig` handling need pnpm-aware packing.
+- [`pnpm pack`](https://pnpm.io/cli/pack) is the source artifact command for
+  this project because pnpm workspaces, catalogs, and `publishConfig` handling
+  need pnpm-aware packing.
 
-`publish-clean` starts from the package-manager artifact instead of maintaining
-a second set of file-selection rules.
+`publish-clean` starts from the pnpm artifact instead of maintaining a second
+set of file-selection rules, then uses npm for the final publish path because
+npm trusted publishing and provenance are npm registry features.
 
 ## Cleanup
 
@@ -58,3 +58,7 @@ flows. `publish-clean` fits as a guard or publish command inside them.
 
 Preview releases and provenance complement `publish-clean`. They do not inspect
 or sanitize the package contents themselves.
+
+For npmjs.com releases, the strongest current composition is pnpm for the source
+artifact and npm for the final publish command. That keeps pnpm workspace
+semantics while using npm's first-party trusted publishing path.
