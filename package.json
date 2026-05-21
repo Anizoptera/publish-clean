@@ -21,7 +21,7 @@
     "pnpm",
     "pack",
     "package",
-    "provenance",
+    "cleanup",
     "monorepo",
     "bun"
   ],
