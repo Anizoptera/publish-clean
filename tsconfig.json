@@ -1,15 +1,48 @@
 {
+  // tsconfig.json uses JSON with Comments (JSONC)
+  "$schema": "https://json.schemastore.org/tsconfig",
   "compilerOptions": {
     "declaration": true,
     "declarationMap": true,
     "exactOptionalPropertyTypes": true,
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "noUncheckedIndexedAccess": true,
     "outDir": "dist",
-    "skipLibCheck": true,
+    "target": "ES2022",
+    "lib": ["ES2022"],
+
+    // TS6 defaults types:[] (empty) — leaf configs MUST set types explicitly
+    "types": ["node", "bun"],
+
+    // JavaScript input/interop
+    "allowJs": true,
+    "allowSyntheticDefaultImports": true, // TS6+: always-on; kept for TS5 compat
+    "checkJs": true,
+    "esModuleInterop": true, // TS6+: always-on; kept for TS5 compat
+    "resolveJsonModule": true,
+
+    // Module isolation & bundler-friendly settings
+    "isolatedModules": true,
+    "noPropertyAccessFromIndexSignature": false,
+
+    // TS6 default: true — catches side-effect imports that don't resolve;
+    // override to false in apps with CSS side-effect imports (web, ext)
+    "noUncheckedSideEffectImports": true,
+
+    // Strictness & correctness checks
     "strict": true,
-    "target": "ES2022"
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+
+    // Diagnostics & tooling/performance
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "useDefineForClassFields": true
   },
   "include": [
     "scripts/**/*.ts",

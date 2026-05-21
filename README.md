@@ -262,6 +262,7 @@ actions-up --yes
 This package has no runtime dependencies.
 
 ## Alternatives and references
+
 - [`clean-publish`](https://github.com/shashkovdanil/clean-publish)
 - [`npm-packlist`](https://github.com/npm/npm-packlist)
 
