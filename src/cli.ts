@@ -235,15 +235,16 @@ const SUSPICIOUS_PATTERNS = [
  * surprise. Deliberately states which packer is used and why, because the alternative a
  * reader reaches for depends on which one they came from.
  *
- * Measured against pnpm 11.21, bun 1.3.14 and npm 11.19: npm never adopted the
+ * Measured against pnpm 11.21, bun 1.3.14, npm 11.19 and yarn 4.18: npm never adopted the
  * `workspace:` protocol and packs it verbatim while exiting 0, which is the failure that
- * reaches consumers. bun resolves it correctly, but only for workspaces bun itself
- * installed, because it reads `bun.lock`. pnpm resolves from the installed `node_modules`
- * tree whoever built it, which is the only behaviour that works in an arbitrary
- * repository. File selection is identical across all three and is not a factor.
+ * reaches consumers. bun resolves it, but only for workspaces bun itself installed,
+ * because it reads `bun.lock`. pnpm instead looks for the dependency in the packing
+ * package's own `node_modules`, so it also handles a Bun workspace, which gives each
+ * package its own. Yarn hoists to the workspace root and so needs a `pnpm-workspace.yaml`
+ * and one `pnpm install` first. File selection is identical across all of them.
  */
 const PUBLISH_ADVISORY =
-  "publish-clean packs with pnpm: it resolves workspace: and catalog: specs from any installed node_modules tree, whichever package manager created it. npm packs those specs unresolved, and bun only resolves workspaces bun installed.";
+  "publish-clean packs with pnpm: it resolves workspace: and catalog: specs from the packing package's own node_modules, so a Bun workspace works as-is and a Yarn one needs a pnpm-workspace.yaml plus one pnpm install. npm packs those specs unresolved.";
 const MIN_TRUSTED_NPM_VERSION = [11, 5, 1] as const;
 
 class PublishCleanError extends Error {

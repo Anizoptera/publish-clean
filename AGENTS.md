@@ -4,8 +4,9 @@
 - Use `pnpm pack` as the source of truth for package file selection and workspace/catalog resolution.
   Never swap it for `bun pm pack` on the grounds that this repo runs on Bun. Measured against pnpm 11.21,
   bun 1.3.14 and npm 11.19: file selection, file modes and `files` patterns are identical across all three,
-  so they decide nothing. pnpm resolves from the installed `node_modules` tree whoever built it, so it also
-  packs a Bun or Yarn workspace; bun reads `bun.lock` and refuses whatever it did not install itself. Bun
+  so they decide nothing. pnpm resolves from the packing package's OWN `node_modules`, so it also packs a Bun
+  workspace (Bun gives each package its own) while Yarn needs a `pnpm-workspace.yaml` and one `pnpm install`
+  first, because Yarn hoists to the root; bun reads `bun.lock` and refuses whatever it did not install. Bun
   additionally mangles an aliased workspace dep (`workspace:<name>@<range>`) into an invalid npm spec and
   exits 0, and pnpm alone applies `publishConfig` field overrides. npm never adopted `workspace:` at all
   and packs it verbatim, also exiting 0.

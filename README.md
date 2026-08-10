@@ -73,14 +73,19 @@ on something other than pnpm.
 For a single package all four behave the same, since nothing in the manifest needs
 resolving before it ships.
 
-Monorepos are where it matters. `pnpm pack` resolves `workspace:` and `catalog:` specs out
-of the installed `node_modules` tree, and it doesn't care which package manager built that
-tree. A Bun or Yarn workspace, declared through the `workspaces` array in the root
-`package.json`, packs exactly like a pnpm one. You don't need a `pnpm-workspace.yaml` and
-you don't need to switch package managers.
+Monorepos are where it matters. `pnpm pack` resolves `workspace:` and `catalog:` specs by
+finding the dependency inside the packing package's own `node_modules`. What decides
+whether that works is the layout your installer left behind, not which installer it was.
 
-What it does need is for the workspace to be installed. Pack one nobody has installed yet
-and it stops on pnpm's own error:
+Bun gives each package its own `node_modules`, so a Bun workspace packs as it stands: no
+`pnpm-workspace.yaml`, no switching package managers. Yarn hoists workspace dependencies
+to the root instead, so pnpm doesn't find them, and Yarn PnP writes no `node_modules` at
+all. Both need a `pnpm-workspace.yaml` and one `pnpm install` before packing works. A Yarn
+package with no `workspace:` or `catalog:` specs needs neither, because there's nothing to
+resolve.
+
+Either way the workspace has to be installed. Pack one nobody has installed and it stops
+on pnpm's own error:
 
 ```
 ERR_PNPM_CANNOT_RESOLVE_WORKSPACE_PROTOCOL
@@ -89,9 +94,6 @@ ERR_PNPM_CANNOT_RESOLVE_WORKSPACE_PROTOCOL
 Which is what you want. Nothing gets published, and a manifest that would have been
 uninstallable for everyone never reaches the registry. Run your usual install and pack
 again.
-
-The rule is the installed tree, so the one layout outside it is Yarn PnP, which keeps no
-`node_modules` to read.
 
 ## Pick your setup
 
@@ -224,8 +226,10 @@ and `catalog:` entries too. On correctness there is nothing to choose between th
 
 They resolve from different places, and that decides it.
 
-pnpm reads the installed `node_modules` tree. Whoever built it, pnpm can resolve from it,
-so it packs a Bun workspace or a Yarn one as readily as its own.
+pnpm looks for the dependency in the packing package's own `node_modules` and resolves it
+from there. It never asks who put it there, so a Bun workspace, which gives every package
+its own `node_modules`, packs as readily as pnpm's own. Yarn hoists to the root instead
+and needs the one-time setup above.
 
 Bun reads `bun.lock`. It resolves the workspaces Bun installed and refuses the others:
 
