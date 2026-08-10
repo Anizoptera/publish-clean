@@ -61,6 +61,45 @@ Needs Node.js 20+, and `pnpm`, `npm` and `tar` on `PATH`.
 `--provenance` also needs Node.js 22.14+, npm 11.5.1+, and a cloud CI runner. npm will
 not sign a publish that came from your laptop.
 
+## Package managers
+
+You can start `publish-clean` with any package manager, and it will still pack with
+`pnpm` and publish with `npm`. That is the design, not a limitation it is working around:
+those two steps are the ones with the behaviour this tool depends on. The practical
+consequence is that both have to be installed even if your project uses neither.
+
+| Your project | How to run it             | What to expect                                            |
+| ------------ | ------------------------- | --------------------------------------------------------- |
+| pnpm         | `pnpm exec publish-clean` | Everything works, no warning.                             |
+| npm          | `npm exec publish-clean`  | Works. Prints an advisory that packing goes through pnpm. |
+| Yarn         | `yarn publish-clean`      | Same as npm.                                              |
+| Bun          | `bunx publish-clean`      | Same as npm.                                              |
+
+The advisory is a warning on stderr, not an error. Nothing behaves differently because of
+it, and there is no flag to silence it. It is there because a release that packs with
+pnpm while the rest of your pipeline uses something else is worth noticing once.
+
+Single-package repositories are the easy case: every manager above behaves identically,
+because nothing in the manifest needs resolving before it ships.
+
+Monorepos are not. `workspace:` and `catalog:` specs are resolved by `pnpm pack`, and
+`pnpm pack` resolves them from a real pnpm workspace: a `pnpm-workspace.yaml` with an
+installed `node_modules` next to it. A workspace declared the Yarn or Bun way, through
+the `workspaces` array in the root `package.json`, is not one, and neither is a pnpm
+workspace you have not run `pnpm install` in yet. In both cases packing stops with
+pnpm's own error:
+
+```
+ERR_PNPM_CANNOT_RESOLVE_WORKSPACE_PROTOCOL
+```
+
+That is the good outcome. Nothing is published, and a manifest that would have been
+uninstallable for every consumer never reaches the registry.
+
+So: a Yarn or Bun monorepo can use `publish-clean` on packages that have no
+`workspace:` dependencies, and needs a pnpm workspace for the ones that do. A pnpm
+monorepo needs nothing beyond what it already has.
+
 ## Pick your setup
 
 ### Publishing a public package from CI
