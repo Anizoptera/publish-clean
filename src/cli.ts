@@ -242,6 +242,7 @@ const SUSPICIOUS_PATTERNS = [
 const PUBLISH_ADVISORY =
   "publish-clean packs with pnpm: it resolves workspace: and catalog: specs from the packing package's own node_modules, so a Bun workspace works as-is and a Yarn one needs a pnpm-workspace.yaml plus one pnpm install. npm packs those specs unresolved.";
 const MIN_TRUSTED_NPM_VERSION = [11, 5, 1] as const;
+const TOOL_PROBE_TIMEOUT_MS = 10_000;
 
 class PublishCleanError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -315,11 +316,38 @@ function runAttached(command: string, args: readonly string[], cwd: string): voi
   execFileSync(command, [...args], { cwd, stdio: ["ignore", "inherit", "inherit"] });
 }
 
+/**
+ * A required tool can fail three ways, and each one asks something different of the
+ * reader, so the probe reports what it observed instead of assuming the common case.
+ * A version-manager shim (asdf, mise, volta, corepack) resolves in PATH and still refuses
+ * to run when no version is pinned; calling that absence sends the reader to verify the
+ * one thing already correct, and `which pnpm` then agrees with them and not with us. The
+ * shim's own message names the fix, so it is forwarded rather than replaced.
+ */
+function toolFailureReason(cause: unknown): string {
+  if (isObject(cause)) {
+    if (cause.code === "ENOENT") return "is not available in PATH";
+    if (cause.code === "ETIMEDOUT")
+      return `did not answer --version within ${TOOL_PROBE_TIMEOUT_MS}ms`;
+  }
+  const stderr = outputFromError(cause, "stderr");
+  return `is present but failed to run${stderr ? `: ${stderr}` : ""}`;
+}
+
+/**
+ * The probe is bounded because a wedged shim would otherwise hang the publish with no end:
+ * `execFileSync` blocks this thread, so no timer here could ever interrupt it. The bound
+ * belongs on the spawn itself. It stays generous because the only job is to separate a
+ * tool that answers from one that never will.
+ */
 function requireTool(name: string): void {
   try {
-    execFileSync(name, ["--version"], { stdio: "ignore" });
+    execFileSync(name, ["--version"], {
+      stdio: ["ignore", "ignore", "pipe"],
+      timeout: TOOL_PROBE_TIMEOUT_MS,
+    });
   } catch (cause) {
-    throw new PublishCleanError(`Required tool "${name}" is not available in PATH.`, { cause });
+    throw new PublishCleanError(`Required tool "${name}" ${toolFailureReason(cause)}.`, { cause });
   }
 }
 

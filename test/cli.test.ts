@@ -306,6 +306,55 @@ exit 1
     }
   });
 
+  it("reports a required tool's own words when it is present but refuses to run", async () => {
+    const fx = await fixture(
+      { name: "fixture-broken-shim", version: "1.0.0", files: ["index.js"] },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    const bin = path.join(fx.root, "bin");
+    try {
+      await mkdir(bin);
+      // A version-manager shim (asdf, mise, volta, corepack) resolves in PATH but exits
+      // non-zero when no version is pinned. Diagnosing that as "not in PATH" sends the
+      // reader to verify the one thing that is already fine, and `which pnpm` will agree
+      // with them and not with the tool.
+      await writeShim(
+        path.join(bin, "pnpm"),
+        `#!/bin/sh
+echo "No version is set for command pnpm" >&2
+exit 126
+`,
+      );
+      const result = runCli(["--no-git-checks", fx.dir], process.cwd(), {
+        PATH: `${bin}:${process.env.PATH ?? ""}`,
+      });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).not.toContain("not available in PATH");
+      expect(result.stderr).toContain("No version is set for command pnpm");
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
+
+  it("still reports a genuinely absent tool as missing", async () => {
+    const fx = await fixture(
+      { name: "fixture-absent-tool", version: "1.0.0", files: ["index.js"] },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    try {
+      // Node's own directory keeps the CLI runnable while leaving every package manager
+      // out of reach, which is the only way to exercise a genuine ENOENT.
+      const result = runCli(["--no-git-checks", fx.dir], process.cwd(), {
+        PATH: path.dirname(process.execPath),
+      });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("pnpm");
+      expect(result.stderr).toContain("not available in PATH");
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
+
   it("rejects provenance publish when npm is too old for trusted publishing", async () => {
     const fx = await fixture(
       { name: "fixture-old-npm", version: "1.0.0", files: ["index.js"] },
