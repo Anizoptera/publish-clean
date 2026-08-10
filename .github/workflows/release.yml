@@ -16,6 +16,11 @@ jobs:
   release-please:
     if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
+    # Both jobs here are bounded, because the runner default is six hours and this workflow
+    # serialises on a concurrency group that never cancels: one wedged run blocks every
+    # later release until a human notices. The publish job additionally holds a live OIDC
+    # identity, which must not stay alive any longer than the upload needs.
+    timeout-minutes: 5
     permissions:
       contents: write
       pull-requests: write
@@ -33,6 +38,7 @@ jobs:
     needs: release-please
     if: ${{ always() && (github.event_name == 'workflow_dispatch' || needs.release-please.outputs.release_created == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write # attach the published tarball to the GitHub Release
       id-token: write # OIDC: npm provenance and build-provenance attestation

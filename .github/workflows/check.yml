@@ -15,6 +15,11 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # This lane costs about a minute. The cap is the standing rule that a check lane may
+    # never exceed five minutes, made mechanical instead of aspirational, and it leaves the
+    # required headroom over the real cost. Without it the runner default is six hours, so
+    # anything that wedges burns a job slot for a working day and reports nothing useful.
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

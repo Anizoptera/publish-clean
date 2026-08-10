@@ -11,6 +11,17 @@ interface Fixture {
   root: string;
 }
 
+/**
+ * Every invocation is bounded, because `spawnSync` blocks the worker thread and vitest's
+ * own `testTimeout` cannot interrupt it: the timer never gets a turn to fire. Without a
+ * bound here, one wedged subprocess hangs the whole suite until the CI job's multi-hour
+ * ceiling, and locally until someone notices.
+ *
+ * The cap is deliberately far above the real cost — CI runs all of these in about a
+ * minute — so it can only ever catch a genuine wedge, never a cold pnpm store.
+ */
+const CLI_TIMEOUT_MS = 60_000;
+
 function runCli(
   args: readonly string[],
   cwd: string,
@@ -20,6 +31,8 @@ function runCli(
     cwd,
     encoding: "utf8",
     env: { ...process.env, ...env },
+    timeout: CLI_TIMEOUT_MS,
+    killSignal: "SIGKILL",
   });
 }
 
