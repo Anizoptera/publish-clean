@@ -1,7 +1,7 @@
 # Contributing
 
-`publish-clean` has one job: publish from a checked package artifact. Keep
-changes close to that.
+`publish-clean` has one job: publish from a package artifact that has been checked.
+Keep changes close to that.
 
 ## Local checks
 
@@ -16,17 +16,20 @@ Bun tests, builds, rejects tracked `dist/`, runs `publint`, and runs
 
 ## Design rules
 
-- Keep runtime dependencies at zero.
-- Use `pnpm pack` as the package artifact source of truth.
-- Use `npm publish` for the final registry upload.
-- Validate the final npm tarball, not only the repository tree or cleaned
-  directory.
-- Preserve the source tree; sanitize only the extracted publish copy.
-- Do not turn this into a release manager. Versioning, changelogs, tags, GitHub
-  Releases, and dist-tag policy belong to release tools.
-- Do not add source content rewriting such as doc or comment cleanup.
-- Do not weaken critical leak checks.
-- Do not track `dist/`.
+These are not preferences. A change that breaks one of them will be rejected however
+good it looks otherwise.
+
+- Runtime dependencies stay at zero.
+- `pnpm pack` decides what is in the package. Do not add file-selection rules of our own.
+- `npm publish` does the upload, because provenance lives there.
+- Validate the final tarball, not just the repository tree or the cleaned directory. The
+  tarball is what users get.
+- Never modify the source tree. Only the extracted copy gets cleaned.
+- This is not a release manager. Versions, changelogs, tags, GitHub Releases and dist-tag
+  policy belong to other tools.
+- No rewriting of source content, including doc or comment stripping.
+- Leak checks do not get weaker. Ever.
+- `dist/` is never tracked.
 
 ## Workflows
 
@@ -41,5 +44,5 @@ maintainer understands why the change exists.
 
 ## Conduct
 
-Keep discussions technical, concrete, and respectful. Security issues belong in
-private vulnerability reporting, not public issues.
+Keep it technical and concrete. Security problems go to private vulnerability reporting,
+never to a public issue. See [SECURITY.md](SECURITY.md).

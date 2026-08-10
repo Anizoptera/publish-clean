@@ -1,10 +1,25 @@
 # Security
 
-Report vulnerabilities through GitHub private vulnerability reporting when it is
-available for this repository.
+Report a vulnerability through GitHub private vulnerability reporting:
 
-Do not put secrets, exploit details, or unpatched vulnerabilities in public
-issues. If private reporting is unavailable, open a public issue asking for a
-private contact path and keep the sensitive details out of it.
+https://github.com/Anizoptera/publish-clean/security/advisories/new
 
-Supported version policy: security fixes target the latest released version.
+Do not open a public issue for anything unpatched, and keep secrets and working exploit
+details out of public threads. If private reporting is not available to you, open an
+issue asking for a private contact path and leave the details out of it.
+
+Security fixes go to the latest released version. Older versions are not patched.
+
+## What this tool is responsible for
+
+`publish-clean` decides what ends up in a published npm tarball, so a bug here can put a
+file on a public registry that was never meant to leave your machine. Reports about the
+leak checks failing to catch something, or about the cleaned manifest keeping data it
+should have removed, are in scope and worth reporting privately.
+
+Releases are published from GitHub Actions with npm provenance. You can check that any
+version you installed came from this repository:
+
+```bash
+npm audit signatures
+```
