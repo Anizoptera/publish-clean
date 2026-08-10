@@ -52,6 +52,10 @@ const DEP_FIELDS = [
   "resolutions",
 ] as const;
 const MONOREPO_PROTOCOLS = ["catalog:", "workspace:", "link:", "portal:"];
+/**
+ * Fields a consumer's toolchain resolves. Stripping one breaks installs, imports or
+ * platform gating, so `devFields` is not allowed to name them.
+ */
 const RUNTIME_MANIFEST_FIELDS = new Set([
   ...DEP_FIELDS,
   "bin",
@@ -77,6 +81,63 @@ const RUNTIME_MANIFEST_FIELDS = new Set([
   "typings",
   "version",
 ]);
+
+/**
+ * Fields npm's registry, website and CLI read, plus the de-facto entry points bundlers
+ * and CDNs look for. Recognised, so they raise no report, but a maintainer may legitimately
+ * strip any of them through `devFields`: none is load-bearing for an install.
+ *
+ * Together with RUNTIME_MANIFEST_FIELDS this is the answer to "does anything downstream
+ * read this key?". Anything outside both sets is, as far as this tool can tell, project
+ * bookkeeping that a consumer downloads and never uses.
+ */
+const REGISTRY_MANIFEST_FIELDS = new Set([
+  "author",
+  "bugs",
+  "contributors",
+  "deno",
+  "description",
+  "directories",
+  "funding",
+  "homepage",
+  "jsdelivr",
+  "keywords",
+  "maintainers",
+  "man",
+  "react-native",
+  "repository",
+  "sass",
+  "scripts",
+  "style",
+  "svelte",
+  "unpkg",
+]);
+
+/**
+ * Names the fields that survived cleaning without anyone recognising them.
+ *
+ * The strip list can only ever describe tools that existed when it was written, so every
+ * new `package.json` key some tool invents ships to consumers until a human notices. This
+ * cannot be fixed by keeping only recognised fields: that would silently drop a key some
+ * consumer genuinely resolves, and the breakage would surface in a stranger's project
+ * rather than here. So the field ships, and the maintainer is told it did, with the exact
+ * config that would drop it next time.
+ *
+ * Reported on stderr because it is advice about the package, not an error in it. Nothing
+ * about the published artifact depends on whether anyone reads this.
+ */
+function reportUnrecognizedFields(pkg: JsonObject): void {
+  const unrecognized = Object.keys(pkg).filter(
+    (field) => !RUNTIME_MANIFEST_FIELDS.has(field) && !REGISTRY_MANIFEST_FIELDS.has(field),
+  );
+  if (unrecognized.length === 0) return;
+  console.warn(
+    `publish-clean: these manifest fields are not recognised and were published as-is:\n` +
+      `${unrecognized.map((field) => `  ${field}`).join("\n")}\n` +
+      `If consumers do not read them, strip them:\n` +
+      `  "publish-clean": { "devFields": [${unrecognized.map((f) => `"${f}"`).join(", ")}] }`,
+  );
+}
 const CRITICAL_PATTERNS = [
   /(?:^|\/)node_modules(?:\/|$)/,
   /(?:^|\/)\.git(?:\/|$)/,
@@ -582,6 +643,7 @@ async function packAndClean(
       cleanedPkg.publishConfig = publishConfig;
     }
     assertNoMonorepoProtocols(cleanedPkg);
+    reportUnrecognizedFields(cleanedPkg);
     await writeFile(packedPkgPath, stringifyJson(cleanedPkg));
     assertDeclaredFiles(cleanedPkg, extracted);
     const cleanedFiles: string[] = [];

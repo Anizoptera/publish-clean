@@ -4,6 +4,11 @@
 - Use `pnpm pack` as the source of truth for package file selection and workspace/catalog resolution.
 - Use `npm pack` and `npm publish` for the final cleaned tarball and registry upload.
 - Never weaken critical artifact checks for secrets, `node_modules`, Git internals, or broken export paths.
+- The published package carries what consumers and the registry read, and nothing else. Dangerous content
+  and useless content are both targets: a shipped tool-config block is noise every installer downloads
+  forever. The manifest is the ONLY surface authorised for this — file selection belongs to `pnpm pack`,
+  and file contents are never rewritten. Unrecognised fields ship and are reported, never dropped
+  silently: dropping a key some consumer resolves breaks a stranger's build with no signal here.
 - Do not add package-manager-specific behavior unless tests prove the published tarball invariant.
 - Split CLI args at `--` before parsing; everything after it belongs to `npm publish`.
 - Keep npm publication in `.github/workflows/release.yml`; npm trusted publishing is keyed by workflow filename.

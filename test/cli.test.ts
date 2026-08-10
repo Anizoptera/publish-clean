@@ -628,4 +628,39 @@ exit 1
       await cleanup(fx.root);
     }
   });
+
+  // The report exists because the strip list cannot know about tools invented after it was
+  // written. Both halves matter and can fail independently: staying silent hides the drift,
+  // and dropping the field would break a consumer who does read it. A recognised field
+  // appearing in the report would be just as bad, because a report nobody trusts is noise.
+  it("reports an unrecognised manifest field and still publishes it", async () => {
+    const fx = await fixture(
+      {
+        name: "fixture-unknown-field",
+        version: "1.0.0",
+        files: ["index.js"],
+        funding: "https://example.test/fund",
+        someToolConfig: { threshold: 5 },
+      },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    try {
+      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expect(result.stderr).toContain("someToolConfig");
+      expect(result.stderr).toContain(`"devFields": ["someToolConfig"]`);
+      expect(result.stderr).not.toContain("funding");
+
+      const extracted = /^\[dry-run\] Extracted package at: (.+)$/m.exec(result.stdout)?.[1];
+      const shipped = JSON.parse(
+        await readFile(path.join(String(extracted).trim(), "package.json"), "utf8"),
+      ) as Record<string, unknown>;
+      expect(shipped.someToolConfig).toEqual({ threshold: 5 });
+      expect(shipped.funding).toBe("https://example.test/fund");
+
+      await cleanupExtracted(result.stdout);
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
 });
