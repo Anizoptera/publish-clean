@@ -73,22 +73,25 @@ on something other than pnpm.
 For a single package all four behave the same, since nothing in the manifest needs
 resolving before it ships.
 
-Monorepos are where it matters. `pnpm pack` resolves `workspace:` and `catalog:` specs
-from a real pnpm workspace, meaning a `pnpm-workspace.yaml` with an installed
-`node_modules` beside it. A workspace declared the Yarn or Bun way, through the
-`workspaces` array in the root `package.json`, isn't one. Neither is a pnpm workspace you
-haven't run `pnpm install` in yet. Either way packing stops on pnpm's own error:
+Monorepos are where it matters. `pnpm pack` resolves `workspace:` and `catalog:` specs out
+of the installed `node_modules` tree, and it doesn't care which package manager built that
+tree. A Bun or Yarn workspace, declared through the `workspaces` array in the root
+`package.json`, packs exactly like a pnpm one. You don't need a `pnpm-workspace.yaml` and
+you don't need to switch package managers.
+
+What it does need is for the workspace to be installed. Pack one nobody has installed yet
+and it stops on pnpm's own error:
 
 ```
 ERR_PNPM_CANNOT_RESOLVE_WORKSPACE_PROTOCOL
 ```
 
 Which is what you want. Nothing gets published, and a manifest that would have been
-uninstallable for everyone never reaches the registry.
+uninstallable for everyone never reaches the registry. Run your usual install and pack
+again.
 
-So a Yarn or Bun monorepo can use `publish-clean` for packages with no `workspace:`
-dependencies, and needs a pnpm workspace for the ones that have them. A pnpm monorepo
-needs nothing it doesn't already have.
+The rule is the installed tree, so the one layout outside it is Yarn PnP, which keeps no
+`node_modules` to read.
 
 ## Pick your setup
 
@@ -193,21 +196,48 @@ Any gate that fails exits non-zero and nothing is published. `--dry-run` and
 
 ### Why pnpm does the packing
 
-For a single package, every package manager produces roughly the same tarball. In a
-workspace they don't. A dependency written as `"@acme/utils": "workspace:*"` means
-"whatever version of that package is in this repo right now". Someone has to turn that
-into a real version range before it ships, because to a stranger installing from the
-registry `workspace:*` means nothing and the install just fails.
+Not for file selection. pnpm, npm and Bun pick the same files: same `files` field, same
+`.npmignore`, same packlist defaults. There are no file rules of this tool's own either,
+so that part behaves however your package manager already behaves.
 
-pnpm knows the answer because pnpm built the workspace. `pnpm pack` resolves those specs,
-and `catalog:` entries too. `npm pack` copies them out as-is.
+Workspaces are the reason. A dependency written as `"@acme/utils": "workspace:*"` means
+"whatever version of that package is in this repo right now". It has to become a real
+version range before it ships, because to a stranger installing from the registry
+`workspace:*` means nothing.
 
-That's the whole reason. On every other input pnpm does what the others do; on this one
-it's the only one that's correct. Using it everywhere, rather than only inside
-workspaces, leaves one file-selection behaviour to reason about instead of a different
-one per project layout. There are no file rules of this tool's own, so `files`,
-`.npmignore` and packlist defaults do whatever your package manager already does with
-them.
+npm never adopted the protocol. It won't even install it:
+
+```
+npm error code EUNSUPPORTEDPROTOCOL
+npm error Unsupported URL Type "workspace:": workspace:*
+```
+
+`npm pack` on that same package exits 0 and writes `workspace:*` straight into the
+tarball. It neither resolves it nor refuses it, and silently publishing something you
+can't install is the one behaviour a release tool can't be built on.
+
+pnpm and Bun both resolve it, and both stop loudly when they can't. Their output matches
+down to `workspace:^` and `workspace:~` in `peerDependencies` and `optionalDependencies`,
+and `catalog:` entries too. On correctness there is nothing to choose between them.
+
+### Why pnpm rather than Bun
+
+They resolve from different places, and that decides it.
+
+pnpm reads the installed `node_modules` tree. Whoever built it, pnpm can resolve from it,
+so it packs a Bun workspace or a Yarn one as readily as its own.
+
+Bun reads `bun.lock`. It resolves the workspaces Bun installed and refuses the others:
+
+```
+error: Failed to resolve workspace version for "@acme/utils" in `dependencies`.
+Run `bun install` and try again.
+```
+
+That message is accurate and useless, because in a pnpm repo `bun install` is not
+something you want to be told to run. A tool that executes in other people's
+repositories has to cope with the repository it finds, so it packs with the one that
+reads all of them. If this tool only ever ran here, Bun would do.
 
 ### Why the manifest is cleaned on a copy
 
@@ -236,8 +266,17 @@ checked.
 
 ### Why npm does the publishing
 
-Provenance, trusted publishing and the registry signature are npm features and work on
-npm's path. `npm publish` also takes a tarball directly, which is what the previous step
+Provenance is an npm feature. The signed attestation behind the "Built and signed on
+GitHub Actions" badge is minted by the npm CLI talking to Sigstore, and trusted
+publishing, which removes the long-lived token entirely, is npm's own OIDC exchange with
+the registry.
+
+No other client mints it. `bun publish` offers `--access`, `--tag`, `--otp` and
+`--auth-type`, and nothing at all for provenance or attestation, so publishing through it
+would cost both the badge and the tokenless path. That trade isn't on the table here:
+verifiable provenance is why this package exists.
+
+`npm publish` also takes a tarball directly, which is exactly what the previous step
 produced.
 
 ## What it checks

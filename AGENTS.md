@@ -2,6 +2,11 @@
 
 - Keep this CLI dependency-free at runtime.
 - Use `pnpm pack` as the source of truth for package file selection and workspace/catalog resolution.
+  Never swap it for `bun pm pack` on the grounds that this repo runs on Bun. Measured against pnpm 11.21,
+  bun 1.3.14 and npm 11.19: file selection is identical across all three, and bun resolves `workspace:`
+  and `catalog:` correctly — but only for workspaces bun installed, because it reads `bun.lock`. pnpm
+  resolves from the installed `node_modules` tree whoever built it, so it is the only packer that works
+  in an arbitrary consumer's repository. npm resolves neither and packs them verbatim while exiting 0.
 - Use `npm pack` and `npm publish` for the final cleaned tarball and registry upload.
 - Never weaken critical artifact checks for secrets, `node_modules`, Git internals, or broken export paths.
 - The published package carries what consumers and the registry read, and nothing else. Dangerous content

@@ -554,7 +554,7 @@ exit 1
       const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("unresolved monorepo-only dependency specs");
-      expect(result.stderr).toContain("uses pnpm pack intentionally");
+      expect(result.stderr).toContain("packs with pnpm");
     } finally {
       await cleanup(fx.root);
     }
@@ -634,7 +634,7 @@ exit 1
         npm_config_user_agent: "npm/11.0.0 node/v24",
       });
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      expect(result.stderr).toContain("uses pnpm pack intentionally");
+      expect(result.stderr).toContain("packs with pnpm");
       expect(result.stderr).toContain("npm/11.0.0");
       await cleanupExtracted(result.stdout);
     } finally {

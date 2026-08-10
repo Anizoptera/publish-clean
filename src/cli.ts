@@ -230,8 +230,20 @@ const SUSPICIOUS_PATTERNS = [
   /\.(?:test|spec)\.[cm]?[jt]sx?$/,
 ];
 
+/**
+ * Shown when another package manager started this tool, so the pnpm requirement is not a
+ * surprise. Deliberately states which packer is used and why, because the alternative a
+ * reader reaches for depends on which one they came from.
+ *
+ * Measured against pnpm 11.21, bun 1.3.14 and npm 11.19: npm never adopted the
+ * `workspace:` protocol and packs it verbatim while exiting 0, which is the failure that
+ * reaches consumers. bun resolves it correctly, but only for workspaces bun itself
+ * installed, because it reads `bun.lock`. pnpm resolves from the installed `node_modules`
+ * tree whoever built it, which is the only behaviour that works in an arbitrary
+ * repository. File selection is identical across all three and is not a factor.
+ */
 const PUBLISH_ADVISORY =
-  "publish-clean uses pnpm pack intentionally; npm, yarn, and bun pack do not reliably normalize pnpm workspace/catalog manifests.";
+  "publish-clean packs with pnpm: it resolves workspace: and catalog: specs from any installed node_modules tree, whichever package manager created it. npm packs those specs unresolved, and bun only resolves workspaces bun installed.";
 const MIN_TRUSTED_NPM_VERSION = [11, 5, 1] as const;
 
 class PublishCleanError extends Error {
