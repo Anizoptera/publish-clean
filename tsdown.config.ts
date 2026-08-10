@@ -6,6 +6,11 @@ export default defineConfig({
   entry: ["src/cli.ts"],
   format: "esm",
   fixedExtension: false,
+  // Deliberately close to a no-op. Identifiers, whitespace and comments all survive, so
+  // the published file stays readable: this package sits on a publish path and handles
+  // registry credentials, and anyone who wants to audit the code they are about to trust
+  // should be able to read it in node_modules without fetching the repository. Only the
+  // genuinely dead parts are dropped.
   minify: {
     mangle: false,
     compress: { dropDebugger: true },

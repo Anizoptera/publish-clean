@@ -52,10 +52,9 @@ not sign a publish that came from your laptop.
 
 ## Package managers
 
-You can start `publish-clean` with any package manager, and it will still pack with
-`pnpm` and publish with `npm`. That is the design, not a limitation it is working around:
-those two steps are the ones with the behaviour this tool depends on. The practical
-consequence is that both have to be installed even if your project uses neither.
+Start `publish-clean` with any package manager and it still packs with `pnpm` and
+publishes with `npm`. So both have to be installed even if your project uses neither. The
+reasons are in [Why it works this way](#why-it-works-this-way).
 
 | Your project | How to run it             | What to expect                                            |
 | ------------ | ------------------------- | --------------------------------------------------------- |
@@ -65,29 +64,28 @@ consequence is that both have to be installed even if your project uses neither.
 | Bun          | `bunx publish-clean`      | Same as npm.                                              |
 
 The advisory is a warning on stderr, not an error. Nothing behaves differently because of
-it, and there is no flag to silence it. It is there because a release that packs with
-pnpm while the rest of your pipeline uses something else is worth noticing once.
+it and there's no flag to silence it. Worth seeing once if the rest of your pipeline runs
+on something other than pnpm.
 
-Single-package repositories are the easy case: every manager above behaves identically,
-because nothing in the manifest needs resolving before it ships.
+For a single package all four behave the same, since nothing in the manifest needs
+resolving before it ships.
 
-Monorepos are not. `workspace:` and `catalog:` specs are resolved by `pnpm pack`, and
-`pnpm pack` resolves them from a real pnpm workspace: a `pnpm-workspace.yaml` with an
-installed `node_modules` next to it. A workspace declared the Yarn or Bun way, through
-the `workspaces` array in the root `package.json`, is not one, and neither is a pnpm
-workspace you have not run `pnpm install` in yet. In both cases packing stops with
-pnpm's own error:
+Monorepos are where it matters. `pnpm pack` resolves `workspace:` and `catalog:` specs
+from a real pnpm workspace, meaning a `pnpm-workspace.yaml` with an installed
+`node_modules` beside it. A workspace declared the Yarn or Bun way, through the
+`workspaces` array in the root `package.json`, isn't one. Neither is a pnpm workspace you
+haven't run `pnpm install` in yet. Either way packing stops on pnpm's own error:
 
 ```
 ERR_PNPM_CANNOT_RESOLVE_WORKSPACE_PROTOCOL
 ```
 
-That is the good outcome. Nothing is published, and a manifest that would have been
-uninstallable for every consumer never reaches the registry.
+Which is what you want. Nothing gets published, and a manifest that would have been
+uninstallable for everyone never reaches the registry.
 
-So: a Yarn or Bun monorepo can use `publish-clean` on packages that have no
-`workspace:` dependencies, and needs a pnpm workspace for the ones that do. A pnpm
-monorepo needs nothing beyond what it already has.
+So a Yarn or Bun monorepo can use `publish-clean` for packages with no `workspace:`
+dependencies, and needs a pnpm workspace for the ones that have them. A pnpm monorepo
+needs nothing it doesn't already have.
 
 ## Pick your setup
 
@@ -144,8 +142,8 @@ If Changesets, semantic-release, release-it or np already owns your releases, us
 
 It packs, cleans and validates, then exits without publishing. A leaked file, an
 unresolved `workspace:` spec or a `main` path that is missing from the tarball fails the
-release before your tool uploads anything. Be clear about the limit though: your tool
-still publishes its own tarball, so you get the checks and not the cleaned manifest.
+release before your tool uploads anything. The limit is real though: your tool still
+publishes its own tarball, so you get the checks and not the cleaned manifest.
 
 ### Looking at what would be published
 
@@ -190,60 +188,54 @@ Any gate that fails exits non-zero and nothing is published. `--dry-run` and
 
 ## Why it works this way
 
-Four decisions shape the tool. Each one is the answer to a question worth asking.
-
 ### Why pnpm does the packing
 
-For a single package, every package manager produces much the same tarball. In a
-workspace they do not. A dependency written as `"@acme/utils": "workspace:*"` means
-"whatever version of that package is in this repo right now", and something has to turn
-it into a real version range before the package ships. To a stranger installing from the
-registry, `workspace:*` means nothing, and the install fails.
+For a single package, every package manager produces roughly the same tarball. In a
+workspace they don't. A dependency written as `"@acme/utils": "workspace:*"` means
+"whatever version of that package is in this repo right now". Someone has to turn that
+into a real version range before it ships, because to a stranger installing from the
+registry `workspace:*` means nothing and the install just fails.
 
 pnpm knows the answer because pnpm built the workspace. `pnpm pack` resolves those specs,
-and `catalog:` entries with them. `npm pack` copies them out as they are.
+and `catalog:` entries too. `npm pack` copies them out as-is.
 
-So packing with pnpm is not a preference. On every other input it does what the
-alternatives do; on this one input it is the only one that is right. Doing it always,
-rather than only inside workspaces, means there is one file-selection behaviour to reason
-about instead of a different one per project layout. This tool adds no file selection
-rules of its own, so `files`, `.npmignore` and packlist defaults behave exactly as your
-package manager already defines them. It cannot disagree with the tool that builds your
-package, because it is that tool.
+That's the whole reason. On every other input pnpm does what the others do; on this one
+it's the only one that's correct. Using it everywhere, rather than only inside
+workspaces, leaves one file-selection behaviour to reason about instead of a different
+one per project layout. There are no file rules of this tool's own, so `files`,
+`.npmignore` and packlist defaults do whatever your package manager already does with
+them.
 
 ### Why the manifest is cleaned on a copy
 
-The tarball is extracted into a temporary directory and the rewrite happens there. Your
-working tree is never touched.
+The tarball gets extracted into a temp directory and rewritten there. Your working tree
+is never touched.
 
-The obvious alternative is what many hand-written release scripts do: edit
-`package.json`, publish, edit it back. That works until something goes wrong in the
-middle, and then your repository is left holding a manifest nobody meant to keep. It is
-also unsafe to run twice at once. Cleaning a copy has neither problem, and it costs a
-directory in `/tmp`.
+The obvious alternative is what a lot of hand-rolled release scripts do: edit
+`package.json`, publish, edit it back. That's fine until something dies in the middle,
+and then your repo is sitting on a manifest nobody meant to keep. It also can't be run
+twice at once. Cleaning a copy has neither problem and costs a directory in `/tmp`.
 
 ### Why npm packs the cleaned copy a second time
 
-Handing npm a directory and handing npm a tarball are not the same act. Given a
-directory, npm packs it as part of the upload, so the bytes that reach the registry come
-into existence after the last check has run.
+Give npm a directory and it packs during the upload, so the bytes that reach the registry
+only come into existence after the last check has run.
 
-Packing first means those bytes exist before anything is uploaded. They can be listed,
-compared against the cleaned directory, scanned for leaks a second time, kept with
-`--tarball-out` for a build attestation, and then published as themselves. What you
-inspect is what ships. If cleaning ever dropped a real file, you find out here rather
-than from a bug report.
+Packing first means they exist before anything is uploaded. They can be listed, compared
+against the cleaned directory, scanned for leaks again, kept with `--tarball-out` for a
+build attestation, and then published as themselves. What you inspect is what ships. If
+cleaning ever dropped a real file, you find out here instead of from a bug report.
 
-That second pack runs with `--ignore-scripts`. The first one does not, on purpose:
-`pnpm pack` runs your `prepare` and `prepack` scripts, which is how your build output
-gets into the package at all. Running them again on the cleaned copy could only change it
-after it was checked.
+The second pack uses `--ignore-scripts`. The first one doesn't, deliberately: `pnpm pack`
+runs your `prepare` and `prepack` scripts, which is how your build output gets into the
+package at all. Running them again on the cleaned copy could only change it after it was
+checked.
 
 ### Why npm does the publishing
 
-Provenance, trusted publishing and the registry signature are npm's own features, and
-they work on npm's own path. `npm publish` also takes a tarball directly, which is
-exactly what the previous step produced.
+Provenance, trusted publishing and the registry signature are npm features and work on
+npm's path. `npm publish` also takes a tarball directly, which is what the previous step
+produced.
 
 ## What it checks
 
@@ -342,10 +334,10 @@ command line.
 
 ## What it does not do
 
-It is not a release manager. It will not pick your version number, write a changelog,
-tag anything, push a commit, create a GitHub release, or configure trusted publishing for
-you. It also does not check that your entry points resolve correctly for consumers, which
-is what `publint` and `@arethetypeswrong/cli` are for.
+It isn't a release manager. It won't pick your version number, write a changelog, tag
+anything, push a commit, create a GitHub release, or set up trusted publishing for you.
+It also doesn't check that your entry points resolve correctly for consumers, which is
+what `publint` and `@arethetypeswrong/cli` are for.
 
 Pick a release manager and a validator to go with it. The next section covers which.
 
