@@ -378,38 +378,27 @@ function readTarballJson(tarball: string, file: string, cwd: string): JsonObject
   return parsed;
 }
 
-function npmPackTarballPath(output: string, packRoot: string): string {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(output) as unknown;
-  } catch (cause) {
-    throw new PublishCleanError("Unable to parse npm pack --json output.", {
-      cause,
-    });
-  }
-  if (!Array.isArray(parsed) || parsed.length !== 1 || !isObject(parsed[0]))
-    throw new PublishCleanError("npm pack --json did not describe one tarball.");
-  const filename = parsed[0].filename;
-  if (typeof filename !== "string" || filename.length === 0)
-    throw new PublishCleanError("npm pack --json did not report a filename.");
-  return path.isAbsolute(filename) ? filename : path.join(packRoot, filename);
-}
-
-function pnpmPackTarballPath(output: string, packRoot: string): string {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(output) as unknown;
-  } catch (cause) {
-    throw new PublishCleanError("Unable to parse pnpm pack --json output.", {
-      cause,
-    });
-  }
-  if (!isObject(parsed))
-    throw new PublishCleanError("pnpm pack --json did not describe a tarball.");
-  const filename = parsed.filename;
-  if (typeof filename !== "string" || filename.length === 0)
-    throw new PublishCleanError("pnpm pack --json did not report a filename.");
-  return path.isAbsolute(filename) ? filename : path.join(packRoot, filename);
+/**
+ * Locates the tarball a packer just produced by reading its destination directory.
+ *
+ * Every pack here targets a directory this process created and owns exclusively, so
+ * the result is discoverable without interpreting the packer's output at all. That
+ * matters because `pack` runs the package's `prepare`/`prepack` lifecycle scripts and
+ * forwards their stdout: any build tool that logs — most of them — lands ahead of the
+ * `--json` payload and breaks a parse of that stream. Reading the directory is immune
+ * to whatever a foreign package's scripts choose to print.
+ *
+ * Exactly one tarball is the invariant, not a convenience: more than one means the
+ * destination was not exclusive and the wrong artifact could be published.
+ */
+async function soleTarball(packRoot: string, packer: string): Promise<string> {
+  const tarballs = (await readdir(packRoot)).filter((entry) => entry.endsWith(".tgz"));
+  const [tarball] = tarballs;
+  if (tarballs.length !== 1 || !tarball)
+    throw new PublishCleanError(
+      `${packer} left ${tarballs.length} tarballs in ${packRoot}; expected exactly one.`,
+    );
+  return path.join(packRoot, tarball);
 }
 
 function assertFinalTarballIncludesCleanedFiles(
@@ -537,8 +526,8 @@ async function packAndClean(
   const root = await mkdtemp(path.join(tmpdir(), "publish-clean-"));
   let keepRoot = false;
   try {
-    const packedOutput = run("pnpm", ["pack", "--json", "--pack-destination", root], packageDir);
-    const tarball = pnpmPackTarballPath(packedOutput, root);
+    run("pnpm", ["pack", "--pack-destination", root], packageDir);
+    const tarball = await soleTarball(root, "pnpm pack");
     run("tar", ["xzf", tarball, "-C", root], packageDir);
 
     const extracted = path.join(root, "package");
@@ -567,12 +556,8 @@ async function packAndClean(
 
     const finalPackRoot = path.join(root, "npm-pack");
     await mkdir(finalPackRoot);
-    const npmPackOutput = run(
-      "npm",
-      ["pack", "--json", "--ignore-scripts", "--pack-destination", finalPackRoot],
-      extracted,
-    );
-    const finalTarball = npmPackTarballPath(npmPackOutput, finalPackRoot);
+    run("npm", ["pack", "--ignore-scripts", "--pack-destination", finalPackRoot], extracted);
+    const finalTarball = await soleTarball(finalPackRoot, "npm pack");
     const finalFiles = listTarballFiles(finalTarball, extracted);
     validatePackedFiles(finalFiles, skipFileCheck);
     assertFinalTarballIncludesCleanedFiles(cleanedFiles, finalFiles);

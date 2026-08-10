@@ -187,7 +187,30 @@ describe("publish-clean", () => {
     }
   });
 
-  it("parses pnpm and npm pack JSON output even when npm config requests JSON", async () => {
+  // `pack` runs the package's `prepare`/`prepack` scripts and forwards their stdout.
+  // Build tools log there as a matter of course, so a foreign package's own build
+  // chatter must never be mistaken for packer output.
+  it("packs a package whose prepare script writes to stdout", async () => {
+    const fx = await fixture(
+      {
+        name: "fixture-noisy-prepare",
+        version: "1.0.0",
+        files: ["index.js"],
+        scripts: { prepare: "node -e \"console.log('building the package')\"" },
+      },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    try {
+      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expect(finalTarballPath(result.stdout)).toMatch(/\.tgz$/);
+      await cleanupExtracted(result.stdout);
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
+
+  it("finds the packed tarball even when npm config requests JSON output", async () => {
     const fx = await fixture(
       { name: "fixture-json-pack", version: "1.0.0", files: ["index.js"] },
       { "index.js": "module.exports = 1;\n" },
