@@ -280,8 +280,9 @@ Anything the tool does not recognise ships, and you get told it did:
 ```
 publish-clean: these manifest fields are not recognised and were published as-is:
   someToolConfig
-If consumers do not read them, strip them:
+Strip the ones consumers do not read, and acknowledge the ones they do:
   "publish-clean": { "devFields": ["someToolConfig"] }
+  "publish-clean": { "keepFields": ["someToolConfig"] }
 ```
 
 The strip list cannot know about a tool invented after it was written, so new
@@ -327,7 +328,8 @@ Stable project defaults can live in `package.json`:
     "registry": "https://registry.npmjs.org",
     "skipFileCheck": false,
     "noGitChecks": false,
-    "devFields": ["customBuildOnlyField"]
+    "devFields": ["customBuildOnlyField"],
+    "keepFields": ["contributes"]
   }
 }
 ```
@@ -345,6 +347,10 @@ from a build directory or a checkout that is not a git repository.
 `devFields` lists extra manifest fields to strip, for tooling this package has not heard
 of. Fields that npm or your consumers actually use, like `exports`, `bin`, `engines` and
 the dependency maps, are rejected here, so a typo cannot quietly break your package.
+
+`keepFields` is the other answer to the same report: the field belongs in the published
+package, stop mentioning it. A VS Code extension needs `contributes` and `publisher` in
+the artifact to work, and no generic publishing tool is ever going to know that.
 
 Command-line flags override this block. Keep per-release choices such as dist-tags on the
 command line.
