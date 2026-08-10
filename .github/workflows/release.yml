@@ -61,12 +61,30 @@ jobs:
       # mints provenance with no credential at all. npm is also removing direct
       # publishing from 2FA-bypass tokens in January 2027, so this path is temporary
       # by design, not by preference.
-      # bun, not pnpm: the dependencies were just installed from bun.lock, and pnpm
-      # treats a foreign node_modules as stale — it reinstalls the whole tree and,
-      # under its supply-chain cooldown, writes a pnpm-workspace.yaml into the
-      # working copy. pnpm is still on PATH because the CLI shells out to
-      # `pnpm pack` for workspace-accurate file selection.
-      - run: bun run publish:clean
+      - run: bun run build
+
+      # This job holds the publish credential and the OIDC token, so it does the
+      # minimum that needs them: pack, publish, attest, attach. The repository's
+      # verification lane is `bun run check`, which the Check workflow already ran on
+      # this exact commit without any credentials — repeating it here would execute
+      # the test suite, which builds shell shims and packs fixture packages, right
+      # next to a live npm token.
+      #
+      # Every step below is repeatable, because a run that publishes and then fails
+      # otherwise leaves the registry, the tag and the Release permanently out of
+      # step with no way back: npm refuses to republish a version, so an existing
+      # version packs in dry-run mode instead. `npm pack` normalises file mtimes,
+      # so the re-packed bytes equal the published ones and stay a truthful
+      # attestation subject.
+      - name: Pack, and publish unless this version is already on the registry
+        run: |
+          mode=""
+          spec="$(node -p '`${require("./package.json").name}@${require("./package.json").version}`')"
+          if npm view "$spec" version >/dev/null 2>&1; then
+            echo "$spec is already on the registry; re-packing to repair the release artifacts."
+            mode="--dry-run"
+          fi
+          node dist/cli.js $mode --tarball-out release-artifacts -- --access public --tag latest --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

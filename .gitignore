@@ -5,3 +5,8 @@ node_modules/
 *.tgz
 .DS_Store
 release-artifacts/
+
+# This is a single package, not a workspace. pnpm 11 writes the file anyway when
+# `pnpm pack` runs here, to record which dependencies it let past its release-age
+# cooldown, so it is a per-run artifact rather than configuration.
+pnpm-workspace.yaml
