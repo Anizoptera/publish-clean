@@ -53,14 +53,18 @@ jobs:
           node-version: "24"
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
-      # NODE_AUTH_TOKEN is the one-shot bootstrap only: npm cannot attach a trusted
-      # publisher to a package that does not exist yet, and provenance cannot be
-      # produced outside CI, so the first publish runs on a short-lived granular
-      # token. Once the package exists, the trusted publisher is bound to this
-      # workflow filename and the secret is deleted — OIDC then authenticates and
-      # mints provenance with no credential at all. npm is also removing direct
-      # publishing from 2FA-bypass tokens in January 2027, so this path is temporary
-      # by design, not by preference.
+      # No npm credential is passed to this job. Publishing authenticates with the
+      # OIDC identity against the trusted publisher bound to this repository and this
+      # workflow *filename*, so renaming or moving this file breaks publishing, and the
+      # error will not mention the rename.
+      #
+      # The bootstrap that got the package onto the registry in the first place is a
+      # separate, one-shot procedure that does need a token, because npm cannot attach a
+      # trusted publisher to a name nobody has published yet: docs/first-publish.md.
+      #
+      # A token must not be reintroduced here as a fallback. While one exists, a broken
+      # trusted-publisher configuration is silently papered over, and the failure surfaces
+      # on whatever future day the token expires instead of on the run that broke it.
       - run: bun run build
 
       # This job holds the publish credential and the OIDC token, so it does the
@@ -85,8 +89,6 @@ jobs:
             mode="--dry-run"
           fi
           node dist/cli.js $mode --tarball-out release-artifacts -- --access public --tag latest --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # npm's own provenance covers the registry; this is the second, registry-
       # independent path (`gh attestation verify`). The subject is the exact tarball
