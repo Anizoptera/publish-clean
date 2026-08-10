@@ -67,7 +67,6 @@ const RUNTIME_MANIFEST_FIELDS = new Set([
   "main",
   "module",
   "name",
-  "optionalDependencies",
   "os",
   "peerDependenciesMeta",
   "publishConfig",
@@ -153,6 +152,20 @@ function outputFromError(error: unknown, key: "stderr" | "stdout"): string {
   if (typeof output === "string") return output.trim();
   if (output instanceof Uint8Array) return Buffer.from(output).toString("utf8").trim();
   return "";
+}
+
+/**
+ * Runs a command with its streams attached to this process instead of captured.
+ *
+ * Reserved for `npm publish`. Every other command here is run for its output or its
+ * effect, but the publish is the one irreversible step, and npm's output is the only
+ * receipt the operator gets: the version that went out, the tarball size, the integrity
+ * hash, and the registry's own wording when it refuses. `run` would swallow all of it on
+ * success and hold the failure text until the process exits, which in CI means a log
+ * that says nothing about the one action that cannot be undone.
+ */
+function runAttached(command: string, args: readonly string[], cwd: string): void {
+  execFileSync(command, [...args], { cwd, stdio: ["ignore", "inherit", "inherit"] });
 }
 
 function requireTool(name: string): void {
@@ -285,6 +298,18 @@ function stripManifest(pkg: JsonObject, extraDevFields: readonly string[]): Json
   return stripped;
 }
 
+/**
+ * Refuses a manifest that still carries a spec only a workspace can resolve. Published
+ * with one, the package is uninstallable for everyone, and the version cannot be taken
+ * back.
+ *
+ * Both call sites pass an already-stripped manifest, so `devDependencies`, `overrides`,
+ * `resolutions` and the `pnpm` block are absent by construction and their branches never
+ * fire today. They are checked anyway: the guard costs nothing, and the day someone moves
+ * it before the strip, or narrows what the strip removes, it has to still be right. A
+ * guard whose correctness depends on the order it is called in is a guard that fails
+ * silently.
+ */
 function assertNoMonorepoProtocols(pkg: JsonObject): void {
   const failures: string[] = [];
   for (const field of DEP_FIELDS) {
@@ -412,32 +437,41 @@ function assertFinalTarballIncludesCleanedFiles(
   );
 }
 
-function collectDeclaredPaths(value: unknown, out: string[]): void {
+/**
+ * Walks a manifest value of any shape and collects the strings that name a file inside
+ * the package, so the caller can prove each one exists in the tarball.
+ *
+ * `mode` exists because the two families of path-bearing fields disagree about what a
+ * bare string means, and reading one by the other's rules produces wrong answers in both
+ * directions:
+ *
+ * - `"every-string"` for `main`, `module`, `types`, `typings`, `bin` and `typesVersions`,
+ *   where every string is a path into this package.
+ * - `"relative-only"` for `exports`, `imports`, `sideEffects` and the object form of
+ *   `browser`, where a string may just as well be an external package name, a condition
+ *   target or a glob. Only a `./` or `../` prefix marks it as a path here. Collecting the
+ *   rest would report a missing file for something that was never a file.
+ *
+ * Booleans are skipped rather than ignored by accident: `sideEffects: false` and
+ * `exports` condition values legitimately hold them.
+ */
+function collectDeclaredPaths(
+  value: unknown,
+  out: string[],
+  mode: "every-string" | "relative-only",
+): void {
   if (typeof value === "string") {
-    out.push(value);
+    if (mode === "every-string" || value.startsWith("./") || value.startsWith("../"))
+      out.push(value);
     return;
   }
   if (typeof value === "boolean") return;
   if (Array.isArray(value)) {
-    for (const item of value) collectDeclaredPaths(item, out);
+    for (const item of value) collectDeclaredPaths(item, out, mode);
     return;
   }
   if (!isObject(value)) return;
-  for (const item of Object.values(value)) collectDeclaredPaths(item, out);
-}
-
-function collectRelativeDeclaredPaths(value: unknown, out: string[]): void {
-  if (typeof value === "string") {
-    if (value.startsWith("./") || value.startsWith("../")) out.push(value);
-    return;
-  }
-  if (typeof value === "boolean") return;
-  if (Array.isArray(value)) {
-    for (const item of value) collectRelativeDeclaredPaths(item, out);
-    return;
-  }
-  if (!isObject(value)) return;
-  for (const item of Object.values(value)) collectRelativeDeclaredPaths(item, out);
+  for (const item of Object.values(value)) collectDeclaredPaths(item, out, mode);
 }
 
 function normalizeDeclaredPath(declared: string): null | string {
@@ -451,14 +485,16 @@ function normalizeDeclaredPath(declared: string): null | string {
 function assertDeclaredFiles(pkg: JsonObject, packageDir: string): void {
   const paths: string[] = [];
   for (const field of ["main", "module", "types", "typings", "bin"]) {
-    collectDeclaredPaths(pkg[field], paths);
+    collectDeclaredPaths(pkg[field], paths, "every-string");
   }
-  if (typeof pkg.browser === "string") collectDeclaredPaths(pkg.browser, paths);
-  else collectRelativeDeclaredPaths(pkg.browser, paths);
+  // `browser` is two fields sharing a name: a string is the replacement entry point, an
+  // object is a map whose values may be `false` or another package's name.
+  if (typeof pkg.browser === "string") collectDeclaredPaths(pkg.browser, paths, "every-string");
+  else collectDeclaredPaths(pkg.browser, paths, "relative-only");
   for (const field of ["exports", "imports", "sideEffects"]) {
-    collectRelativeDeclaredPaths(pkg[field], paths);
+    collectDeclaredPaths(pkg[field], paths, "relative-only");
   }
-  collectDeclaredPaths(pkg.typesVersions, paths);
+  collectDeclaredPaths(pkg.typesVersions, paths, "every-string");
   const normalized = paths.map((declared) => ({
     declared,
     normalized: normalizeDeclaredPath(declared),
@@ -594,7 +630,7 @@ async function packAndClean(
     const publishArgs = registry
       ? ["publish", finalTarball, "--registry", registry, ...opts.publishArgs]
       : ["publish", finalTarball, ...opts.publishArgs];
-    run("npm", publishArgs, extracted);
+    runAttached("npm", publishArgs, extracted);
   } finally {
     if (!keepRoot) await rm(root, { recursive: true, force: true });
   }
