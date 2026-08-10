@@ -61,7 +61,12 @@ jobs:
       # mints provenance with no credential at all. npm is also removing direct
       # publishing from 2FA-bypass tokens in January 2027, so this path is temporary
       # by design, not by preference.
-      - run: pnpm run publish:clean
+      # bun, not pnpm: the dependencies were just installed from bun.lock, and pnpm
+      # treats a foreign node_modules as stale — it reinstalls the whole tree and,
+      # under its supply-chain cooldown, writes a pnpm-workspace.yaml into the
+      # working copy. pnpm is still on PATH because the CLI shells out to
+      # `pnpm pack` for workspace-accurate file selection.
+      - run: bun run publish:clean
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -73,9 +78,11 @@ jobs:
         with:
           subject-path: release-artifacts/*.tgz
 
-      # Absent on workflow_dispatch bootstrap runs, where no release-please release exists.
-      - if: ${{ needs.release-please.outputs.tag_name != '' }}
-        run: gh release upload "$TAG" release-artifacts/*.tgz --clobber
+      # The tag is derived from the manifest rather than taken from the release-please
+      # output so that a workflow_dispatch run recovering a failed release still attaches
+      # the artifact to the tag that release already created. release-please tags
+      # `v<version>` for this single-package repo. Failing here is intended: a published
+      # version whose GitHub Release carries no artifact is an incomplete release.
+      - run: gh release upload "v$(node -p 'require("./package.json").version')" release-artifacts/*.tgz --clobber
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.release-please.outputs.tag_name }}
