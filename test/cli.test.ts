@@ -1,13 +1,5 @@
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import {
-  chmod,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -38,19 +30,13 @@ async function fixture(
   const root = await mkdtemp(path.join(tmpdir(), "publish-clean-test-"));
   const dir = path.join(root, "pkg");
   await mkdir(dir, { recursive: true });
-  await writeFile(
-    path.join(dir, "package.json"),
-    `${JSON.stringify(pkg, null, 2)}\n`,
-  );
+  await writeFile(path.join(dir, "package.json"), `${JSON.stringify(pkg, null, 2)}\n`);
   for (const [name, content] of Object.entries(files)) {
     const file = path.join(dir, name);
     await mkdir(path.dirname(file), { recursive: true });
     await writeFile(file, content);
   }
-  await writeFile(
-    path.join(root, "pnpm-workspace.yaml"),
-    "packages:\n  - pkg\n",
-  );
+  await writeFile(path.join(root, "pnpm-workspace.yaml"), "packages:\n  - pkg\n");
   return { dir, root };
 }
 
@@ -111,10 +97,7 @@ describe("publish-clean", () => {
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(
-        ["--dry-run", "--no-git-checks", fx.dir, "stray"],
-        process.cwd(),
-      );
+      const result = runCli(["--dry-run", "--no-git-checks", fx.dir, "stray"], process.cwd());
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("Unexpected positional arguments");
     } finally {
@@ -136,16 +119,10 @@ describe("publish-clean", () => {
       { "index.js": "export const ok = true;\n" },
     );
     try {
-      const result = runCli(
-        ["--dry-run", "--no-git-checks", fx.dir],
-        process.cwd(),
-      );
+      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       const pkg = JSON.parse(
-        await readFile(
-          path.join(extractedPath(result.stdout), "package.json"),
-          "utf8",
-        ),
+        await readFile(path.join(extractedPath(result.stdout), "package.json"), "utf8"),
       ) as Record<string, unknown>;
       expect(pkg.devDependencies).toBeUndefined();
       expect(pkg.scripts).toEqual({ postinstall: "node index.js" });
@@ -161,10 +138,7 @@ describe("publish-clean", () => {
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(
-        ["--dry-run", "--no-git-checks", "--", "--tag", "next"],
-        fx.dir,
-      );
+      const result = runCli(["--dry-run", "--no-git-checks", "--", "--tag", "next"], fx.dir);
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       expect(result.stdout).toContain("[dry-run] Extracted package at:");
       await cleanupExtracted(result.stdout);
@@ -179,10 +153,7 @@ describe("publish-clean", () => {
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(
-        ["--dry-run", "--no-git-checks", fx.dir],
-        process.cwd(),
-      );
+      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       expect(finalTarballPath(result.stdout)).toMatch(/\.tgz$/);
       await cleanupExtracted(result.stdout);
@@ -203,10 +174,7 @@ describe("publish-clean", () => {
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(
-        ["--dry-run", "--no-git-checks", fx.dir],
-        process.cwd(),
-      );
+      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       const pkg = JSON.parse(
         readTarballFile(finalTarballPath(result.stdout), "package.json"),
@@ -225,11 +193,9 @@ describe("publish-clean", () => {
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(
-        ["--dry-run", "--no-git-checks", fx.dir],
-        process.cwd(),
-        { NPM_CONFIG_JSON: "true" },
-      );
+      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd(), {
+        NPM_CONFIG_JSON: "true",
+      });
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       expect(finalTarballPath(result.stdout)).toMatch(/\.tgz$/);
       await cleanupExtracted(result.stdout);
@@ -267,15 +233,7 @@ exit 1
 `,
       );
       const result = runCli(
-        [
-          "--no-git-checks",
-          fx.dir,
-          "--",
-          "--access",
-          "public",
-          "--tag",
-          "latest",
-        ],
+        ["--no-git-checks", fx.dir, "--", "--access", "public", "--tag", "latest"],
         process.cwd(),
         { PATH: `${bin}:${process.env.PATH ?? ""}`, REAL_NPM: realNpm },
       );
@@ -305,11 +263,9 @@ echo "unexpected npm $*" >&2
 exit 1
 `,
       );
-      const result = runCli(
-        ["--no-git-checks", fx.dir, "--", "--provenance"],
-        process.cwd(),
-        { PATH: `${bin}:${process.env.PATH ?? ""}` },
-      );
+      const result = runCli(["--no-git-checks", fx.dir, "--", "--provenance"], process.cwd(), {
+        PATH: `${bin}:${process.env.PATH ?? ""}`,
+      });
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("requires npm 11.5.1");
     } finally {
@@ -377,16 +333,12 @@ echo "unexpected npm $*" >&2
 exit 1
 `,
       );
-      const result = runCli(
-        ["--no-git-checks", fx.dir, "--", "--provenance"],
-        process.cwd(),
-        {
-          PATH: `${bin}:${process.env.PATH ?? ""}`,
-          REAL_NPM: realNpm,
-          GITHUB_ACTIONS: "true",
-          GITHUB_REPOSITORY: "Anizoptera/publish-clean",
-        },
-      );
+      const result = runCli(["--no-git-checks", fx.dir, "--", "--provenance"], process.cwd(), {
+        PATH: `${bin}:${process.env.PATH ?? ""}`,
+        REAL_NPM: realNpm,
+        GITHUB_ACTIONS: "true",
+        GITHUB_REPOSITORY: "Anizoptera/publish-clean",
+      });
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("repository.url must match");
     } finally {
@@ -400,10 +352,7 @@ exit 1
     await mkdir(dir, { recursive: true });
     await writeFile(path.join(dir, "package.json"), "{\n");
     try {
-      const result = runCli(
-        ["--dry-run", "--no-git-checks", dir],
-        process.cwd(),
-      );
+      const result = runCli(["--dry-run", "--no-git-checks", dir], process.cwd());
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain(path.join(dir, "package.json"));
     } finally {
@@ -417,10 +366,7 @@ exit 1
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(
-        ["--dry-run", "--no-git-checks", fx.dir],
-        process.cwd(),
-      );
+      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("ERR_PNPM_INVALID_PACKAGE_NAME");
     } finally {
@@ -491,9 +437,7 @@ exit 1
         { TMPDIR: temp },
       );
       expect(result.status).not.toBe(0);
-      const leftovers = (await readdir(temp)).filter((name) =>
-        name.startsWith("publish-clean-"),
-      );
+      const leftovers = (await readdir(temp)).filter((name) => name.startsWith("publish-clean-"));
       expect(leftovers).toEqual([]);
       expect(result.stdout).not.toContain("Final tarball");
     } finally {
@@ -509,16 +453,12 @@ exit 1
     );
     const temp = await mkdtemp(path.join(tmpdir(), "publish-clean-tmp-"));
     try {
-      const result = runCli(
-        ["--guard-only", "--no-git-checks", fx.dir],
-        process.cwd(),
-        { TMPDIR: temp },
-      );
+      const result = runCli(["--guard-only", "--no-git-checks", fx.dir], process.cwd(), {
+        TMPDIR: temp,
+      });
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       expect(result.stdout).not.toContain("[dry-run]");
-      const leftovers = (await readdir(temp)).filter((name) =>
-        name.startsWith("publish-clean-"),
-      );
+      const leftovers = (await readdir(temp)).filter((name) => name.startsWith("publish-clean-"));
       expect(leftovers).toEqual([]);
     } finally {
       await cleanup(fx.root);
@@ -552,14 +492,9 @@ exit 1
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(
-        ["--dry-run", "--no-git-checks", fx.dir],
-        process.cwd(),
-      );
+      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
       expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain(
-        "unresolved monorepo-only dependency specs",
-      );
+      expect(result.stderr).toContain("unresolved monorepo-only dependency specs");
       expect(result.stderr).toContain("uses pnpm pack intentionally");
     } finally {
       await cleanup(fx.root);
@@ -578,10 +513,7 @@ exit 1
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(
-        ["--dry-run", "--no-git-checks", fx.dir],
-        process.cwd(),
-      );
+      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("publish-clean.devFields");
       expect(result.stderr).toContain("dependencies");
@@ -603,10 +535,7 @@ exit 1
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(
-        ["--dry-run", "--no-git-checks", fx.dir],
-        process.cwd(),
-      );
+      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("missing.js");
       expect(result.stderr).toContain("bin/missing.js");
@@ -627,14 +556,9 @@ exit 1
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(
-        ["--dry-run", "--no-git-checks", fx.dir],
-        process.cwd(),
-      );
+      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
       expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain(
-        "Manifest declares invalid package paths",
-      );
+      expect(result.stderr).toContain("Manifest declares invalid package paths");
       expect(result.stderr).toContain("../fixture-path-traversal-1.0.0.tgz");
     } finally {
       await cleanup(fx.root);
@@ -647,13 +571,9 @@ exit 1
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(
-        ["--dry-run", "--no-git-checks", fx.dir],
-        process.cwd(),
-        {
-          npm_config_user_agent: "npm/11.0.0 node/v24",
-        },
-      );
+      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd(), {
+        npm_config_user_agent: "npm/11.0.0 node/v24",
+      });
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       expect(result.stderr).toContain("uses pnpm pack intentionally");
       expect(result.stderr).toContain("npm/11.0.0");

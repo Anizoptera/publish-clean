@@ -42,13 +42,7 @@ const DEV_FIELDS = new Set([
   "turbo",
 ]);
 
-const CONSUMER_SCRIPTS = new Set([
-  "preinstall",
-  "install",
-  "postinstall",
-  "prepare",
-  "uninstall",
-]);
+const CONSUMER_SCRIPTS = new Set(["preinstall", "install", "postinstall", "prepare", "uninstall"]);
 const DEP_FIELDS = [
   "dependencies",
   "devDependencies",
@@ -123,8 +117,7 @@ function readJson(file: string): JsonObject {
       cause,
     });
   }
-  if (!isObject(parsed))
-    throw new PublishCleanError(`${file} must contain a JSON object.`);
+  if (!isObject(parsed)) throw new PublishCleanError(`${file} must contain a JSON object.`);
   return parsed;
 }
 
@@ -158,8 +151,7 @@ function outputFromError(error: unknown, key: "stderr" | "stdout"): string {
   if (!isObject(error)) return "";
   const output = error[key];
   if (typeof output === "string") return output.trim();
-  if (output instanceof Uint8Array)
-    return Buffer.from(output).toString("utf8").trim();
+  if (output instanceof Uint8Array) return Buffer.from(output).toString("utf8").trim();
   return "";
 }
 
@@ -167,10 +159,7 @@ function requireTool(name: string): void {
   try {
     execFileSync(name, ["--version"], { stdio: "ignore" });
   } catch (cause) {
-    throw new PublishCleanError(
-      `Required tool "${name}" is not available in PATH.`,
-      { cause },
-    );
+    throw new PublishCleanError(`Required tool "${name}" is not available in PATH.`, { cause });
   }
 }
 
@@ -193,23 +182,16 @@ function isAtLeast(
   return true;
 }
 
-function wantsTrustedPublish(
-  pkg: JsonObject,
-  publishArgs: readonly string[],
-): boolean {
+function wantsTrustedPublish(pkg: JsonObject, publishArgs: readonly string[]): boolean {
   if (publishArgs.includes("--provenance")) return true;
-  if (isObject(pkg.publishConfig) && pkg.publishConfig.provenance === true)
-    return true;
+  if (isObject(pkg.publishConfig) && pkg.publishConfig.provenance === true) return true;
   return (
     process.env.GITHUB_ACTIONS === "true" &&
     typeof process.env.ACTIONS_ID_TOKEN_REQUEST_URL === "string"
   );
 }
 
-function assertTrustedPublishingRuntime(
-  pkg: JsonObject,
-  publishArgs: readonly string[],
-): void {
+function assertTrustedPublishingRuntime(pkg: JsonObject, publishArgs: readonly string[]): void {
   if (!wantsTrustedPublish(pkg, publishArgs)) return;
   const actual = npmVersion();
   if (!isAtLeast(actual, MIN_TRUSTED_NPM_VERSION))
@@ -227,23 +209,14 @@ function assertTrustedPublishingRuntime(
 function warnIfNonPnpmLifecycle(): void {
   const userAgent = process.env.npm_config_user_agent;
   if (!userAgent || userAgent.startsWith("pnpm/")) return;
-  console.warn(
-    `${PUBLISH_ADVISORY} Detected lifecycle user agent: ${userAgent}`,
-  );
+  console.warn(`${PUBLISH_ADVISORY} Detected lifecycle user agent: ${userAgent}`);
 }
 
 function assertCleanGit(packageDir: string, skip: boolean): void {
   if (skip) return;
   try {
-    const output = run(
-      "git",
-      ["status", "--porcelain", "--", "."],
-      packageDir,
-    ).trim();
-    if (output)
-      throw new PublishCleanError(
-        `Source package has uncommitted changes:\n${output}`,
-      );
+    const output = run("git", ["status", "--porcelain", "--", "."], packageDir).trim();
+    if (output) throw new PublishCleanError(`Source package has uncommitted changes:\n${output}`);
   } catch (error) {
     if (error instanceof PublishCleanError) throw error;
     throw new PublishCleanError("Unable to verify source git status.", {
@@ -254,15 +227,12 @@ function assertCleanGit(packageDir: string, skip: boolean): void {
 
 function assertPublicPackage(pkg: JsonObject): void {
   if (pkg.private === true)
-    throw new PublishCleanError(
-      "Refusing to publish a package with private: true.",
-    );
+    throw new PublishCleanError("Refusing to publish a package with private: true.");
 }
 
 function repositoryUrl(pkg: JsonObject): null | string {
   if (typeof pkg.repository === "string") return pkg.repository;
-  if (isObject(pkg.repository) && typeof pkg.repository.url === "string")
-    return pkg.repository.url;
+  if (isObject(pkg.repository) && typeof pkg.repository.url === "string") return pkg.repository.url;
   return null;
 }
 
@@ -282,15 +252,9 @@ function githubRepositorySlug(url: string): null | string {
   }
 }
 
-function assertRepositoryForTrustedPublish(
-  pkg: JsonObject,
-  publishArgs: readonly string[],
-): void {
+function assertRepositoryForTrustedPublish(pkg: JsonObject, publishArgs: readonly string[]): void {
   if (!wantsTrustedPublish(pkg, publishArgs)) return;
-  if (
-    process.env.GITHUB_ACTIONS !== "true" ||
-    typeof process.env.GITHUB_REPOSITORY !== "string"
-  )
+  if (process.env.GITHUB_ACTIONS !== "true" || typeof process.env.GITHUB_REPOSITORY !== "string")
     return;
   const repoUrl = repositoryUrl(pkg);
   if (!repoUrl)
@@ -304,20 +268,15 @@ function assertRepositoryForTrustedPublish(
     );
 }
 
-function stripManifest(
-  pkg: JsonObject,
-  extraDevFields: readonly string[],
-): JsonObject {
+function stripManifest(pkg: JsonObject, extraDevFields: readonly string[]): JsonObject {
   const stripped: JsonObject = { ...pkg };
-  for (const field of [...DEV_FIELDS, ...extraDevFields])
-    delete stripped[field];
+  for (const field of [...DEV_FIELDS, ...extraDevFields]) delete stripped[field];
 
   const scripts = isObject(pkg.scripts) ? pkg.scripts : null;
   if (scripts) {
     const kept: JsonObject = {};
     for (const [name, value] of Object.entries(scripts)) {
-      if (CONSUMER_SCRIPTS.has(name) && typeof value === "string")
-        kept[name] = value;
+      if (CONSUMER_SCRIPTS.has(name) && typeof value === "string") kept[name] = value;
     }
     if (Object.keys(kept).length > 0) stripped.scripts = kept;
     else delete stripped.scripts;
@@ -340,10 +299,7 @@ function assertNoMonorepoProtocols(pkg: JsonObject): void {
   const pnpm = pkg.pnpm;
   if (isObject(pnpm) && isObject(pnpm.overrides)) {
     for (const [name, spec] of Object.entries(pnpm.overrides)) {
-      if (
-        typeof spec === "string" &&
-        MONOREPO_PROTOCOLS.some((prefix) => spec.includes(prefix))
-      )
+      if (typeof spec === "string" && MONOREPO_PROTOCOLS.some((prefix) => spec.includes(prefix)))
         failures.push(`pnpm.overrides.${name}: ${spec}`);
     }
   }
@@ -357,9 +313,7 @@ function assertNoMonorepoProtocols(pkg: JsonObject): void {
 
 function customDevFields(config: JsonObject): string[] {
   if (!Array.isArray(config.devFields)) return [];
-  const fields = config.devFields.filter(
-    (field): field is string => typeof field === "string",
-  );
+  const fields = config.devFields.filter((field): field is string => typeof field === "string");
   const unsafe = fields.filter((field) => RUNTIME_MANIFEST_FIELDS.has(field));
   if (unsafe.length > 0)
     throw new PublishCleanError(
@@ -368,11 +322,7 @@ function customDevFields(config: JsonObject): string[] {
   return fields;
 }
 
-async function walkFiles(
-  dir: string,
-  root: string,
-  files: string[],
-): Promise<void> {
+async function walkFiles(dir: string, root: string, files: string[]): Promise<void> {
   const entries = await readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
     const absolute = path.join(dir, entry.name);
@@ -388,32 +338,21 @@ async function walkFiles(
 function assertFilesField(pkg: JsonObject, skip: boolean): void {
   if (skip) return;
   if (!Array.isArray(pkg.files) || pkg.files.length === 0) {
-    throw new PublishCleanError(
-      'Package manifest must define a non-empty "files" array.',
-    );
+    throw new PublishCleanError('Package manifest must define a non-empty "files" array.');
   }
 }
 
-function validatePackedFiles(
-  files: readonly string[],
-  skipSuspicious: boolean,
-): void {
-  const critical = files.filter((file) =>
-    CRITICAL_PATTERNS.some((pattern) => pattern.test(file)),
-  );
+function validatePackedFiles(files: readonly string[], skipSuspicious: boolean): void {
+  const critical = files.filter((file) => CRITICAL_PATTERNS.some((pattern) => pattern.test(file)));
   if (critical.length > 0)
-    throw new PublishCleanError(
-      `Critical files must not be published:\n${critical.join("\n")}`,
-    );
+    throw new PublishCleanError(`Critical files must not be published:\n${critical.join("\n")}`);
   if (skipSuspicious) return;
 
   const suspicious = files.filter((file) =>
     SUSPICIOUS_PATTERNS.some((pattern) => pattern.test(file)),
   );
   if (suspicious.length > 0)
-    throw new PublishCleanError(
-      `Suspicious files in package artifact:\n${suspicious.join("\n")}`,
-    );
+    throw new PublishCleanError(`Suspicious files in package artifact:\n${suspicious.join("\n")}`);
 }
 
 function listTarballFiles(tarball: string, cwd: string): string[] {
@@ -427,26 +366,15 @@ function listTarballFiles(tarball: string, cwd: string): string[] {
     .sort();
 }
 
-function readTarballJson(
-  tarball: string,
-  file: string,
-  cwd: string,
-): JsonObject {
+function readTarballJson(tarball: string, file: string, cwd: string): JsonObject {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(
-      run("tar", ["xOzf", tarball, `package/${file}`], cwd),
-    ) as unknown;
+    parsed = JSON.parse(run("tar", ["xOzf", tarball, `package/${file}`], cwd)) as unknown;
   } catch (cause) {
-    throw new PublishCleanError(
-      `Unable to read JSON from final npm tarball: ${file}`,
-      { cause },
-    );
+    throw new PublishCleanError(`Unable to read JSON from final npm tarball: ${file}`, { cause });
   }
   if (!isObject(parsed))
-    throw new PublishCleanError(
-      `Final npm tarball ${file} must contain a JSON object.`,
-    );
+    throw new PublishCleanError(`Final npm tarball ${file} must contain a JSON object.`);
   return parsed;
 }
 
@@ -460,9 +388,7 @@ function npmPackTarballPath(output: string, packRoot: string): string {
     });
   }
   if (!Array.isArray(parsed) || parsed.length !== 1 || !isObject(parsed[0]))
-    throw new PublishCleanError(
-      "npm pack --json did not describe one tarball.",
-    );
+    throw new PublishCleanError("npm pack --json did not describe one tarball.");
   const filename = parsed[0].filename;
   if (typeof filename !== "string" || filename.length === 0)
     throw new PublishCleanError("npm pack --json did not report a filename.");
@@ -490,9 +416,7 @@ function assertFinalTarballIncludesCleanedFiles(
   cleanedFiles: readonly string[],
   finalFiles: readonly string[],
 ): void {
-  const missing = cleanedFiles
-    .filter((file) => !finalFiles.includes(file))
-    .sort();
+  const missing = cleanedFiles.filter((file) => !finalFiles.includes(file)).sort();
   if (missing.length === 0) return;
   throw new PublishCleanError(
     `Final npm tarball dropped files from the cleaned package:\n${missing.join("\n")}`,
@@ -524,16 +448,14 @@ function collectRelativeDeclaredPaths(value: unknown, out: string[]): void {
     return;
   }
   if (!isObject(value)) return;
-  for (const item of Object.values(value))
-    collectRelativeDeclaredPaths(item, out);
+  for (const item of Object.values(value)) collectRelativeDeclaredPaths(item, out);
 }
 
 function normalizeDeclaredPath(declared: string): null | string {
   const withoutDot = declared.startsWith("./") ? declared.slice(2) : declared;
   if (!withoutDot || path.posix.isAbsolute(withoutDot)) return null;
   const normalized = path.posix.normalize(withoutDot);
-  if (normalized === "." || normalized === ".." || normalized.startsWith("../"))
-    return null;
+  if (normalized === "." || normalized === ".." || normalized.startsWith("../")) return null;
   return normalized;
 }
 
@@ -601,14 +523,11 @@ async function packAndClean(
 
   const sourcePkgPath = path.join(packageDir, "package.json");
   const sourcePkg = readJson(sourcePkgPath);
-  if (!opts.guardOnly && !opts.dryRun)
-    assertTrustedPublishingRuntime(sourcePkg, opts.publishArgs);
+  if (!opts.guardOnly && !opts.dryRun) assertTrustedPublishingRuntime(sourcePkg, opts.publishArgs);
   const config = packageConfig(sourcePkg);
   const skipFileCheck = opts.skipFileCheck || config.skipFileCheck === true;
   const noGitChecks = opts.noGitChecks || config.noGitChecks === true;
-  const registry =
-    opts.registry ??
-    (typeof config.registry === "string" ? config.registry : null);
+  const registry = opts.registry ?? (typeof config.registry === "string" ? config.registry : null);
   const extraDevFields = customDevFields(config);
 
   assertPublicPackage(sourcePkg);
@@ -618,20 +537,14 @@ async function packAndClean(
   const root = await mkdtemp(path.join(tmpdir(), "publish-clean-"));
   let keepRoot = false;
   try {
-    const packedOutput = run(
-      "pnpm",
-      ["pack", "--json", "--pack-destination", root],
-      packageDir,
-    );
+    const packedOutput = run("pnpm", ["pack", "--json", "--pack-destination", root], packageDir);
     const tarball = pnpmPackTarballPath(packedOutput, root);
     run("tar", ["xzf", tarball, "-C", root], packageDir);
 
     const extracted = path.join(root, "package");
     const extractedStat = await stat(extracted);
     if (!extractedStat.isDirectory())
-      throw new PublishCleanError(
-        "Extracted tarball did not contain package/ directory.",
-      );
+      throw new PublishCleanError("Extracted tarball did not contain package/ directory.");
 
     const files: string[] = [];
     await walkFiles(extracted, extracted, files);
@@ -656,13 +569,7 @@ async function packAndClean(
     await mkdir(finalPackRoot);
     const npmPackOutput = run(
       "npm",
-      [
-        "pack",
-        "--json",
-        "--ignore-scripts",
-        "--pack-destination",
-        finalPackRoot,
-      ],
+      ["pack", "--json", "--ignore-scripts", "--pack-destination", finalPackRoot],
       extracted,
     );
     const finalTarball = npmPackTarballPath(npmPackOutput, finalPackRoot);
@@ -672,9 +579,7 @@ async function packAndClean(
     const finalPkg = readTarballJson(finalTarball, "package.json", extracted);
     assertNoMonorepoProtocols(finalPkg);
     if (stableJson(finalPkg) !== stableJson(cleanedPkg))
-      throw new PublishCleanError(
-        "Final npm tarball manifest differs from the cleaned manifest.",
-      );
+      throw new PublishCleanError("Final npm tarball manifest differs from the cleaned manifest.");
 
     if (opts.guardOnly || opts.dryRun) {
       if (!opts.dryRun) return;
@@ -730,10 +635,7 @@ async function main(): Promise<void> {
     guardOnly: parsed.values["guard-only"] === true,
     noGitChecks: parsed.values["no-git-checks"] === true,
     publishArgs,
-    registry:
-      typeof parsed.values.registry === "string"
-        ? parsed.values.registry
-        : null,
+    registry: typeof parsed.values.registry === "string" ? parsed.values.registry : null,
     skipFileCheck: parsed.values["skip-file-check"] === true,
   });
 }
