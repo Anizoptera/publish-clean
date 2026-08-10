@@ -30,19 +30,8 @@ never modified. If the artifact still has something in it that should not ship, 
 declares a `main`, `exports`, or `bin` path that is not in the tarball, it fails instead
 of publishing.
 
-## Why pnpm packs and npm publishes
-
-Neither tool does the whole job, so this one uses each for the half it is good at.
-
-`pnpm pack` decides what the package contains. It is the packer that turns `workspace:`
-and `catalog:` specs into real version ranges. Other packers and hand-written cleanup
-scripts do not.
-
-`npm publish` uploads it, because provenance and trusted publishing are npm's own
-feature and work best on npm's own path.
-
-Between those two steps sits the packed manifest, which still holds everything a
-maintainer needs and a consumer does not. That is what this tool cleans.
+It uses pnpm to pack and npm to publish, and cleans the manifest in between. The
+reasoning behind that is in [Why it works this way](#why-it-works-this-way).
 
 ## Install
 
@@ -196,23 +185,65 @@ flowchart TD
   H --> I[npm publish tarball 2]
 ```
 
-Any gate that fails exits non-zero and nothing is published. All of it happens on a copy
-in a temp directory, so your repository is never modified.
+Any gate that fails exits non-zero and nothing is published. `--dry-run` and
+`--guard-only` run the whole pipeline and stop before the publish.
 
-Two things about that diagram matter more than the rest.
+## Why it works this way
 
-The file set in tarball 1 is whatever `pnpm pack` would ship. This tool has no file
-selection rules of its own, so `files`, `.npmignore`, packlist defaults and
-`workspace:`/`catalog:` resolution all work exactly as your package manager defines them.
-It cannot disagree with the tool that actually builds your package, because it is that
-tool.
+Four decisions shape the tool. Each one is the answer to a question worth asking.
 
-Tarball 2 is checked again after cleaning. Nothing that was in the cleaned directory may
-be missing from it, the manifest inside it has to match the one that was written, and the
-leak scan runs a second time. If cleaning ever dropped a real file, you find out here
-instead of from a bug report.
+### Why pnpm does the packing
 
-`--dry-run` and `--guard-only` run the whole pipeline and stop before the publish.
+For a single package, every package manager produces much the same tarball. In a
+workspace they do not. A dependency written as `"@acme/utils": "workspace:*"` means
+"whatever version of that package is in this repo right now", and something has to turn
+it into a real version range before the package ships. To a stranger installing from the
+registry, `workspace:*` means nothing, and the install fails.
+
+pnpm knows the answer because pnpm built the workspace. `pnpm pack` resolves those specs,
+and `catalog:` entries with them. `npm pack` copies them out as they are.
+
+So packing with pnpm is not a preference. On every other input it does what the
+alternatives do; on this one input it is the only one that is right. Doing it always,
+rather than only inside workspaces, means there is one file-selection behaviour to reason
+about instead of a different one per project layout. This tool adds no file selection
+rules of its own, so `files`, `.npmignore` and packlist defaults behave exactly as your
+package manager already defines them. It cannot disagree with the tool that builds your
+package, because it is that tool.
+
+### Why the manifest is cleaned on a copy
+
+The tarball is extracted into a temporary directory and the rewrite happens there. Your
+working tree is never touched.
+
+The obvious alternative is what many hand-written release scripts do: edit
+`package.json`, publish, edit it back. That works until something goes wrong in the
+middle, and then your repository is left holding a manifest nobody meant to keep. It is
+also unsafe to run twice at once. Cleaning a copy has neither problem, and it costs a
+directory in `/tmp`.
+
+### Why npm packs the cleaned copy a second time
+
+Handing npm a directory and handing npm a tarball are not the same act. Given a
+directory, npm packs it as part of the upload, so the bytes that reach the registry come
+into existence after the last check has run.
+
+Packing first means those bytes exist before anything is uploaded. They can be listed,
+compared against the cleaned directory, scanned for leaks a second time, kept with
+`--tarball-out` for a build attestation, and then published as themselves. What you
+inspect is what ships. If cleaning ever dropped a real file, you find out here rather
+than from a bug report.
+
+That second pack runs with `--ignore-scripts`. The first one does not, on purpose:
+`pnpm pack` runs your `prepare` and `prepack` scripts, which is how your build output
+gets into the package at all. Running them again on the cleaned copy could only change it
+after it was checked.
+
+### Why npm does the publishing
+
+Provenance, trusted publishing and the registry signature are npm's own features, and
+they work on npm's own path. `npm publish` also takes a tarball directly, which is
+exactly what the previous step produced.
 
 ## What it checks
 
