@@ -237,7 +237,33 @@ Run `bun install` and try again.
 That message is accurate and useless, because in a pnpm repo `bun install` is not
 something you want to be told to run. A tool that executes in other people's
 repositories has to cope with the repository it finds, so it packs with the one that
-reads all of them. If this tool only ever ran here, Bun would do.
+reads all of them.
+
+There's a correctness gap too, and it's the quiet kind. An aliased workspace dependency,
+`"utils": "workspace:@acme/utils@*"`, has to come out the other side as an npm alias.
+pnpm writes `"npm:@acme/utils@1.2.3"`. Bun 1.3.14 writes `"@acme/utils@*"`: the `npm:`
+prefix is dropped and the range was never resolved. npm won't take it.
+
+```
+npm error code EINVALIDTAGNAME
+npm error Invalid tag name "is-odd@3.0.1" of package "aliased@is-odd@3.0.1"
+```
+
+`bun pm pack` exits 0 either way, so nothing tells you until someone tries to install the
+release.
+
+One silent way to publish a broken manifest is one too many for the step you can't take
+back.
+
+pnpm also applies `publishConfig` field overrides. If your manifest points `main`, `types`
+and `exports` at source for local development and overrides them to `dist` for publishing,
+pnpm swaps them on the way out and drops `publishConfig` itself. npm and Bun both ignore
+those overrides and publish the development paths. That one is a pnpm extension rather
+than a bug in the other two, but the effect on the release is the same.
+
+Everything else we compared came out identical: file modes including the executable bit on
+`bin`, negated `files` patterns, dropped symlinks, prerelease versions, pinned
+`workspace:1.2.3` ranges, named catalogs, and refusing a catalog entry that doesn't exist.
 
 ### Why the manifest is cleaned on a copy
 
@@ -402,6 +428,19 @@ It also doesn't check that your entry points resolve correctly for consumers, wh
 what `publint` and `@arethetypeswrong/cli` are for.
 
 Pick a release manager and a validator to go with it. The next section covers which.
+
+It can't publish a package that uses `bundleDependencies`. pnpm links dependencies rather
+than copying them, so it has nothing to bundle and refuses:
+
+```
+Add "nodeLinker: hoisted" to pnpm-workspace.yaml or delete bundleDependencies
+```
+
+Doing what it says makes the package publishable again. This is the one thing you give up
+by packing with pnpm, and it's a fair trade: `bundleDependencies` is rare, and the failure
+is loud and tells you the fix. npm and Bun bundle correctly for a standalone package, and
+neither bundles anything for a package inside a workspace, because the dependency hoists
+to the workspace root where the package can't see it.
 
 ## How it compares
 
