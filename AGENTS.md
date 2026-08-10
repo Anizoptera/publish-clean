@@ -14,4 +14,10 @@
 - Use `--provenance` for public npmjs.com releases; trusted publishing requires Node.js 22.14.0+ and npm 11.5.1+.
 - The primary pre-publish self-application check is the freshly built `dist/cli.js` against its cleaned artifact.
 - After npm publication, registry-install smoke checks may update this repo to the published package and regenerate the lockfile, but they do not replace the built-current CLI gate.
+- A change anyone outside this repository can observe MUST be committed as `fix` or `feat`, never as
+  `refactor`, `chore` or `style`, however internal the edit looks. release-please cuts a release from
+  `feat` and `fix` alone, so a user-visible change under any other type ships in whatever release happens
+  next, with no version of its own and no changelog line. `changelog-sections` in
+  `release-please-config.json` makes a mistyped commit visible rather than silent; it does not make the
+  release happen.
 - Run `bun run check` before committing.
