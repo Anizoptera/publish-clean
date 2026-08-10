@@ -232,16 +232,12 @@ const SUSPICIOUS_PATTERNS = [
 
 /**
  * Shown when another package manager started this tool, so the pnpm requirement is not a
- * surprise. Deliberately states which packer is used and why, because the alternative a
- * reader reaches for depends on which one they came from.
+ * surprise. It names the packer and the consequence for the reader's own layout, rather
+ * than claiming the alternatives are broken, because what a reader needs to do next
+ * depends on which package manager they came from.
  *
- * Measured against pnpm 11.21, bun 1.3.14, npm 11.19 and yarn 4.18: npm never adopted the
- * `workspace:` protocol and packs it verbatim while exiting 0, which is the failure that
- * reaches consumers. bun resolves it, but only for workspaces bun itself installed,
- * because it reads `bun.lock`. pnpm instead looks for the dependency in the packing
- * package's own `node_modules`, so it also handles a Bun workspace, which gives each
- * package its own. Yarn hoists to the workspace root and so needs a `pnpm-workspace.yaml`
- * and one `pnpm install` first. File selection is identical across all of them.
+ * The measured comparison behind the choice of packer, and the standing rule against
+ * swapping it, live in this repository's AGENTS.md.
  */
 const PUBLISH_ADVISORY =
   "publish-clean packs with pnpm: it resolves workspace: and catalog: specs from the packing package's own node_modules, so a Bun workspace works as-is and a Yarn one needs a pnpm-workspace.yaml plus one pnpm install. npm packs those specs unresolved.";
