@@ -4,9 +4,9 @@ Report a vulnerability through GitHub private vulnerability reporting:
 
 https://github.com/Anizoptera/publish-clean/security/advisories/new
 
-Do not open a public issue for anything unpatched, and keep secrets and working exploit
-details out of public threads. If private reporting is not available to you, open an
-issue asking for a private contact path and leave the details out of it.
+Private reporting is enabled on this repository, so use it. Do not open a public issue
+for anything unpatched, and keep secrets and working exploit details out of public
+threads.
 
 Security fixes go to the latest released version. Older versions are not patched.
 

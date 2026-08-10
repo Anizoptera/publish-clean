@@ -54,23 +54,20 @@
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "test": "bun run build && bun run test:built",
-    "test:built": "vitest run  && bun test test/*.bun.test.ts",
+    "test:built": "vitest run && bun test test/*.bun.test.ts",
     "tracked-artifacts:check": "test -z \"$(git ls-files dist)\"",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
-    "@arethetypeswrong/cli": "^0.18.2",
+    "@arethetypeswrong/cli": "^0.18.5",
     "@types/bun": "^1.3.14",
-    "@types/node": "^25.9.1",
+    "@types/node": "^25.9.5",
     "oxfmt": "^0.63.0",
-    "publint": "^0.3.21",
-    "tsdown": "^0.22.0",
+    "publint": "^0.3.23",
+    "tsdown": "^0.22.14",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.10"
   },
-  "browserslist": [
-    "node >= 24"
-  ],
   "engines": {
     "node": ">=20"
   }

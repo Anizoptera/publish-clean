@@ -221,6 +221,9 @@ publish-clean [options] [package-dir] [-- npm-publish-args]
 - `--skip-file-check`: skip suspicious-file checks and the required `files`
   array check. Critical leak checks still run.
 - `--no-git-checks`: skip the source git cleanliness check.
+- `--tarball-out DIR`: copy the final tarball into `DIR` before publishing. The bytes
+  kept are the ones that were published, so a release pipeline can attach them to a
+  GitHub Release or sign them with build-provenance attestation.
 - `-h`, `--help`: print usage.
 
 Arguments after `--` go to `npm publish`, which publishes the final cleaned
