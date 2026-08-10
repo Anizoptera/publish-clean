@@ -7,6 +7,9 @@
 - Do not add package-manager-specific behavior unless tests prove the published tarball invariant.
 - Split CLI args at `--` before parsing; everything after it belongs to `npm publish`.
 - Keep npm publication in `.github/workflows/release.yml`; npm trusted publishing is keyed by workflow filename.
+- The publish job holds the npm credential and the OIDC identity, so it only builds, publishes, attests, and attaches. Never run `bun run check` there: Check already ran it on the same commit without credentials, and re-running it executes the test suite — which puts fake executables on `PATH` and runs fixture lifecycle scripts — beside a live token. It also behaves differently, because `id-token: write` defines `ACTIONS_ID_TOKEN_REQUEST_URL` and the CLI treats that as a trusted-publish context.
+- Every release step must survive a re-run, because a run that publishes and then fails is otherwise unrepairable. Only the npm publish refuses; skip it when the version is already on the registry and let the remaining steps run.
+- Generated files must not gate a release. `CHANGELOG.md` is release-please's output and is excluded from the formatter; styling it would fail the lane on every release commit.
 - Publish commands must pass `--tag latest` explicitly unless intentionally proving another npm dist-tag.
 - Use `--provenance` for public npmjs.com releases; trusted publishing requires Node.js 22.14.0+ and npm 11.5.1+.
 - The primary pre-publish self-application check is the freshly built `dist/cli.js` against its cleaned artifact.

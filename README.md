@@ -227,6 +227,43 @@ install credentials are separate from publish credentials.
 Trusted publishing authenticates the publish operation; it does not grant
 consumers access to private dependencies.
 
+## First publish of a new package
+
+Trusted publishing cannot be configured until the package exists on the
+registry: it attaches a publisher to a package record, and a name you have
+never published has no record. `npm trust` and staged publishing require an
+existing package for the same reason. So every package name has exactly one
+release that authenticates with a token, once, and never again.
+
+Do that release **from CI, not from a laptop**. npm only generates provenance
+on a supported cloud runner, so a hand-published first version stays unsigned
+for as long as it exists and cannot be fixed later.
+
+1. Create a granular access token scoped to your package or scope, with **read
+   and write** permission and the shortest available expiry. Enable the option
+   to **bypass 2FA for package publishing** — without it the publish reaches
+   the registry, mints its provenance, and is then rejected with `EOTP`,
+   asking for a one-time password no unattended build can answer.
+2. Store it as an Actions secret and pass it to the publish step as
+   `NODE_AUTH_TOKEN`. Keep `id-token: write` on the job: npm mints provenance
+   from the OIDC identity even when the token is what authenticates.
+3. Run the release. Verify with `npm audit signatures`, or read
+   `dist.attestations` from the version document
+   (`registry.npmjs.org/<name>/<version>`). Check the **version** document, not
+   the package-level one — if you probed the package while it did not exist,
+   the CDN may still be serving your own cached 404.
+4. Configure the trusted publisher on npmjs.com, naming the repository and the
+   **workflow filename** — npm keys the trust on that filename, so renaming the
+   workflow later breaks publishing. This step needs interactive 2FA; tokens
+   that bypass 2FA have been barred from package management since August 2026.
+5. Delete the Actions secret and revoke the token. Later releases authenticate
+   with the OIDC identity alone.
+
+npm is removing direct publishing from 2FA-bypassing tokens in January 2027.
+The documented replacement, staged publishing, also requires an existing
+package, so the bootstrap path after that date is an open question rather than
+a solved one.
+
 ## Related tools
 
 This package borrows the useful part of
