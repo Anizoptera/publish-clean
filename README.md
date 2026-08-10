@@ -50,6 +50,12 @@ maintainer needs and a consumer does not. That is what this tool cleans.
 pnpm add -D @anizoptera/publish-clean
 ```
 
+That installs one package and nothing else. `publish-clean` has zero runtime
+dependencies: it is a single file that talks to `pnpm`, `npm` and `tar` through the
+tools you already have. For something that sits on your publish path and handles your
+registry credentials, that matters. A publishing tool with a dependency tree is a
+supply-chain risk of its own, and this one has no transitive code to audit.
+
 Needs Node.js 20+, and `pnpm`, `npm` and `tar` on `PATH`.
 
 `--provenance` also needs Node.js 22.14+, npm 11.5.1+, and a cloud CI runner. npm will
