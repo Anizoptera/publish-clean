@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -503,6 +503,13 @@ async function packAndClean(
     publishArgs: readonly string[];
     registry: null | string;
     skipFileCheck: boolean;
+    /**
+     * Directory to copy the final tarball into before publishing, so callers can
+     * keep the exact published bytes. Everything else here lives in a temp tree
+     * that is removed on exit, which leaves a release pipeline with nothing to
+     * attach to a GitHub Release or hand to build-provenance attestation.
+     */
+    tarballOut: null | string;
   },
 ): Promise<void> {
   requireTool("pnpm");
@@ -566,6 +573,15 @@ async function packAndClean(
     if (stableJson(finalPkg) !== stableJson(cleanedPkg))
       throw new PublishCleanError("Final npm tarball manifest differs from the cleaned manifest.");
 
+    // Copied before publishing, and in every mode, so the retained bytes are exactly
+    // the validated artifact regardless of whether the publish itself succeeds.
+    if (opts.tarballOut !== null) {
+      await mkdir(opts.tarballOut, { recursive: true });
+      const kept = path.join(opts.tarballOut, path.basename(finalTarball));
+      await copyFile(finalTarball, kept);
+      console.log(`Final tarball kept at: ${kept}`);
+    }
+
     if (opts.guardOnly || opts.dryRun) {
       if (!opts.dryRun) return;
       keepRoot = true;
@@ -599,13 +615,14 @@ async function main(): Promise<void> {
       "no-git-checks": { type: "boolean", default: false },
       registry: { type: "string", default: undefined },
       "skip-file-check": { type: "boolean", default: false },
+      "tarball-out": { type: "string", default: undefined },
     },
     strict: true,
   });
 
   if (parsed.values.help) {
     console.log(
-      "publish-clean [--dry-run] [--guard-only] [--no-git-checks] [--registry URL] [--skip-file-check] [package-dir] [-- npm-publish-args]",
+      "publish-clean [--dry-run] [--guard-only] [--no-git-checks] [--registry URL] [--skip-file-check] [--tarball-out DIR] [package-dir] [-- npm-publish-args]",
     );
     return;
   }
@@ -622,6 +639,8 @@ async function main(): Promise<void> {
     publishArgs,
     registry: typeof parsed.values.registry === "string" ? parsed.values.registry : null,
     skipFileCheck: parsed.values["skip-file-check"] === true,
+    tarballOut:
+      typeof parsed.values["tarball-out"] === "string" ? parsed.values["tarball-out"] : null,
   });
 }
 

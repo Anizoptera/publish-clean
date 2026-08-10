@@ -187,6 +187,29 @@ describe("publish-clean", () => {
     }
   });
 
+  // A release pipeline must attach and attest the exact bytes that reach the registry,
+  // so the retained copy has to be byte-identical to the tarball the CLI publishes —
+  // not a re-pack, which would differ and make any attestation a lie.
+  it("keeps a byte-identical copy of the published tarball", async () => {
+    const fx = await fixture(
+      { name: "fixture-tarball-out", version: "1.0.0", files: ["index.js"] },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    const out = path.join(fx.root, "artifacts");
+    try {
+      const result = runCli(
+        ["--dry-run", "--no-git-checks", "--tarball-out", out, fx.dir],
+        process.cwd(),
+      );
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      const kept = path.join(out, path.basename(finalTarballPath(result.stdout)));
+      expect(await readFile(kept)).toEqual(await readFile(finalTarballPath(result.stdout)));
+      await cleanupExtracted(result.stdout);
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
+
   // `pack` runs the package's `prepare`/`prepack` scripts and forwards their stdout.
   // Build tools log there as a matter of course, so a foreign package's own build
   // chatter must never be mistaken for packer output.

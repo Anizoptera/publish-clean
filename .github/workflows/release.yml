@@ -21,6 +21,7 @@ jobs:
       pull-requests: write
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
@@ -33,8 +34,9 @@ jobs:
     if: ${{ always() && (github.event_name == 'workflow_dispatch' || needs.release-please.outputs.release_created == 'true') }}
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      id-token: write
+      contents: write # attach the published tarball to the GitHub Release
+      id-token: write # OIDC: npm provenance and build-provenance attestation
+      attestations: write # GitHub's own attestation store
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -51,4 +53,29 @@ jobs:
           node-version: "24"
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
+      # NODE_AUTH_TOKEN is the one-shot bootstrap only: npm cannot attach a trusted
+      # publisher to a package that does not exist yet, and provenance cannot be
+      # produced outside CI, so the first publish runs on a short-lived granular
+      # token. Once the package exists, the trusted publisher is bound to this
+      # workflow filename and the secret is deleted — OIDC then authenticates and
+      # mints provenance with no credential at all. npm is also removing direct
+      # publishing from 2FA-bypass tokens in January 2027, so this path is temporary
+      # by design, not by preference.
       - run: pnpm run publish:clean
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # npm's own provenance covers the registry; this is the second, registry-
+      # independent path (`gh attestation verify`). The subject is the exact tarball
+      # the CLI published, retained via --tarball-out — attesting a re-pack would
+      # attest bytes nobody received.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release-artifacts/*.tgz
+
+      # Absent on workflow_dispatch bootstrap runs, where no release-please release exists.
+      - if: ${{ needs.release-please.outputs.tag_name != '' }}
+        run: gh release upload "$TAG" release-artifacts/*.tgz --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}

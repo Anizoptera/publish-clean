@@ -53,7 +53,7 @@
     "clean": "rm -rf ./dist ./node_modules/.cache",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
-    "publish:clean": "bun run check && node dist/cli.js -- --access public --tag latest --provenance",
+    "publish:clean": "bun run check && node dist/cli.js --tarball-out release-artifacts -- --access public --tag latest --provenance",
     "test": "bun run build && bun run test:built",
     "test:built": "vitest run  && bun test test/*.bun.test.ts",
     "tracked-artifacts:check": "test -z \"$(git ls-files dist)\"",
