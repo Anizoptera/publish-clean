@@ -664,6 +664,28 @@ exit 1
     }
   });
 
+  // The package's headline promise is that a private key cannot reach the registry, so the
+  // ways a key file evades a pattern are the failures that matter most. Both cases here
+  // shipped silently before: an SSH key carries no extension, and on the case-insensitive
+  // filesystems most packages are built on, `Server.PEM` is the same file as `server.pem`.
+  it.each(["id_rsa", "deploy/id_ed25519", "Server.PEM", "certs/private.Key"])(
+    "refuses to publish %s",
+    async (secret) => {
+      const fx = await fixture(
+        { name: "fixture-key-leak", version: "1.0.0", files: ["index.js", secret.split("/")[0]] },
+        { "index.js": "module.exports = 1;\n", [secret]: "PRIVATE KEY\n" },
+      );
+      try {
+        const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+        expect(result.status, `${result.stdout}\n${result.stderr}`).not.toBe(0);
+        expect(result.stderr).toContain("Critical files must not be published");
+        expect(result.stderr).toContain(secret);
+      } finally {
+        await cleanup(fx.root);
+      }
+    },
+  );
+
   // Cleaning is subtraction, so it fails by taking too much, and a field that quietly
   // vanished leaves no trace in the artifact. `repository` is the sharpest case: losing it
   // breaks provenance verification while the package still installs fine.

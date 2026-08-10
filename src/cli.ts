@@ -200,12 +200,27 @@ function reportUnrecognizedFields(pkg: JsonObject, kept: readonly string[]): voi
       `  "publish-clean": { "keepFields": [${unrecognized.map((f) => `"${f}"`).join(", ")}] }`,
   );
 }
+/**
+ * Content that must never reach a registry. Matched against tarball paths with the
+ * `package/` prefix already stripped, so `^` means the package root.
+ *
+ * Case-insensitive throughout, because the filesystems most packages are built on are
+ * too. On macOS and Windows `Server.PEM` and `server.pem` are the same file, so a
+ * case-sensitive guard refuses one and publishes the other, which is worse than no guard:
+ * it reads as coverage.
+ *
+ * Private keys are matched by extension and, separately, by exact filename. SSH keys carry
+ * no extension at all, and `id_rsa` is the most common private-key filename there is. The
+ * exact-name form deliberately does not match `id_rsa.pub`, which is public by design and
+ * legitimate to ship.
+ */
 const CRITICAL_PATTERNS = [
-  /(?:^|\/)node_modules(?:\/|$)/,
-  /(?:^|\/)\.git(?:\/|$)/,
-  /(?:^|\/)\.env(?:\.|$)/,
-  /(?:^|\/)\.npmrc$/,
-  /\.(?:pem|key|p12|pfx)$/,
+  /(?:^|\/)node_modules(?:\/|$)/i,
+  /(?:^|\/)\.git(?:\/|$)/i,
+  /(?:^|\/)\.env(?:\.|$)/i,
+  /(?:^|\/)\.npmrc$/i,
+  /\.(?:pem|key|p12|pfx|p8|ppk|jks|keystore)$/i,
+  /(?:^|\/)id_(?:rsa|dsa|ecdsa|ed25519)$/i,
 ];
 const SUSPICIOUS_PATTERNS = [
   /(?:^|\/)(?:test|tests|__tests__|__snapshots__|coverage)(?:\/|$)/,
