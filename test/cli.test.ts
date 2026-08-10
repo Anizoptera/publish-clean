@@ -445,14 +445,22 @@ exit 1
     }
   });
 
+  // Nested paths are the interesting case: a critical file is easy to spot at the
+  // package root and easy to miss one directory down. The leaked secret here is a
+  // private key rather than a nested `.npmrc`, because npm and pnpm strip `.npmrc`
+  // from tarballs at any depth — a fixture the packer refuses to emit can never
+  // reach this guard and only ever proves that packing happened.
   it("refuses critical leaked files in nested package paths", async () => {
     const fx = await fixture(
       {
         name: "fixture-nested-leak",
         version: "1.0.0",
-        files: ["index.js", "config/.npmrc"],
+        files: ["index.js", "config/deploy.key"],
       },
-      { "index.js": "module.exports = 1;\n", "config/.npmrc": "//token\n" },
+      {
+        "index.js": "module.exports = 1;\n",
+        "config/deploy.key": "-----BEGIN PRIVATE KEY-----\n",
+      },
     );
     try {
       const result = runCli(
@@ -460,7 +468,7 @@ exit 1
         process.cwd(),
       );
       expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain("config/.npmrc");
+      expect(result.stderr).toContain("config/deploy.key");
     } finally {
       await cleanup(fx.root);
     }
