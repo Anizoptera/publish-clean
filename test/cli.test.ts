@@ -663,4 +663,67 @@ exit 1
       await cleanup(fx.root);
     }
   });
+
+  // Cleaning is subtraction, so it fails by taking too much, and a field that quietly
+  // vanished leaves no trace in the artifact. `repository` is the sharpest case: losing it
+  // breaks provenance verification while the package still installs fine.
+  it("publishes every consumer-facing field the source declared", async () => {
+    const declared = {
+      description: "fixture",
+      repository: { type: "git", url: "git+https://example.test/x.git" },
+      funding: "https://example.test/fund",
+      engines: { node: ">=20" },
+      sideEffects: false,
+    };
+    const fx = await fixture(
+      { name: "fixture-kept-fields", version: "1.0.0", files: ["index.js"], ...declared },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    try {
+      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      const tarball = /^\[dry-run\] Final tarball at: (.+)$/m.exec(result.stdout)?.[1];
+      const shipped = JSON.parse(
+        spawnSync("tar", ["xzOf", String(tarball).trim(), "package/package.json"], {
+          encoding: "utf8",
+        }).stdout,
+      ) as Record<string, unknown>;
+      for (const [field, value] of Object.entries(declared)) expect(shipped[field]).toEqual(value);
+      await cleanupExtracted(result.stdout);
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
+
+  // A report whose only resolution deletes the field is unusable for any package whose
+  // ecosystem this tool does not know: a VS Code extension needs `contributes` in the
+  // artifact to work at all. keepFields must silence the report while leaving the field in
+  // place, or the author's only options are a permanent warning or a broken package.
+  it("stops reporting a field acknowledged through keepFields, and still ships it", async () => {
+    const fx = await fixture(
+      {
+        name: "fixture-keep-field",
+        version: "1.0.0",
+        files: ["index.js"],
+        contributes: { commands: [] },
+        "publish-clean": { keepFields: ["contributes"] },
+      },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    try {
+      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expect(result.stderr).not.toContain("contributes");
+
+      const extracted = /^\[dry-run\] Extracted package at: (.+)$/m.exec(result.stdout)?.[1];
+      const shipped = JSON.parse(
+        await readFile(path.join(String(extracted).trim(), "package.json"), "utf8"),
+      ) as Record<string, unknown>;
+      expect(shipped.contributes).toEqual({ commands: [] });
+
+      await cleanupExtracted(result.stdout);
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
 });

@@ -9,6 +9,20 @@ import { parseArgs } from "node:util";
 type JsonObject = Record<string, unknown>;
 
 const DEV_FIELDS = new Set([
+  // Editor and schema hints, root-only install directives, and tool config blocks. Each
+  // is either read exclusively from a workspace root, where an installed dependency is
+  // never consulted, or by a tool the consumer does not run.
+  "$schema",
+  "catalog",
+  "catalogs",
+  "patchedDependencies",
+  // The refusal to publish reads `private` from the source manifest before any stripping
+  // happens, so removing it here cannot open a bypass. In a published manifest npm never
+  // reads it back.
+  "private",
+  "stylelint",
+  "trustedDependencies",
+  "wireit",
   "devDependencies",
   "overrides",
   "resolutions",
@@ -67,6 +81,7 @@ const RUNTIME_MANIFEST_FIELDS = new Set([
   "exports",
   "files",
   "imports",
+  "libc",
   "license",
   "main",
   "module",
@@ -94,21 +109,25 @@ const RUNTIME_MANIFEST_FIELDS = new Set([
 const REGISTRY_MANIFEST_FIELDS = new Set([
   "author",
   "bugs",
+  "config",
   "contributors",
   "deno",
   "description",
   "directories",
   "funding",
+  "gitHead",
   "homepage",
   "jsdelivr",
   "keywords",
   "maintainers",
   "man",
+  "preferGlobal",
   "react-native",
   "repository",
   "sass",
   "scripts",
   "style",
+  "styleModule",
   "svelte",
   "unpkg",
 ]);
@@ -126,16 +145,59 @@ const REGISTRY_MANIFEST_FIELDS = new Set([
  * Reported on stderr because it is advice about the package, not an error in it. Nothing
  * about the published artifact depends on whether anyone reads this.
  */
-function reportUnrecognizedFields(pkg: JsonObject): void {
+/**
+ * Refuses a published manifest that lost a field the source declared and consumers read.
+ *
+ * Every other check here asks whether something got in that should not have. This asks the
+ * opposite, and nothing else does: cleaning is subtraction, so the way it fails is by
+ * taking too much. A dropped `repository` breaks provenance verification, a dropped
+ * `exports` makes the package unimportable, and neither leaves any trace in the artifact
+ * to notice later. The registry keeps the version forever either way.
+ *
+ * Compared against the *final* tarball rather than the cleaned directory, so a loss
+ * introduced by the re-pack is caught as well as one introduced by stripping.
+ *
+ * `devFields` entries are exempt: removing those was the request. `scripts` is exempt
+ * because it is rewritten rather than removed, down to the install lifecycle hooks a
+ * consumer runs, and a package whose scripts are all developer-only correctly ends up with
+ * none.
+ */
+function assertNoLostConsumerFields(
+  sourcePkg: JsonObject,
+  finalPkg: JsonObject,
+  removedOnRequest: readonly string[],
+): void {
+  // DEV_FIELDS overlaps the recognised sets (`devDependencies` and friends are dependency
+  // maps that are nonetheless always stripped), so a field removed by design can never
+  // count as lost.
+  const expected = new Set([...DEV_FIELDS, ...removedOnRequest, "scripts"]);
+  const lost = Object.keys(sourcePkg).filter(
+    (field) =>
+      (RUNTIME_MANIFEST_FIELDS.has(field) || REGISTRY_MANIFEST_FIELDS.has(field)) &&
+      !expected.has(field) &&
+      !(field in finalPkg),
+  );
+  if (lost.length > 0)
+    throw new PublishCleanError(
+      `The published manifest is missing fields the source declared and consumers read:\n${lost.join("\n")}`,
+    );
+}
+
+function reportUnrecognizedFields(pkg: JsonObject, kept: readonly string[]): void {
+  const acknowledged = new Set(kept);
   const unrecognized = Object.keys(pkg).filter(
-    (field) => !RUNTIME_MANIFEST_FIELDS.has(field) && !REGISTRY_MANIFEST_FIELDS.has(field),
+    (field) =>
+      !RUNTIME_MANIFEST_FIELDS.has(field) &&
+      !REGISTRY_MANIFEST_FIELDS.has(field) &&
+      !acknowledged.has(field),
   );
   if (unrecognized.length === 0) return;
   console.warn(
     `publish-clean: these manifest fields are not recognised and were published as-is:\n` +
       `${unrecognized.map((field) => `  ${field}`).join("\n")}\n` +
-      `If consumers do not read them, strip them:\n` +
-      `  "publish-clean": { "devFields": [${unrecognized.map((f) => `"${f}"`).join(", ")}] }`,
+      `Strip the ones consumers do not read, and acknowledge the ones they do:\n` +
+      `  "publish-clean": { "devFields": [${unrecognized.map((f) => `"${f}"`).join(", ")}] }\n` +
+      `  "publish-clean": { "keepFields": [${unrecognized.map((f) => `"${f}"`).join(", ")}] }`,
   );
 }
 const CRITICAL_PATTERNS = [
@@ -398,6 +460,22 @@ function customDevFields(config: JsonObject): string[] {
   return fields;
 }
 
+/**
+ * Fields the maintainer has confirmed belong in the published package, so they stop being
+ * reported as unrecognised.
+ *
+ * Without this the report has only one resolution, `devFields`, which deletes the field.
+ * That is the wrong answer for every package whose ecosystem this tool has never heard of:
+ * a VS Code extension needs `contributes` and `publisher` in the artifact to function at
+ * all. Its author would face a warning on every release that can only be silenced by
+ * breaking the extension, and a warning nobody can act on trains everyone to ignore the
+ * next one, including a real leak.
+ */
+function keptFields(config: JsonObject): readonly string[] {
+  if (!Array.isArray(config.keepFields)) return [];
+  return config.keepFields.filter((field): field is string => typeof field === "string");
+}
+
 async function walkFiles(dir: string, root: string, files: string[]): Promise<void> {
   const entries = await readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
@@ -612,6 +690,7 @@ async function packAndClean(
   const noGitChecks = opts.noGitChecks || config.noGitChecks === true;
   const registry = opts.registry ?? (typeof config.registry === "string" ? config.registry : null);
   const extraDevFields = customDevFields(config);
+  const keepFields = keptFields(config);
 
   assertPublicPackage(sourcePkg);
   assertCleanGit(packageDir, noGitChecks);
@@ -643,7 +722,7 @@ async function packAndClean(
       cleanedPkg.publishConfig = publishConfig;
     }
     assertNoMonorepoProtocols(cleanedPkg);
-    reportUnrecognizedFields(cleanedPkg);
+    reportUnrecognizedFields(cleanedPkg, keepFields);
     await writeFile(packedPkgPath, stringifyJson(cleanedPkg));
     assertDeclaredFiles(cleanedPkg, extracted);
     const cleanedFiles: string[] = [];
@@ -658,6 +737,7 @@ async function packAndClean(
     assertFinalTarballIncludesCleanedFiles(cleanedFiles, finalFiles);
     const finalPkg = readTarballJson(finalTarball, "package.json", extracted);
     assertNoMonorepoProtocols(finalPkg);
+    assertNoLostConsumerFields(sourcePkg, finalPkg, extraDevFields);
     if (stableJson(finalPkg) !== stableJson(cleanedPkg))
       throw new PublishCleanError("Final npm tarball manifest differs from the cleaned manifest.");
 
