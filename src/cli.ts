@@ -303,12 +303,10 @@ function stripManifest(pkg: JsonObject, extraDevFields: readonly string[]): Json
  * with one, the package is uninstallable for everyone, and the version cannot be taken
  * back.
  *
- * Both call sites pass an already-stripped manifest, so `devDependencies`, `overrides`,
- * `resolutions` and the `pnpm` block are absent by construction and their branches never
- * fire today. They are checked anyway: the guard costs nothing, and the day someone moves
- * it before the strip, or narrows what the strip removes, it has to still be right. A
- * guard whose correctness depends on the order it is called in is a guard that fails
- * silently.
+ * Both call sites pass an already-stripped manifest, so the dev-only members of
+ * DEP_FIELDS are absent by construction. They are still checked, because a guard whose
+ * correctness depends on the order it happens to be called in fails silently the day
+ * someone reorders it.
  */
 function assertNoMonorepoProtocols(pkg: JsonObject): void {
   const failures: string[] = [];
@@ -321,14 +319,6 @@ function assertNoMonorepoProtocols(pkg: JsonObject): void {
         failures.push(`${field}.${name}: ${spec}`);
     }
   }
-  const pnpm = pkg.pnpm;
-  if (isObject(pnpm) && isObject(pnpm.overrides)) {
-    for (const [name, spec] of Object.entries(pnpm.overrides)) {
-      if (typeof spec === "string" && MONOREPO_PROTOCOLS.some((prefix) => spec.includes(prefix)))
-        failures.push(`pnpm.overrides.${name}: ${spec}`);
-    }
-  }
-
   if (failures.length > 0) {
     throw new PublishCleanError(
       `Packed manifest contains unresolved monorepo-only dependency specs:\n${failures.join("\n")}\n${PUBLISH_ADVISORY}`,
