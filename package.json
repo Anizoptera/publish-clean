@@ -1,7 +1,7 @@
 {
   "name": "@anizoptera/publish-clean",
   "version": "0.2.0",
-  "description": "Publish pnpm workspace packages from a cleaned, validated package tarball.",
+  "description": "Publish npm packages with a consumer-only package.json. Refuses to ship a .env, a private key, or an unresolved workspace dependency.",
   "keywords": [
     "bun",
     "cleanup",
@@ -9,8 +9,12 @@
     "npm",
     "pack",
     "package",
+    "package.json",
     "pnpm",
-    "publish"
+    "provenance",
+    "publish",
+    "supply-chain",
+    "workspace"
   ],
   "homepage": "https://github.com/Anizoptera/publish-clean#readme",
   "bugs": {

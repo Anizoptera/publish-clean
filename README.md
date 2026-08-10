@@ -1,5 +1,8 @@
 # @anizoptera/publish-clean
 
+Publish npm packages with a consumer-only `package.json`. Refuses to ship a `.env`, a
+private key, or an unresolved workspace dependency.
+
 [![npm version](https://img.shields.io/npm/v/@anizoptera/publish-clean?label=npm)](https://www.npmjs.com/package/@anizoptera/publish-clean)
 [![Signed provenance](https://img.shields.io/badge/provenance-signed-2ea44f?logo=npm&logoColor=white)](https://www.npmjs.com/package/@anizoptera/publish-clean#provenance)
 [![CI](https://github.com/Anizoptera/publish-clean/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/Anizoptera/publish-clean/actions/workflows/check.yml)
@@ -271,6 +274,20 @@ What goes: `devDependencies`, `workspaces`, `pnpm`, `packageManager`, `overrides
 coverage tools, build systems and release tools. Scripts go too, apart from the install
 lifecycle ones a consumer actually runs: `preinstall`, `install`, `postinstall`,
 `prepare` and `uninstall`.
+
+Anything the tool does not recognise ships, and you get told it did:
+
+```
+publish-clean: these manifest fields are not recognised and were published as-is:
+  someToolConfig
+If consumers do not read them, strip them:
+  "publish-clean": { "devFields": ["someToolConfig"] }
+```
+
+The strip list cannot know about a tool invented after it was written, so new
+`package.json` keys would otherwise leak into every install unnoticed. Dropping them
+instead would be worse: a key some consumer actually resolves would vanish, and you would
+hear about it from a stranger's broken build rather than from your own release.
 
 Add your own with `devFields`. Better still, run `--dry-run` and read the manifest that
 would ship instead of trusting this list.
