@@ -10,9 +10,10 @@ bun install --frozen-lockfile
 bun run check
 ```
 
-`bun run check` is the required gate. It formats, typechecks, runs Vitest and
-Bun tests, builds, rejects tracked `dist/`, runs `publint`, and runs
-`@arethetypeswrong/cli --pack .`.
+`bun run check` is the required gate. It checks formatting, typechecks, builds, runs the
+Vitest and Bun suites against that build, rejects a tracked `dist/`, and finally runs the
+freshly built CLI on this package itself — asserting the cleaned artifact has no runtime
+dependencies and passing it to `publint` and `@arethetypeswrong/cli`.
 
 ## Design rules
 
@@ -22,11 +23,11 @@ good it looks otherwise.
 - Runtime dependencies stay at zero.
 - `pnpm pack` decides what is in the package. Do not add file-selection rules of our own.
 - `npm publish` does the upload, because provenance lives there.
-- Validate the final tarball, not just the repository tree or the cleaned directory. The
-  tarball is what users get.
-- Never modify the source tree, and pack only once. The manifest is cleaned in an extracted
-  copy and written back into the packed tarball as a member replacement; repacking that copy
-  would hand the file set to a second packer that re-derives it from the stripped `files`.
+- Validate the tarball that gets published, and nothing else. Checking an extracted copy or
+  the repository tree proves things about something no user receives.
+- Never modify the source tree, and pack only once. The manifest is read out of the packed
+  tarball and written back into a copy of it as a member replacement; repacking would hand
+  the file set to a second packer that re-derives it from the stripped `files`.
 - This is not a release manager. Versions, changelogs, tags, GitHub Releases and dist-tag
   policy belong to other tools.
 - No rewriting of source content, including doc or comment stripping.

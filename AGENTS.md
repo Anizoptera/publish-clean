@@ -25,6 +25,11 @@
   (`libnpmpublish` builds the attestation subject from `ssri.fromData(tarballData)`), so the
   attestation covers exactly what this tool produced. Publishing a tarball also runs no lifecycle
   scripts at all — `libnpmpack` gates `prepack`/`postpack` on a directory spec.
+- Every guard reads the tarball that gets uploaded — its `tar` listing, or the directory extracted
+  from it. Never validate an intermediate: a check against the extracted _source_ tarball, or a
+  directory the tool wrote itself, proves things about bytes nobody receives and needs a second
+  check to confirm the first still applies. One artifact, checked once, is why the guards here are
+  short.
 - Never weaken critical artifact checks for secrets, `node_modules`, Git internals, or broken export paths.
 - The published package carries what consumers and the registry read, and nothing else. Dangerous content
   and useless content are both targets: a shipped tool-config block is noise every installer downloads

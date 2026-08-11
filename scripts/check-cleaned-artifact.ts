@@ -41,7 +41,7 @@ const stdout = run(process.execPath, ["dist/cli.js", "--dry-run", "--no-git-chec
 const match = /^\[dry-run\] Extracted package at: (.+)$/m.exec(stdout);
 if (!match?.[1]) throw new Error(`publish-clean did not report the cleaned artifact path.`);
 const tarballMatch = /^\[dry-run\] Final tarball at: (.+)$/m.exec(stdout);
-if (!tarballMatch?.[1]) throw new Error(`publish-clean did not report the final npm tarball path.`);
+if (!tarballMatch?.[1]) throw new Error(`publish-clean did not report the final tarball path.`);
 
 const artifact = match[1].trim();
 const root = path.dirname(artifact);

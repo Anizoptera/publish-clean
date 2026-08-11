@@ -27,11 +27,11 @@ tests, `.github/`, a lockfile. You do not see the tarball before it goes out, an
 version is published you cannot edit it. Unpublishing only works for a short window and
 under conditions npm decides.
 
-`publish-clean` packs the package, rewrites the manifest of the extracted copy down to
-what consumers actually use, packs that, and publishes the result. Your working tree is
-never modified. If the artifact still has something in it that should not ship, or
-declares a `main`, `exports`, or `bin` path that is not in the tarball, it fails instead
-of publishing.
+`publish-clean` packs the package once, rewrites the `package.json` inside that tarball
+down to what consumers actually use, checks the result, and publishes those exact bytes.
+Your working tree is never modified. If the artifact still has something in it that should
+not ship, or declares a `main`, `exports`, or `bin` path that is not in the tarball, it
+fails instead of publishing.
 
 It uses pnpm to pack and npm to publish, and cleans the manifest in between. The
 reasoning behind that is in [Why it works this way](#why-it-works-this-way).
@@ -182,14 +182,17 @@ publish-clean packages/my-lib -- --access public --tag next
 ```mermaid
 flowchart TD
   A[Your package directory] -->|pnpm pack| B[Tarball - pnpm decides the file set]
-  B --> C[Extract into a temp directory]
-  C --> D{No leaked files?}
-  D --> E[Clean package.json for consumers]
-  E --> F{Every declared main/exports/bin/types path exists?}
-  F -->|replace the package.json member| G[Same tarball, cleaned manifest]
-  G --> H{Same files, expected manifest, still no leaks?}
+  B --> C[Clean its package.json for consumers]
+  C -->|replace that one member| D[Same tarball, cleaned manifest]
+  D --> E{Same file set as the pack?}
+  E --> F{No leaked files?}
+  F --> G{Every declared main/exports/bin/types path is in it?}
+  G -->|extract it| H{Manifest that came out is the one we approved?}
   H --> I[npm publish that tarball]
 ```
+
+Every gate reads the tarball that gets uploaded, so what passes the checks and what
+reaches the registry are the same bytes rather than two things that ought to match.
 
 Any gate that fails exits non-zero and nothing is published. `--dry-run` and
 `--guard-only` run the whole pipeline and stop before the publish.
@@ -271,8 +274,8 @@ Everything else we compared came out identical: file modes including the executa
 
 ### Why the manifest is cleaned on a copy
 
-The tarball gets extracted into a temp directory and rewritten there. Your working tree
-is never touched.
+The manifest is read out of the packed tarball and written back into a copy of it, in a
+temp directory. Your working tree is never touched.
 
 The obvious alternative is what a lot of hand-rolled release scripts do: edit
 `package.json`, publish, edit it back. That's fine until something dies in the middle,
@@ -333,7 +336,7 @@ produced.
 - dependency specs still use `catalog:`, `workspace:`, `link:`, or `portal:`
 - declared export, type, import, browser, bin, or side-effect paths are missing
   from the cleaned package
-- the final npm tarball drops files that were present in the cleaned package
+- rewriting the manifest changed the tarball's file set in any way
 - trusted GitHub publication uses `--provenance` but package repository metadata
   does not match the workflow repository
 
@@ -347,10 +350,14 @@ Leak checks cannot be turned off by any flag or config key.
 
 Everything a consumer or a registry reads survives: `name`, `version`, `license`,
 `dependencies`, `peerDependencies` and their meta, `exports`, `main`, `module`, `types`,
-`bin`, `files`, `engines`, `os`, `cpu`, `sideEffects`, `publishConfig`, and the rest of
-the public surface.
+`bin`, `engines`, `os`, `cpu`, `sideEffects`, `publishConfig`, and the rest of the public
+surface.
 
-What goes: `devDependencies`, `workspaces`, `pnpm`, `packageManager`, `overrides`,
+`files` goes, because it is spent: it told the packer what to include, the tarball already
+exists, nothing re-selects afterwards, and an install extracts every entry unfiltered. npm
+agrees — its registry drops the field from the metadata it serves.
+
+What else goes: `devDependencies`, `workspaces`, `pnpm`, `packageManager`, `overrides`,
 `resolutions`, and the config blocks belonging to test runners, linters, formatters,
 coverage tools, build systems and release tools. Scripts go too, apart from the install
 lifecycle ones a consumer actually runs: `preinstall`, `install`, `postinstall`,
