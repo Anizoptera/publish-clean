@@ -47,13 +47,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Both versions come from `.tool-versions`, the single toolchain declaration
+      # asdf also reads. Bun builds `dist` and Node runs the CLI that packs and
+      # signs, so drift between a laptop and a runner is drift in the artifact.
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: .tool-versions
       - run: bun install --frozen-lockfile
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "24"
+          node-version-file: .tool-versions
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
       # No npm credential is passed to this job. Publishing authenticates with the
