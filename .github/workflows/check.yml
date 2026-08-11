@@ -38,3 +38,34 @@ jobs:
           node-version-file: .tool-versions
           package-manager-cache: false
       - run: bun run check
+
+  # Windows is the one platform where this tool's spawning differs, because `pnpm` and `npm`
+  # there are `.cmd` shims that `execFile` cannot launch at all (see src/command.ts). That
+  # branch cannot be proved by any test on Linux or macOS, and an unverified branch claiming
+  # a supported platform is worse than declaring the platform unsupported.
+  #
+  # The suite itself is not run here: it puts fake executables on PATH through shell shims,
+  # which is a port, not a check. A single dry-run against this package is the whole product
+  # path instead — tool probes, `pnpm pack`, the rewrite, and every guard — and it is exactly
+  # the run that fails today if the cmd.exe wrapper is wrong.
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .tool-versions
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .tool-versions
+          package-manager-cache: false
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      # pnpm comes from this repo's devDependencies, so the same version resolves here as in
+      # every other lane. `--no-git-checks` because the build writes `dist/`, which is not
+      # tracked; the check under test is the pack and the guards, not the working tree.
+      - run: echo "${{ github.workspace }}\node_modules\.bin" >> $env:GITHUB_PATH
+      - run: node dist/cli.js --dry-run --no-git-checks

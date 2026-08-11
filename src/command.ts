@@ -1,10 +1,10 @@
 /**
  * Runs the external tools this CLI depends on: `pnpm`, `npm` and `git`.
  *
- * No shell, ever. `execFileSync` passes the argument vector to the OS untouched, while
- * `{ shell: true }` space-joins it with no escaping at all — which Node runtime-deprecated in
- * v24 as shell injection (DEP0190). This tool forwards arguments a caller wrote after `--`
- * straight into `npm publish`, so that vector is attacker-shaped by design.
+ * Never `{ shell: true }`. It space-joins the argument vector with no escaping at all, which
+ * Node runtime-deprecated in v24 as shell injection (DEP0190) — and this tool forwards
+ * arguments a caller wrote after `--` straight into `npm publish`, so that vector is
+ * attacker-shaped by design. Every spawn here passes an argument vector, never a command line.
  */
 import { execFileSync } from "node:child_process";
 
@@ -19,8 +19,27 @@ import { isObject } from "./json";
  */
 const TOOL_PROBE_TIMEOUT_MS = 10_000;
 
+/**
+ * Windows cannot launch `pnpm` or `npm` directly: both are `.cmd` shims there, and Node's own
+ * documentation states a `.cmd` "cannot be launched using child_process.execFile()" — so the
+ * spawn fails as ENOENT and the probe below would report a working package manager as missing.
+ * Of the three routes Node names, this is the one that adds no parsing of our own: cmd.exe runs
+ * the shim AND does the PATH/PATHEXT lookup, so no name resolution belongs here either.
+ *
+ * `/d` skips registry AutoRun commands, which would otherwise execute inside a publish. Neither
+ * `/s` nor `windowsVerbatimArguments` is used: without them Node applies its ordinary C-runtime
+ * quoting to every argument, exactly as on any other platform, and there is no second escaping
+ * layer to get wrong. The one residual is cmd's `%VAR%` expansion inside an argument, which no
+ * argument this tool generates contains; a caller writing one after `--` gets it expanded.
+ */
+function spawn(command: string, args: readonly string[]): [string, string[]] {
+  return process.platform === "win32"
+    ? ["cmd.exe", ["/d", "/c", command, ...args]]
+    : [command, [...args]];
+}
+
 export function run(command: string, args: readonly string[], cwd: string): string {
-  return execFileSync(command, [...args], {
+  return execFileSync(...spawn(command, args), {
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
@@ -38,7 +57,7 @@ export function run(command: string, args: readonly string[], cwd: string): stri
  * that says nothing about the one action that cannot be undone.
  */
 export function runAttached(command: string, args: readonly string[], cwd: string): void {
-  execFileSync(command, [...args], { cwd, stdio: ["ignore", "inherit", "inherit"] });
+  execFileSync(...spawn(command, args), { cwd, stdio: ["ignore", "inherit", "inherit"] });
 }
 
 /** Child output survives only on the thrown error, and is lost unless read off it here. */
@@ -70,7 +89,7 @@ function toolFailureReason(cause: unknown): string {
 
 export function requireTool(name: string): void {
   try {
-    execFileSync(name, ["--version"], {
+    execFileSync(...spawn(name, ["--version"]), {
       stdio: ["ignore", "ignore", "pipe"],
       timeout: TOOL_PROBE_TIMEOUT_MS,
     });

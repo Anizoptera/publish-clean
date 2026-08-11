@@ -32,6 +32,11 @@
   a filename containing one. Tests may use it freely, and one case pins this reader against it on a
   real pnpm archive; that cross-check is the reason a hand-written parser is acceptable here.
 - Never weaken critical artifact checks for secrets, `node_modules`, Git internals, or broken export paths.
+- Never spawn with `{ shell: true }`, on any platform, however much simpler the Windows branch in
+  `src/command.ts` would look. A shell space-joins the argument vector with NO escaping — Node
+  runtime-deprecated it in v24 as injection (DEP0190) — and the arguments a caller writes after `--`
+  go straight into the one irreversible step. The Windows job in `check.yml` is the only instrument
+  that grades that branch; delete it and the platform is unsupported again, verified by nothing.
 - One escape hatch relaxes exactly one policy. `--skip-file-check` and `--allow-suspicious` were a
   single flag until 0.6.0, so a package that legitimately declares no `files` array had to waive the
   artifact scan as well: a manifest convention and a content guard behind one switch, where nobody
