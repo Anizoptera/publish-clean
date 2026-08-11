@@ -17,6 +17,7 @@ import {
   unrecognizedFieldsReport,
   validatePackedFiles,
   wantsTrustedPublish,
+  withRegistry,
 } from "../src/rules";
 
 /**
@@ -389,5 +390,40 @@ describe.concurrent("final tarball completeness", () => {
     expect(() =>
       assertFinalTarballIncludesCleanedFiles(["index.js"], ["index.js", "package.json"]),
     ).not.toThrow();
+  });
+});
+
+describe.concurrent("registry pinning", () => {
+  it("leaves the manifest alone when no registry was chosen", () => {
+    const pkg = { name: "x" };
+    expect(withRegistry(pkg, null)).toBe(pkg);
+  });
+
+  it("creates publishConfig when the author declared none", () => {
+    expect(withRegistry({ name: "x" }, "https://r.test").publishConfig).toEqual({
+      registry: "https://r.test",
+    });
+  });
+
+  // publishConfig carries consumer-facing settings such as `provenance` and `access`; losing
+  // one while pinning a registry would silently change how the package is published.
+  it("keeps the author's other publishConfig settings", () => {
+    expect(
+      withRegistry({ publishConfig: { access: "public", provenance: true } }, "https://r.test")
+        .publishConfig,
+    ).toEqual({ access: "public", provenance: true, registry: "https://r.test" });
+  });
+
+  it("overrides a registry the manifest already named", () => {
+    expect(
+      withRegistry({ publishConfig: { registry: "https://old.test" } }, "https://new.test")
+        .publishConfig,
+    ).toEqual({ registry: "https://new.test" });
+  });
+
+  it("does not mutate the manifest it was given", () => {
+    const pkg = { name: "x", publishConfig: { access: "public" } };
+    withRegistry(pkg, "https://r.test");
+    expect(pkg.publishConfig).toEqual({ access: "public" });
   });
 });

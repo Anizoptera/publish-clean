@@ -394,6 +394,24 @@ export function stripManifest(pkg: JsonObject, extraDevFields: readonly string[]
 }
 
 /**
+ * Pins the published manifest to a registry, when one was chosen.
+ *
+ * Written into `publishConfig` rather than passed only on the command line, because that is
+ * where npm looks when someone later republishes the same tarball by hand — the artifact then
+ * carries its own destination instead of depending on whoever runs the command. Any other
+ * `publishConfig` keys the author set are consumer-facing and survive untouched.
+ *
+ * Returns the manifest unchanged when no registry was chosen, so the caller has no branch and
+ * cannot forget one.
+ */
+export function withRegistry(pkg: JsonObject, registry: null | string): JsonObject {
+  if (registry === null) return pkg;
+  const publishConfig = isObject(pkg.publishConfig) ? { ...pkg.publishConfig } : {};
+  publishConfig.registry = registry;
+  return { ...pkg, publishConfig };
+}
+
+/**
  * Refuses a manifest that still carries a spec only a workspace can resolve. Published
  * with one, the package is uninstallable for everyone, and the version cannot be taken
  * back.

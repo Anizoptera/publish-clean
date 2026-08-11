@@ -22,12 +22,13 @@ import {
   keptFields,
   normalizeDeclaredPath,
   packageConfig,
-  unrecognizedFieldsReport,
   stableJson,
   stringifyJson,
   stripManifest,
+  unrecognizedFieldsReport,
   validatePackedFiles,
   wantsTrustedPublish,
+  withRegistry,
 } from "./rules";
 import type { JsonObject, TrustedPublishEnv } from "./rules";
 
@@ -322,14 +323,10 @@ async function packAndClean(
     validatePackedFiles(files, skipFileCheck);
 
     const packedPkgPath = path.join(extracted, "package.json");
-    const cleanedPkg = stripManifest(readJson(packedPkgPath), extraDevFields);
-    if (registry) {
-      const publishConfig = isObject(cleanedPkg.publishConfig)
-        ? { ...cleanedPkg.publishConfig }
-        : {};
-      publishConfig.registry = registry;
-      cleanedPkg.publishConfig = publishConfig;
-    }
+    const cleanedPkg = withRegistry(
+      stripManifest(readJson(packedPkgPath), extraDevFields),
+      registry,
+    );
     assertNoMonorepoProtocols(cleanedPkg);
     const unrecognized = unrecognizedFieldsReport(cleanedPkg, keepFields);
     if (unrecognized) console.warn(unrecognized);
