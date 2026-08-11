@@ -31,6 +31,11 @@
   check to confirm the first still applies. One artifact, checked once, is why the guards here are
   short.
 - Never weaken critical artifact checks for secrets, `node_modules`, Git internals, or broken export paths.
+- Never delete a check because the new structure makes its failure "impossible". That argument is the
+  new code vouching for itself, and here the structure is always the tar rewriter — the one place this
+  tool authors bytes, guarding the one step nobody can take back. These checks read values the pipeline
+  has already computed, so they cost nothing and no argument can beat free. Deleting one already cost a
+  release: 0.4.0 shipped with no invariant on the rewriter's file set at all.
 - The published package carries what consumers and the registry read, and nothing else. Dangerous content
   and useless content are both targets: a shipped tool-config block is noise every installer downloads
   forever. The manifest is the ONLY surface authorised for this — file selection belongs to `pnpm pack`,
