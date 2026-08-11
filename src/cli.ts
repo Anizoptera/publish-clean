@@ -263,7 +263,6 @@ async function packAndClean(
   assertFilesField(sourcePkg, skipFileCheck);
 
   const root = await mkdtemp(path.join(tmpdir(), "publish-clean-"));
-  let keepRoot = false;
   try {
     run("pnpm", ["pack", "--pack-destination", root], packageDir);
     const tarball = await soleTarball(root);
@@ -293,12 +292,11 @@ async function packAndClean(
     validatePackedFiles(finalFiles, skipFileCheck);
     assertDeclaredFiles(cleanedPkg, finalFiles);
 
-    // Extracted last, and from the final tarball: `tar` decoding every entry is an independent
-    // reader agreeing the rewritten archive is sound, and it leaves the operator — and this
-    // repository's own publint gate — a directory holding exactly what ships.
-    run("tar", ["xzf", finalTarball, "-C", root], packageDir);
-    const extracted = path.join(root, "package");
-    const shippedPkg = readJson(path.join(extracted, "package.json"));
+    // Read back out of the final tarball, by tar, so the check is against the shipped bytes
+    // rather than against the object this process just built. Reading the one member costs
+    // one process; extracting the whole archive to reach it writes every file to disk for
+    // nothing, and the directory it leaves is then somebody's problem to delete.
+    const shippedPkg = readTarballJson(finalTarball, "package.json", root);
     assertNoMonorepoProtocols(shippedPkg);
     // A tripwire for this tool's own bugs: every field it would catch is either kept by design
     // or removed on request, and a removal on request is excluded from the comparison. Its
@@ -318,10 +316,13 @@ async function packAndClean(
       console.log(`Final tarball kept at: ${kept}`);
     }
 
+    // Prints the result instead of leaving a temp directory for the caller to delete.
+    // Returning a path made cleanup the caller's job, so every dry-run leaked a tree.
+    // Use --tarball-out to keep the bytes, in a directory the caller names.
     if (opts.dryRun) {
-      keepRoot = true;
-      console.log(`[dry-run] Extracted package at: ${extracted}`);
-      console.log(`[dry-run] Final tarball at: ${finalTarball}`);
+      console.log(`[dry-run] ${finalFiles.length} files:`);
+      for (const file of finalFiles) console.log(`  ${file}`);
+      console.log(`[dry-run] cleaned package.json:\n${stringifyJson(cleanedPkg)}`);
       return;
     }
     if (opts.guardOnly) return;
@@ -337,7 +338,8 @@ async function packAndClean(
     // project value only when cwd sits under that manifest.
     runAttached("npm", publishArgs, packageDir);
   } finally {
-    if (!keepRoot) await rm(root, { recursive: true, force: true });
+    // No mode keeps this tree. A failed run must not strand package contents in temp.
+    await rm(root, { recursive: true, force: true });
   }
 }
 

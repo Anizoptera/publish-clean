@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 /**
@@ -37,16 +38,20 @@ function run(command: string, args: readonly string[]): string {
   return result.stdout;
 }
 
-const stdout = run(process.execPath, ["dist/cli.js", "--dry-run", "--no-git-checks"]);
-const match = /^\[dry-run\] Extracted package at: (.+)$/m.exec(stdout);
-if (!match?.[1]) throw new Error(`publish-clean did not report the cleaned artifact path.`);
-const tarballMatch = /^\[dry-run\] Final tarball at: (.+)$/m.exec(stdout);
-if (!tarballMatch?.[1]) throw new Error(`publish-clean did not report the final tarball path.`);
-
-const artifact = match[1].trim();
-const root = path.dirname(artifact);
-const tarball = tarballMatch[1].trim();
+// The CLI keeps no temp tree, so this script names its own and deletes it.
+// publint reads the extracted package; @arethetypeswrong/cli reads the tarball.
+const root = mkdtempSync(path.join(tmpdir(), "publish-clean-check-"));
 try {
+  run(process.execPath, ["dist/cli.js", "--dry-run", "--no-git-checks", "--tarball-out", root]);
+  const packed = readdirSync(root).filter((entry) => entry.endsWith(".tgz"));
+  const [name] = packed;
+  if (packed.length !== 1 || !name)
+    throw new Error(`expected exactly one tarball in ${root}, found ${packed.length}`);
+
+  const tarball = path.join(root, name);
+  run("tar", ["xzf", tarball, "-C", root]);
+  const artifact = path.join(root, "package");
+
   assertNoRuntimeDependencies(artifact);
   run("bunx", ["publint", "run", artifact, "--pack", "false"]);
   run("bunx", ["@arethetypeswrong/cli", tarball]);

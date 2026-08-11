@@ -37,9 +37,17 @@ choices are argued, with measurements, in
 
 ## Install
 
-```bash
-pnpm add -D @anizoptera/publish-clean
-```
+| Project | Install                                 | Run                       |
+| ------- | --------------------------------------- | ------------------------- |
+| pnpm    | `pnpm add -D @anizoptera/publish-clean` | `pnpm exec publish-clean` |
+| Bun     | `bun add -d @anizoptera/publish-clean`  | `bunx publish-clean`      |
+| npm     | `npm i -D @anizoptera/publish-clean`    | `npm exec publish-clean`  |
+| Yarn    | `yarn add -D @anizoptera/publish-clean` | `yarn publish-clean`      |
+
+**Whatever you start it with, `pnpm` prepares the package and `npm` uploads it, so both
+must be on `PATH`.** A Bun, npm or Yarn project needs pnpm installed too, including in CI.
+
+Also needs `tar` and Node.js 22.14+. Below 22.14 npm cannot mint provenance.
 
 That installs one package and nothing else. `publish-clean` has zero runtime
 dependencies: it is a single file that talks to `pnpm`, `npm` and `tar` through the
@@ -47,33 +55,20 @@ tools you already have. For something that sits on your publish path and handles
 registry credentials, that matters. A publishing tool with a dependency tree is a
 supply-chain risk of its own, and this one has no transitive code to audit.
 
-Needs Node.js 22.14+, and `pnpm`, `npm` and `tar` on `PATH`. That floor is npm's, not
-ours: below it npm cannot mint provenance, and signing the release is what this tool is
-for. The code would run on older Node, but a build of it that cannot sign is not worth
-supporting — and Node 20 left support in April 2026 anyway.
-
 `--provenance` additionally needs npm 11.5.1+ and a cloud CI runner. npm will not sign a
 publish that came from your laptop.
 
 ## Package managers
 
-Start `publish-clean` with any package manager and it still packs with `pnpm` and
-publishes with `npm`. So both have to be installed even if your project uses neither.
-Short version: pnpm is the only packer that resolves every workspace layout correctly,
-and npm is the only client that can sign a release. Long version with the measurements:
-[why pnpm packs and npm publishes](docs/why-pnpm-and-npm.md).
+Why pnpm packs and npm publishes: pnpm is the only packer that resolves every workspace
+layout correctly, and npm is the only client that can sign a release. The measurements are
+in [why pnpm packs and npm publishes](docs/why-pnpm-and-npm.md).
 
-| Your project | How to run it             | What to expect                                            |
-| ------------ | ------------------------- | --------------------------------------------------------- |
-| pnpm         | `pnpm exec publish-clean` | Everything works, no warning.                             |
-| npm          | `npm exec publish-clean`  | Works. Prints an advisory that packing goes through pnpm. |
-| Yarn         | `yarn publish-clean`      | Same as npm.                                              |
-| Bun          | `bunx publish-clean`      | Same as npm.                                              |
+Started with anything other than pnpm, it prints an advisory on stderr saying so. That is
+a warning, not an error. Nothing behaves differently because of it, and there is no flag
+to silence it.
 
-The advisory is a warning on stderr, not an error. Nothing behaves differently because of
-it, and there is no flag to silence it.
-
-For a single package all four behave the same, since nothing in the manifest needs
+For a single package every manager behaves the same, since nothing in the manifest needs
 resolving before it ships.
 
 Monorepos are where it matters. `pnpm pack` resolves `workspace:` and `catalog:` specs by
@@ -162,8 +157,8 @@ publishes its own tarball, so you get the checks and not the cleaned manifest.
 pnpm exec publish-clean --dry-run
 ```
 
-Prints the paths of the cleaned package and the exact tarball that would be uploaded, and
-leaves both on disk. Run `tar tzf` on the tarball and read the rewritten `package.json`.
+Prints every file that would ship and the cleaned `package.json`, then deletes its temp
+tree. Add `--tarball-out DIR` to keep the tarball itself.
 
 ### Publishing a restricted package
 
@@ -331,17 +326,17 @@ choices like dist-tags on the command line and stable project policy in the mani
 }
 ```
 
-| Flag                | `package.json`  | What it does                                                                                                         |
-| ------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `--dry-run`         | -               | Run everything up to the publish, then print the cleaned package and the final tarball paths and leave both on disk. |
-| `--guard-only`      | -               | Run everything up to the publish and exit. Keeps nothing.                                                            |
-| `--tarball-out DIR` | -               | Copy the final tarball into `DIR` before publishing.                                                                 |
-| `--registry URL`    | `registry`      | Set `publishConfig.registry` on the cleaned manifest, and publish to it.                                             |
-| `--skip-file-check` | `skipFileCheck` | Drop the suspicious-file check and the required `files` array.                                                       |
-| `--no-git-checks`   | `noGitChecks`   | Allow publishing from a dirty working tree.                                                                          |
-| -                   | `devFields`     | Extra manifest fields to strip.                                                                                      |
-| -                   | `keepFields`    | Fields that belong in the published package, so stop reporting them.                                                 |
-| `-h`, `--help`      | -               | Print usage.                                                                                                         |
+| Flag                | `package.json`  | What it does                                                                               |
+| ------------------- | --------------- | ------------------------------------------------------------------------------------------ |
+| `--dry-run`         | -               | Run everything up to the publish, then print the file list and the cleaned `package.json`. |
+| `--guard-only`      | -               | Run everything up to the publish and exit, printing nothing.                               |
+| `--tarball-out DIR` | -               | Copy the final tarball into `DIR` before publishing.                                       |
+| `--registry URL`    | `registry`      | Set `publishConfig.registry` on the cleaned manifest, and publish to it.                   |
+| `--skip-file-check` | `skipFileCheck` | Drop the suspicious-file check and the required `files` array.                             |
+| `--no-git-checks`   | `noGitChecks`   | Allow publishing from a dirty working tree.                                                |
+| -                   | `devFields`     | Extra manifest fields to strip.                                                            |
+| -                   | `keepFields`    | Fields that belong in the published package, so stop reporting them.                       |
+| `-h`, `--help`      | -               | Print usage.                                                                               |
 
 Arguments after `--` go to `npm publish`. Pass the dist-tag explicitly: `--tag latest` for
 a normal public release.

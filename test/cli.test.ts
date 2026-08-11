@@ -77,20 +77,12 @@ async function cleanup(root: string): Promise<void> {
   await rm(root, { recursive: true, force: true });
 }
 
-function extractedPath(stdout: string): string {
-  const match = /\[dry-run\] Extracted package at: (.+)$/m.exec(stdout);
-  if (!match?.[1]) throw new Error(`missing dry-run path in ${stdout}`);
-  return match[1].trim();
-}
-
-function finalTarballPath(stdout: string): string {
-  const match = /\[dry-run\] Final tarball at: (.+)$/m.exec(stdout);
-  if (!match?.[1]) throw new Error(`missing final tarball path in ${stdout}`);
-  return match[1].trim();
-}
-
-async function cleanupExtracted(stdout: string): Promise<void> {
-  await cleanup(path.dirname(extractedPath(stdout)));
+async function soleTarball(dir: string): Promise<string> {
+  const packed = (await readdir(dir)).filter((entry) => entry.endsWith(".tgz"));
+  const [name] = packed;
+  if (packed.length !== 1 || !name)
+    throw new Error(`expected one tarball in ${dir}, found ${packed.length}`);
+  return path.join(dir, name);
 }
 
 async function writeShim(file: string, script: string): Promise<void> {
@@ -104,6 +96,15 @@ function readTarballFile(tarball: string, file: string): string {
   });
   if (result.status !== 0) throw new Error(result.stderr);
   return result.stdout;
+}
+
+function listTarball(tarball: string): string[] {
+  const result = spawnSync("tar", ["tzf", tarball], { encoding: "utf8" });
+  if (result.status !== 0) throw new Error(result.stderr);
+  return result.stdout
+    .split("\n")
+    .filter((line) => line.length > 0 && !line.endsWith("/"))
+    .map((line) => line.replace(/^package\//, ""));
 }
 
 // Concurrent because each case is an independent process against its own temp directory,
@@ -207,9 +208,11 @@ describe.concurrent("publish-clean", () => {
       expect(result.stderr).toContain("packs with pnpm");
       expect(result.stderr).toContain("npm/11.0.0");
 
-      const cleaned = JSON.parse(
-        await readFile(path.join(extractedPath(result.stdout), "package.json"), "utf8"),
-      ) as Record<string, unknown>;
+      const tarball = await soleTarball(out);
+      const cleaned = JSON.parse(readTarballFile(tarball, "package.json")) as Record<
+        string,
+        unknown
+      >;
       expect(cleaned.devDependencies).toBeUndefined();
       expect(cleaned["publish-clean"]).toBeUndefined();
       expect(cleaned.scripts).toEqual({ postinstall: "node index.js" });
@@ -220,31 +223,17 @@ describe.concurrent("publish-clean", () => {
       expect(result.stderr).toContain(`"devFields": ["someToolConfig"]`);
       expect(result.stderr).not.toContain("contributes");
 
-      // The tarball is the artifact that reaches the registry; the cleaned directory is only
-      // an intermediate, so every promise above has to hold in the packed bytes too.
-      const tarball = finalTarballPath(result.stdout);
-      expect(tarball).toMatch(/\.tgz$/);
-      const shipped = JSON.parse(readTarballFile(tarball, "package.json")) as Record<
-        string,
-        unknown
-      >;
-      expect(shipped.devDependencies).toBeUndefined();
       // Stripped, and the entry below proves that costs nothing: the file this package's own
       // `.gitignore` excludes still ships, because the tarball was rewritten rather than
       // repacked and no packer consults `files` again.
-      expect(shipped.files).toBeUndefined();
+      expect(cleaned.files).toBeUndefined();
       expect(readTarballFile(tarball, "index.d.ts")).toBe("export {};\n");
-      expect(shipped.scripts).toEqual({ postinstall: "node index.js" });
       for (const [field, value] of Object.entries(consumerFacing))
-        expect(shipped[field]).toEqual(value);
+        expect(cleaned[field]).toEqual(value);
 
-      // A release pipeline attaches and attests the exact bytes that reach the registry, so
-      // the retained copy has to be the published tarball itself and not a re-pack, which
-      // would differ and make any attestation a lie.
-      const kept = path.join(out, path.basename(tarball));
-      expect(await readFile(kept)).toEqual(await readFile(tarball));
-
-      await cleanupExtracted(result.stdout);
+      // The report is the only output of a dry-run, so it has to describe the bytes that
+      // --tarball-out kept. A report listing files the retained tarball lacks is a lie.
+      for (const file of listTarball(tarball)) expect(result.stdout).toContain(file);
     } finally {
       await cleanup(fx.root);
     }
@@ -271,8 +260,9 @@ describe.concurrent("publish-clean", () => {
         NPM_CONFIG_JSON: "true",
       });
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      expect(finalTarballPath(result.stdout)).toMatch(/\.tgz$/);
-      await cleanupExtracted(result.stdout);
+      // Build chatter on stdout and a JSON-mode packer. Reporting the fixture's own file
+      // proves the right tarball was still found and read.
+      expect(result.stdout).toContain("index.js");
     } finally {
       await cleanup(fx.root);
     }
@@ -505,6 +495,29 @@ exit 1
       expect(result.stderr).toContain("Critical files must not be published");
       expect(result.stderr).toContain("config/deploy.key");
       expect(result.stdout).not.toContain("Final tarball");
+      const leftovers = (await readdir(temp)).filter((name) => name.startsWith("publish-clean-"));
+      expect(leftovers).toEqual([]);
+    } finally {
+      await cleanup(fx.root);
+      await cleanup(temp);
+    }
+  });
+
+  // The mode that reports instead of publishing used to keep its tree so the caller could
+  // look inside it, and nobody ever deleted one. The report is the output now; nothing is
+  // kept unless --tarball-out asks for it.
+  it("leaves no temporary tree after a successful dry-run", async () => {
+    const fx = await fixture(
+      { name: "fixture-dry-run-cleanup", version: "1.0.0", files: ["index.js"] },
+      { "index.js": "module.exports = 1;\n" },
+    );
+    const temp = await mkdtemp(path.join(tmpdir(), "publish-clean-tmp-"));
+    try {
+      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd(), {
+        TMPDIR: temp,
+      });
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expect(result.stdout).toContain("index.js");
       const leftovers = (await readdir(temp)).filter((name) => name.startsWith("publish-clean-"));
       expect(leftovers).toEqual([]);
     } finally {
