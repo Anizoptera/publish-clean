@@ -170,6 +170,15 @@ describe("archive reading", () => {
     expect(() => readArchive(truncated(source, BLOCK * 2 + 100))).toThrow(/truncated/);
   });
 
+  // The truncation the walk cannot feel: every entry reads cleanly and the archive simply
+  // stops. Left unrefused, the rewrite would emit an archive with no end-of-archive marker,
+  // built from entries that were all individually valid.
+  it("refuses an archive that stops on an entry boundary, with no end marker", () => {
+    const source = archive([{ name: "package/a.js", body: "a" }]);
+    const withoutMarker = gunzipSync(source).subarray(0, BLOCK * 2);
+    expect(() => readArchive(gzipSync(withoutMarker))).toThrow(/no end-of-archive marker/);
+  });
+
   it("keeps a filename a line-based listing would split in two", () => {
     const source = archive([{ name: "package/we\nird.js", body: "x" }]);
     expect(packageFiles(readArchive(source))).toEqual(["we\nird.js"]);

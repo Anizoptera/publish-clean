@@ -134,7 +134,7 @@ function reheader(original: Buffer, size: number): Buffer {
 export function readArchive(gzipped: Buffer): TarArchive {
   const tar = gunzipSync(gzipped);
   const entries: TarEntry[] = [];
-  let tail = tar.subarray(tar.length);
+  let tail: Buffer | null = null;
 
   for (let offset = 0; offset < tar.length;) {
     const header = tar.subarray(offset, offset + BLOCK);
@@ -168,6 +168,12 @@ export function readArchive(gzipped: Buffer): TarArchive {
     offset = end;
   }
 
+  // An archive ending on an entry boundary with no zero blocks is truncated too, and this is
+  // the truncation the walk cannot feel: every entry read cleanly. Refusing it here is also
+  // what keeps the rewrite honest, since the output is assembled from these entries plus this
+  // tail — with none, it would emit an archive with no end-of-archive marker at all.
+  if (tail === null)
+    throw new PublishCleanError("Tarball has no end-of-archive marker; the archive is truncated.");
   return { entries, tail };
 }
 
