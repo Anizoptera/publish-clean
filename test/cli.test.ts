@@ -138,6 +138,9 @@ describe("publish-clean", () => {
         await readFile(path.join(extractedPath(result.stdout), "package.json"), "utf8"),
       ) as Record<string, unknown>;
       expect(pkg.devDependencies).toBeUndefined();
+      // `files` selected these very bytes and cannot select again: the artifact it
+      // describes is already packed, and an install extracts all of it unfiltered.
+      expect(pkg.files).toBeUndefined();
       expect(pkg.scripts).toEqual({ postinstall: "node index.js" });
       await cleanupExtracted(result.stdout);
     } finally {
@@ -281,7 +284,7 @@ describe("publish-clean", () => {
 if [ "$1" = "--version" ]; then echo "11.5.1"; exit 0; fi
 if [ "$1" = "pack" ]; then
   shift
-  exec "$REAL_NPM" pack "$@"
+  PATH="$REAL_PATH" exec "$REAL_NPM" pack "$@"
 fi
 if [ "$1" = "publish" ]; then
   printf '%s\\n' "$*" > "${log}"
@@ -294,7 +297,16 @@ exit 1
       const result = runCli(
         ["--no-git-checks", fx.dir, "--", "--access", "public", "--tag", "latest"],
         process.cwd(),
-        { PATH: `${bin}:${process.env.PATH ?? ""}`, REAL_NPM: realNpm },
+        // REAL_PATH is this PATH without `bin`. `which npm` usually resolves to a version
+        // manager's shim (asdf, mise, volta), and a shim does not run the tool: it
+        // re-resolves it BY NAME. Handed a PATH whose first entry is this fake, it finds
+        // the fake, which execs the shim again — an unbounded fork/exec loop that presents
+        // as a hang and gets misread as slowness.
+        {
+          PATH: `${bin}:${process.env.PATH ?? ""}`,
+          REAL_NPM: realNpm,
+          REAL_PATH: process.env.PATH ?? "",
+        },
       );
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       const published = await readFile(log, "utf8");
@@ -435,7 +447,7 @@ exit 1
         path.join(bin, "npm"),
         `#!/bin/sh
 if [ "$1" = "--version" ]; then echo "11.5.1"; exit 0; fi
-if [ "$1" = "pack" ]; then shift; exec "$REAL_NPM" pack "$@"; fi
+if [ "$1" = "pack" ]; then shift; PATH="$REAL_PATH" exec "$REAL_NPM" pack "$@"; fi
 if [ "$1" = "publish" ]; then exit 0; fi
 echo "unexpected npm $*" >&2
 exit 1
@@ -444,6 +456,7 @@ exit 1
       const result = runCli(["--no-git-checks", fx.dir, "--", "--provenance"], process.cwd(), {
         PATH: `${bin}:${process.env.PATH ?? ""}`,
         REAL_NPM: realNpm,
+        REAL_PATH: process.env.PATH ?? "", // see the shim note above: no path back to the fake
         GITHUB_ACTIONS: "true",
         GITHUB_REPOSITORY: "Anizoptera/publish-clean",
       });
@@ -758,10 +771,19 @@ exit 1
       funding: "https://example.test/fund",
       engines: { node: ">=20" },
       sideEffects: false,
+      // Condition order decides which build each consumer gets, so this must survive
+      // byte-identical: a reordered or partially dropped map still installs and still
+      // imports, just from the wrong file, on one runtime only.
+      exports: { ".": { types: "./index.d.ts", bun: "./index.js", import: "./index.js" } },
     };
     const fx = await fixture(
-      { name: "fixture-kept-fields", version: "1.0.0", files: ["index.js"], ...declared },
-      { "index.js": "module.exports = 1;\n" },
+      {
+        name: "fixture-kept-fields",
+        version: "1.0.0",
+        files: ["index.js", "index.d.ts"],
+        ...declared,
+      },
+      { "index.js": "module.exports = 1;\n", "index.d.ts": "export {};\n" },
     );
     try {
       const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());

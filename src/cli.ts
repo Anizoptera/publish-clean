@@ -20,6 +20,13 @@ const DEV_FIELDS = new Set([
   // happens, so removing it here cannot open a bypass. In a published manifest npm never
   // reads it back.
   "private",
+  // A packing instruction, consumed once when a tarball is created — always from the
+  // SOURCE manifest, which this tool never touches. By the time this manifest exists the
+  // file set is frozen, and an install extracts every entry unfiltered. npm agrees: its
+  // registry normalisation deletes `files` from the served version document while keeping
+  // `exports` and `sideEffects`. Resolution belongs to those, never to this; measured
+  // identical across Node require/import/subpath, Bun, a bundler and tsc.
+  "files",
   "stylelint",
   "trustedDependencies",
   "wireit",
@@ -79,7 +86,6 @@ const RUNTIME_MANIFEST_FIELDS = new Set([
   "cpu",
   "engines",
   "exports",
-  "files",
   "imports",
   "libc",
   "license",
