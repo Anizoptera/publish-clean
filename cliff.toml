@@ -1,0 +1,51 @@
+# git-cliff writes a Keep a Changelog section into CHANGELOG.md from the commits since the
+# last tag. It runs once per release, from the `changelog` script, and only ever PREPENDS —
+# sections already in the file are never rewritten, so edits to a released section are
+# permanent and edits to the new one survive everything that follows.
+#
+# The generated section is a draft, not the deliverable. Commit subjects say what changed in
+# the tree; release notes say what a consumer gets. Edit the section before tagging.
+
+[changelog]
+# This must stay byte-identical to the top of CHANGELOG.md. `--prepend` inserts a new
+# section directly after the header it recognises; if it matches nothing, the section lands
+# above the file's own title instead.
+header = """# Changelog
+
+Notable changes per release, newest first. This file is the source of the GitHub Release
+notes: the section for a version is published verbatim when its tag is pushed.
+"""
+body = """
+
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group }}
+{% for commit in commits %}
+- {{ commit.message | split(pat="\n") | first | upper_first }}\
+{% endfor %}
+{% endfor %}
+"""
+trim = true
+
+[git]
+# Sections are Keep a Changelog's six, not conventional-commit type names: the file is read
+# by consumers deciding whether to upgrade, and "Added/Fixed/Security" answers that where
+# "feat/fix/chore" does not. Measured trap: git-cliff's own keepachangelog preset maps
+# `feat!` to "Changed" and marks the break nowhere, so the mapping is written out here.
+#
+# A breaking change is matched FIRST, because `feat!:` matches the plain `feat` pattern too
+# and the first matching parser wins.
+conventional_commits = true
+filter_commits = false
+commit_parsers = [
+  { message = "^[a-z]+!:|^[a-z]+\\([^)]*\\)!:", group = "Changed (breaking)" },
+  { message = "^feat", group = "Added" },
+  { message = "^fix", group = "Fixed" },
+  { message = "^perf", group = "Changed" },
+  { message = "^refactor", group = "Changed" },
+  { message = "^docs", group = "Documentation" },
+  # Everything else is listed rather than dropped. A note that silently hides work
+  # describes a release nobody shipped, and an unwanted line is deleted in one keystroke
+  # while a missing one is never noticed.
+  { message = ".*", group = "Other" },
+]

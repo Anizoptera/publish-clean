@@ -1,9 +1,13 @@
 name: Release
 
+# A release is a pushed tag, and nothing else is. `pnpm version <patch|minor|major>` bumps
+# the manifest, commits and tags in one step, so the tag and the published version cannot
+# disagree; `git push --follow-tags` starts this workflow. Dispatch is the repair path —
+# select the tag ref and every step below re-runs against it.
 on:
   workflow_dispatch:
   push:
-    branches: [main, "v*.x"]
+    tags: ["v*"]
 
 permissions:
   contents: read
@@ -13,31 +17,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release-please:
-    if: ${{ github.event_name == 'push' }}
-    runs-on: ubuntu-latest
-    # Both jobs here are bounded, because the runner default is six hours and this workflow
-    # serialises on a concurrency group that never cancels: one wedged run blocks every
-    # later release until a human notices. The publish job additionally holds a live OIDC
-    # identity, which must not stay alive any longer than the upload needs.
-    timeout-minutes: 5
-    permissions:
-      contents: write
-      pull-requests: write
-    outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-    steps:
-      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
-        id: release
-        with:
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
-
   publish:
-    needs: release-please
-    if: ${{ always() && (github.event_name == 'workflow_dispatch' || needs.release-please.outputs.release_created == 'true') }}
     runs-on: ubuntu-latest
+    # Bounded because the runner default is six hours and this workflow serialises on a
+    # concurrency group that never cancels: one wedged run blocks every later release until
+    # a human notices. This job also holds a live OIDC identity, which must not stay alive
+    # any longer than the upload needs.
     timeout-minutes: 15
     permissions:
       contents: write # attach the published tarball to the GitHub Release
@@ -59,6 +44,19 @@ jobs:
           node-version-file: .tool-versions
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
+
+      # The tag names the release; the manifest names what npm publishes. `pnpm version`
+      # writes both from one input, so they agree unless a tag was made by hand — in which
+      # case this stops before anything reaches the registry. Without it the mismatch first
+      # appears as an artifact attached to the wrong GitHub Release, after the npm version
+      # is already permanent.
+      - name: Refuse a tag that disagrees with the manifest
+        run: |
+          tagged="${GITHUB_REF_NAME#v}"
+          declared="$(node -p 'require("./package.json").version')"
+          test "$tagged" = "$declared" ||
+            { echo "::error::tag $GITHUB_REF_NAME does not match package.json $declared"; exit 1; }
+
       # No npm credential is passed to this job. Publishing authenticates with the
       # OIDC identity against the trusted publisher bound to this repository and this
       # workflow *filename*, so renaming or moving this file breaks publishing, and the
@@ -114,11 +112,30 @@ jobs:
         with:
           subject-path: release-artifacts/*.tgz
 
-      # The tag is derived from the manifest rather than taken from the release-please
-      # output so that a workflow_dispatch run recovering a failed release still attaches
-      # the artifact to the tag that release already created. release-please tags
-      # `v<version>` for this single-package repo. Failing here is intended: a published
-      # version whose GitHub Release carries no artifact is an incomplete release.
-      - run: gh release upload "v$(node -p 'require("./package.json").version')" release-artifacts/*.tgz --clobber
+      # CHANGELOG.md is the single source of the release notes, so what ships here is what
+      # was reviewed in the tagged commit — editable before the tag, never regenerated after
+      # it. `gh --generate-notes` cannot serve this: it lists merged pull requests, and work
+      # lands on main by direct push, so it renders an empty release (measured on v0.4.0 —
+      # one line, the old release bot's own PR).
+      #
+      # The section runs from `## [x.y.z]` to the next `## [`, a shape owned by cliff.toml.
+      # Extracting it here rather than with a third-party action is deliberate: this job
+      # holds the npm OIDC identity and write access to the Release, and four lines of awk
+      # are a smaller surface than any action added to that blast radius.
+      #
+      # An empty extraction fails the release. A version with no changelog section is the
+      # thin, contentless release note this whole arrangement exists to prevent, and the
+      # local `version` script refuses the same case before the tag is ever made.
+      - name: Publish the GitHub Release and attach the tarball
+        run: |
+          notes="$(awk -v h="## [${GITHUB_REF_NAME#v}]" '
+            index($0, h) == 1 { found = 1; next }
+            found && index($0, "## [") == 1 { exit }
+            found' CHANGELOG.md)"
+          test -n "$(printf '%s' "$notes" | tr -d '[:space:]')" ||
+            { echo "::error::CHANGELOG.md has no ${GITHUB_REF_NAME#v} section"; exit 1; }
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 ||
+            printf '%s\n' "$notes" | gh release create "$GITHUB_REF_NAME" --verify-tag --notes-file -
+          gh release upload "$GITHUB_REF_NAME" release-artifacts/*.tgz --clobber
         env:
           GH_TOKEN: ${{ github.token }}

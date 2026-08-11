@@ -40,11 +40,13 @@ each, which is the place to start if you want to argue with one.
 Focused Conventional Commits, with enough body that the next maintainer understands why
 the change exists.
 
-Pick the type by what a user can observe, not by how the edit looks. release-please cuts
-releases from `feat` and `fix` alone, so anything a consumer can see must be one of those
-even when the diff looks internal, and anything they cannot see must not be (`test:`,
-`chore:`, `ci:`, `docs:` are omitted from the changelog). A breaking change is marked `!`
-and releases as a minor while this package is pre-1.0.
+Pick the type by what a user can observe, not by how the edit looks: `feat` and `fix` for
+anything a consumer can see, `test:`, `chore:`, `ci:` or `docs:` for anything they cannot.
+The type does not decide whether a change ships — a pushed tag does — it decides which
+changelog group the subject drafts into, and every commit is drafted. Mark a breaking
+change `!`; pre-1.0 it releases as a minor.
+
+Write the subject for a stranger. It becomes the first draft of a public release note.
 
 ## Workflows
 

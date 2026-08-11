@@ -1,5 +1,8 @@
 # Changelog
 
+Notable changes per release, newest first. This file is the source of the GitHub Release
+notes: the section for a version is published verbatim when its tag is pushed.
+
 ## [0.4.0](https://github.com/Anizoptera/publish-clean/compare/v0.3.0...v0.4.0) (2026-08-11)
 
 
@@ -74,7 +77,3 @@
 * make cli build reproducible ([6fe8fff](https://github.com/Anizoptera/publish-clean/commit/6fe8fff46c8a1b067b0f2d422136153b3b006f5e))
 * publish cleaned npm tarballs ([1bf9a2e](https://github.com/Anizoptera/publish-clean/commit/1bf9a2eb73c3061c6608d9b9b7f24f7535d5cd3c))
 * stop tracking built cli artifact ([ba822da](https://github.com/Anizoptera/publish-clean/commit/ba822dabd49ecba68356c957bca3411c47d0b34a))
-
-## Changelog
-
-All notable changes are managed by release-please from Conventional Commits.
