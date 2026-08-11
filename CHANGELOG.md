@@ -3,6 +3,19 @@
 Notable changes per release, newest first. This file is the source of the GitHub Release
 notes: the section for a version is published verbatim when its tag is pushed.
 
+## [0.7.2] - 2026-08-11
+
+### Changed
+
+- **The published `dist/cli.js` is no longer compressed, so you can audit the file you install.**
+  It now reads statement for statement as the repository source does, types erased and nothing
+  else, and a diff against `src/` is a real check. Previously `mangle: false` kept the names and
+  comments while the compressor still rewrote the code underneath them — `const` to `let`, `===`
+  to `==`, `if (a) b()` to `a && b()`, an early return into a nested branch — leaving comments
+  describing control flow that no longer matched. This tool runs on your publish path and handles
+  registry credentials, which is a poor place to ask for trust in bytes nobody can read. The file
+  grows 1,157 gzipped bytes, downloaded once per developer.
+
 ## [0.7.1] - 2026-08-11
 
 ### Fixed
