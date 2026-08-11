@@ -3,6 +3,30 @@
 Notable changes per release, newest first. This file is the source of the GitHub Release
 notes: the section for a version is published verbatim when its tag is pushed.
 
+## [0.5.0] - 2026-08-11
+
+### Changed
+
+- `--dry-run` now prints the file list and the cleaned `package.json` instead of leaving an
+  extracted directory behind and printing its path. **Anything parsing `[dry-run] Extracted
+  package at:` or `[dry-run] Final tarball at:` out of stdout must switch to `--tarball-out
+  DIR`**, which writes the published bytes into a directory you name and own. No mode keeps a
+  temporary tree now, on success or on failure; every previous dry-run leaked one.
+- Node.js 22.14 or newer is required. That is the floor npm enforces before it will sign a
+  publish, so below it `--provenance` cannot work at all.
+
+### Fixed
+
+- `npm publish` runs from your package directory, so a project `.npmrc` is honoured. It
+  previously ran with the working directory inside a temporary tree; npm resolves its config
+  from the nearest ancestor holding a `package.json`, found none, and silently used defaults
+  instead of the registry and settings your project declared.
+- The tarball rewriter refuses GNU long-name entries. A path longer than 100 bytes is stored
+  in a preceding long-name entry, which can rename another archive member onto
+  `package/package.json` — the one file that decides what every consumer resolves.
+- The file set of the rewritten tarball is checked against the packed one again, by reading
+  both with `tar`. 0.4.0 shipped with no invariant on the rewriter's output at all.
+
 ## [0.4.0](https://github.com/Anizoptera/publish-clean/compare/v0.3.0...v0.4.0) (2026-08-11)
 
 

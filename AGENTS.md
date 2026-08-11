@@ -40,7 +40,7 @@
 - Do not add package-manager-specific behavior unless tests prove the published tarball invariant.
 - Split CLI args at `--` before parsing; everything after it belongs to `npm publish`.
 - Keep npm publication in `.github/workflows/release.yml`; npm trusted publishing is keyed by workflow filename.
-- The publish job holds the npm credential and the OIDC identity, so it only builds, publishes, attests, and attaches. Never run `bun run check` there: Check already ran it on the same commit without credentials, and re-running it executes the test suite — which puts fake executables on `PATH` and runs fixture lifecycle scripts — beside a live token. It also behaves differently, because `id-token: write` defines `ACTIONS_ID_TOKEN_REQUEST_URL` and the CLI treats that as a trusted-publish context.
+- The publish job holds the npm credential and the OIDC identity, so it only builds, publishes, attests, and attaches. Never run `bun run check` there: it executes the test suite — which puts fake executables on `PATH` and runs fixture lifecycle scripts — beside a live token, and it behaves differently anyway, because `id-token: write` defines `ACTIONS_ID_TOKEN_REQUEST_URL` and the CLI treats that as a trusted-publish context. The lane still gates the release, through `preversion`: it runs locally before the bump and a non-zero exit aborts, so no tag exists to push. Do not restate this as "Check already ran on this commit" — the tagged commit is the version bump, created after Check last ran.
 - Every release step must survive a re-run, because a run that publishes and then fails is otherwise unrepairable. Only the npm publish refuses; skip it when the version is already on the registry and let the remaining steps run.
 - `CHANGELOG.md` is excluded from the formatter. `git-cliff` writes sections into it, and a formatter that reflows generated output turns every release into a lane failure.
 - The npm dist-tag is derived from the tag, never hardcoded: a version with a prerelease
@@ -50,8 +50,10 @@
 - Use `--provenance` for public npmjs.com releases; trusted publishing requires Node.js 22.14.0+ and npm 11.5.1+.
 - The primary pre-publish self-application check is the freshly built `dist/cli.js` against its cleaned artifact.
 - After npm publication, registry-install smoke checks may update this repo to the published package and regenerate the lockfile, but they do not replace the built-current CLI gate.
-- Releasing is three commands and no bot: `bun run changelog v<next>` drafts the section from the
-  commits since the last tag, you EDIT it, then `pnpm version <next>` and `git push --follow-tags`.
+- Releasing is four commands and no bot: `bun run changelog v<next>` drafts the section from the
+  commits since the last tag, you EDIT it, you COMMIT it, then `pnpm version <next>` and
+  `git push --follow-tags`. The commit is not optional bookkeeping: `pnpm version` aborts on a
+  dirty tree (`ERR_PNPM_UNCLEAN_WORKING_TREE`), so the drafted section must already be committed.
   The `version` script refuses to commit or tag when `CHANGELOG.md` has no section for the new
   version, and the workflow refuses to publish when that section is empty.
 - Commit TYPE no longer decides whether a change ships — the tag does. Types only pick which
