@@ -1,4 +1,4 @@
-import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -12,27 +12,37 @@ interface Fixture {
 }
 
 /**
- * Every invocation is bounded, because `spawnSync` blocks the worker thread and vitest's
- * own `testTimeout` cannot interrupt it: the timer never gets a turn to fire. Without a
- * bound here, one wedged subprocess hangs the whole suite until the CI job's multi-hour
- * ceiling, and locally until someone notices.
+ * Runs the built CLI without blocking the worker thread.
  *
- * The cap is deliberately far above the real cost — CI runs all of these in about a
- * minute — so it can only ever catch a genuine wedge, never a cold pnpm store.
+ * Async on purpose, and it is not a style choice. `spawnSync` holds the thread for the
+ * whole run, so vitest's own `testTimeout` can never fire — its timer gets no turn — and
+ * every case here serialises behind the last even though each one is an independent
+ * process against its own temp directory. Yielding restores both: the real timeout
+ * applies, and the suite is free to run these concurrently.
+ *
+ * The spawn keeps its own bound as well, because a timeout is the only thing that ends a
+ * wedged child: failing the test would otherwise leave the process alive.
  */
-const CLI_TIMEOUT_MS = 60_000;
+const CLI_TIMEOUT_MS = 30_000;
 
 function runCli(
   args: readonly string[],
   cwd: string,
   env?: Record<string, string>,
-): SpawnSyncReturns<string> {
-  return spawnSync("node", [CLI, ...args], {
-    cwd,
-    encoding: "utf8",
-    env: { ...process.env, ...env },
-    timeout: CLI_TIMEOUT_MS,
-    killSignal: "SIGKILL",
+): Promise<{ status: null | number; stderr: string; stdout: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("node", [CLI, ...args], {
+      cwd,
+      env: { ...process.env, ...env },
+      timeout: CLI_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+    child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+    child.on("error", reject);
+    child.on("close", (status) => resolve({ status, stderr, stdout }));
   });
 }
 
@@ -86,16 +96,19 @@ function readTarballFile(tarball: string, file: string): string {
   return result.stdout;
 }
 
-describe("publish-clean", () => {
-  it("prints all supported options in help", () => {
-    const result = runCli(["--help"], process.cwd());
+// Concurrent because each case is an independent process against its own temp directory,
+// sharing nothing: the only reason they ever ran one at a time was the blocking spawn.
+// The work is real packing, so the ceiling is cores, not this setting.
+describe.concurrent("publish-clean", () => {
+  it("prints all supported options in help", async () => {
+    const result = await runCli(["--help"], process.cwd());
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
     expect(result.stdout).toContain("--no-git-checks");
     expect(result.stdout).toContain("npm-publish-args");
   });
 
-  it("rejects unknown CLI options before publish args", () => {
-    const result = runCli(["--dryrun"], process.cwd());
+  it("rejects unknown CLI options before publish args", async () => {
+    const result = await runCli(["--dryrun"], process.cwd());
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("Unknown option");
   });
@@ -110,7 +123,7 @@ describe("publish-clean", () => {
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(["--dry-run", "--no-git-checks", fx.dir, "stray"], process.cwd());
+      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir, "stray"], process.cwd());
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("Unexpected positional arguments");
     } finally {
@@ -132,7 +145,7 @@ describe("publish-clean", () => {
       { "index.js": "export const ok = true;\n" },
     );
     try {
-      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       const pkg = JSON.parse(
         await readFile(path.join(extractedPath(result.stdout), "package.json"), "utf8"),
@@ -154,7 +167,7 @@ describe("publish-clean", () => {
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(["--dry-run", "--no-git-checks", "--", "--tag", "next"], fx.dir);
+      const result = await runCli(["--dry-run", "--no-git-checks", "--", "--tag", "next"], fx.dir);
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       expect(result.stdout).toContain("[dry-run] Extracted package at:");
       await cleanupExtracted(result.stdout);
@@ -169,7 +182,7 @@ describe("publish-clean", () => {
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       expect(finalTarballPath(result.stdout)).toMatch(/\.tgz$/);
       await cleanupExtracted(result.stdout);
@@ -190,7 +203,7 @@ describe("publish-clean", () => {
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       const pkg = JSON.parse(
         readTarballFile(finalTarballPath(result.stdout), "package.json"),
@@ -213,7 +226,7 @@ describe("publish-clean", () => {
     );
     const out = path.join(fx.root, "artifacts");
     try {
-      const result = runCli(
+      const result = await runCli(
         ["--dry-run", "--no-git-checks", "--tarball-out", out, fx.dir],
         process.cwd(),
       );
@@ -240,7 +253,7 @@ describe("publish-clean", () => {
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       expect(finalTarballPath(result.stdout)).toMatch(/\.tgz$/);
       await cleanupExtracted(result.stdout);
@@ -255,7 +268,7 @@ describe("publish-clean", () => {
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd(), {
+      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd(), {
         NPM_CONFIG_JSON: "true",
       });
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
@@ -294,7 +307,7 @@ echo "unexpected npm $*" >&2
 exit 1
 `,
       );
-      const result = runCli(
+      const result = await runCli(
         ["--no-git-checks", fx.dir, "--", "--access", "public", "--tag", "latest"],
         process.cwd(),
         // REAL_PATH is this PATH without `bin`. `which npm` usually resolves to a version
@@ -337,7 +350,7 @@ echo "No version is set for command pnpm" >&2
 exit 126
 `,
       );
-      const result = runCli(["--no-git-checks", fx.dir], process.cwd(), {
+      const result = await runCli(["--no-git-checks", fx.dir], process.cwd(), {
         PATH: `${bin}:${process.env.PATH ?? ""}`,
       });
       expect(result.status).not.toBe(0);
@@ -356,7 +369,7 @@ exit 126
     try {
       // Node's own directory keeps the CLI runnable while leaving every package manager
       // out of reach, which is the only way to exercise a genuine ENOENT.
-      const result = runCli(["--no-git-checks", fx.dir], process.cwd(), {
+      const result = await runCli(["--no-git-checks", fx.dir], process.cwd(), {
         PATH: path.dirname(process.execPath),
       });
       expect(result.status).not.toBe(0);
@@ -383,9 +396,13 @@ echo "unexpected npm $*" >&2
 exit 1
 `,
       );
-      const result = runCli(["--no-git-checks", fx.dir, "--", "--provenance"], process.cwd(), {
-        PATH: `${bin}:${process.env.PATH ?? ""}`,
-      });
+      const result = await runCli(
+        ["--no-git-checks", fx.dir, "--", "--provenance"],
+        process.cwd(),
+        {
+          PATH: `${bin}:${process.env.PATH ?? ""}`,
+        },
+      );
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("requires npm 11.5.1");
     } finally {
@@ -414,7 +431,7 @@ echo "unexpected npm $*" >&2
 exit 1
 `,
       );
-      const result = runCli(["--no-git-checks", fx.dir], process.cwd(), {
+      const result = await runCli(["--no-git-checks", fx.dir], process.cwd(), {
         PATH: `${bin}:${process.env.PATH ?? ""}`,
       });
       expect(result.status).not.toBe(0);
@@ -453,13 +470,17 @@ echo "unexpected npm $*" >&2
 exit 1
 `,
       );
-      const result = runCli(["--no-git-checks", fx.dir, "--", "--provenance"], process.cwd(), {
-        PATH: `${bin}:${process.env.PATH ?? ""}`,
-        REAL_NPM: realNpm,
-        REAL_PATH: process.env.PATH ?? "", // see the shim note above: no path back to the fake
-        GITHUB_ACTIONS: "true",
-        GITHUB_REPOSITORY: "Anizoptera/publish-clean",
-      });
+      const result = await runCli(
+        ["--no-git-checks", fx.dir, "--", "--provenance"],
+        process.cwd(),
+        {
+          PATH: `${bin}:${process.env.PATH ?? ""}`,
+          REAL_NPM: realNpm,
+          REAL_PATH: process.env.PATH ?? "", // see the shim note above: no path back to the fake
+          GITHUB_ACTIONS: "true",
+          GITHUB_REPOSITORY: "Anizoptera/publish-clean",
+        },
+      );
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("repository.url must match");
     } finally {
@@ -473,7 +494,7 @@ exit 1
     await mkdir(dir, { recursive: true });
     await writeFile(path.join(dir, "package.json"), "{\n");
     try {
-      const result = runCli(["--dry-run", "--no-git-checks", dir], process.cwd());
+      const result = await runCli(["--dry-run", "--no-git-checks", dir], process.cwd());
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain(path.join(dir, "package.json"));
     } finally {
@@ -487,7 +508,7 @@ exit 1
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("ERR_PNPM_INVALID_PACKAGE_NAME");
     } finally {
@@ -501,7 +522,7 @@ exit 1
       { "index.js": "module.exports = 1;\n", ".env": "TOKEN=secret\n" },
     );
     try {
-      const result = runCli(
+      const result = await runCli(
         ["--dry-run", "--no-git-checks", "--skip-file-check", fx.dir],
         process.cwd(),
       );
@@ -530,7 +551,7 @@ exit 1
       },
     );
     try {
-      const result = runCli(
+      const result = await runCli(
         ["--dry-run", "--no-git-checks", "--skip-file-check", fx.dir],
         process.cwd(),
       );
@@ -552,7 +573,7 @@ exit 1
     );
     const temp = await mkdtemp(path.join(tmpdir(), "publish-clean-tmp-"));
     try {
-      const result = runCli(
+      const result = await runCli(
         ["--dry-run", "--no-git-checks", "--skip-file-check", fx.dir],
         process.cwd(),
         { TMPDIR: temp },
@@ -574,7 +595,7 @@ exit 1
     );
     const temp = await mkdtemp(path.join(tmpdir(), "publish-clean-tmp-"));
     try {
-      const result = runCli(["--guard-only", "--no-git-checks", fx.dir], process.cwd(), {
+      const result = await runCli(["--guard-only", "--no-git-checks", fx.dir], process.cwd(), {
         TMPDIR: temp,
       });
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
@@ -594,7 +615,7 @@ exit 1
     );
     try {
       spawnSync("git", ["init"], { cwd: fx.dir, stdio: "ignore" });
-      const result = runCli(["--guard-only", fx.dir], process.cwd());
+      const result = await runCli(["--guard-only", fx.dir], process.cwd());
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("Source package has uncommitted changes");
     } finally {
@@ -613,7 +634,7 @@ exit 1
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("unresolved monorepo-only dependency specs");
       expect(result.stderr).toContain("packs with pnpm");
@@ -634,7 +655,7 @@ exit 1
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("publish-clean.devFields");
       expect(result.stderr).toContain("dependencies");
@@ -656,7 +677,7 @@ exit 1
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("missing.js");
       expect(result.stderr).toContain("bin/missing.js");
@@ -677,7 +698,7 @@ exit 1
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("Manifest declares invalid package paths");
       expect(result.stderr).toContain("../fixture-path-traversal-1.0.0.tgz");
@@ -692,7 +713,7 @@ exit 1
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd(), {
+      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd(), {
         npm_config_user_agent: "npm/11.0.0 node/v24",
       });
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
@@ -720,7 +741,7 @@ exit 1
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       expect(result.stderr).toContain("someToolConfig");
       expect(result.stderr).toContain(`"devFields": ["someToolConfig"]`);
@@ -743,23 +764,32 @@ exit 1
   // ways a key file evades a pattern are the failures that matter most. Both cases here
   // shipped silently before: an SSH key carries no extension, and on the case-insensitive
   // filesystems most packages are built on, `Server.PEM` is the same file as `server.pem`.
-  it.each(["id_rsa", "deploy/id_ed25519", "Server.PEM", "certs/private.Key"])(
-    "refuses to publish %s",
-    async (secret) => {
-      const fx = await fixture(
-        { name: "fixture-key-leak", version: "1.0.0", files: ["index.js", secret.split("/")[0]] },
-        { "index.js": "module.exports = 1;\n", [secret]: "PRIVATE KEY\n" },
-      );
-      try {
-        const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
-        expect(result.status, `${result.stdout}\n${result.stderr}`).not.toBe(0);
-        expect(result.stderr).toContain("Critical files must not be published");
-        expect(result.stderr).toContain(secret);
-      } finally {
-        await cleanup(fx.root);
-      }
-    },
-  );
+  // One package carrying every evasion at once, rather than one pipeline per filename:
+  // the patterns are a pure decision over a path list, so re-running two package managers
+  // per name buys nothing. It also asks the harder question, which per-name cases could
+  // not: a guard that stopped at the FIRST offender passed every one of them.
+  it("refuses to publish every private key it can recognise, naming all of them", async () => {
+    const secrets = ["id_rsa", "deploy/id_ed25519", "Server.PEM", "certs/private.Key"];
+    const fx = await fixture(
+      {
+        name: "fixture-key-leak",
+        version: "1.0.0",
+        files: ["index.js", ...secrets.map((s) => s.split("/")[0]!)],
+      },
+      {
+        "index.js": "module.exports = 1;\n",
+        ...Object.fromEntries(secrets.map((s) => [s, "PRIVATE KEY\n"])),
+      },
+    );
+    try {
+      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+      expect(result.status, `${result.stdout}\n${result.stderr}`).not.toBe(0);
+      expect(result.stderr).toContain("Critical files must not be published");
+      for (const secret of secrets) expect(result.stderr).toContain(secret);
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
 
   // Cleaning is subtraction, so it fails by taking too much, and a field that quietly
   // vanished leaves no trace in the artifact. `repository` is the sharpest case: losing it
@@ -786,7 +816,7 @@ exit 1
       { "index.js": "module.exports = 1;\n", "index.d.ts": "export {};\n" },
     );
     try {
-      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       const tarball = /^\[dry-run\] Final tarball at: (.+)$/m.exec(result.stdout)?.[1];
       const shipped = JSON.parse(
@@ -817,7 +847,7 @@ exit 1
       { "index.js": "module.exports = 1;\n" },
     );
     try {
-      const result = runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       expect(result.stderr).not.toContain("contributes");
 
