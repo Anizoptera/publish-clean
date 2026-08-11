@@ -252,12 +252,13 @@ export function replaceManifest(archive: TarArchive, manifest: string): Buffer {
   // WORSE on a 2.5MB corpus. Node writes no mtime into the gzip header, so the output stays
   // byte-identical across runs, which is what lets a re-run repair a release truthfully.
   //
-  // That reproducibility is per-RUNTIME, not universal, so releases run this under `node` and
-  // never under `bun`. Measured 2026-08-11 on three corpora: Node 24.15.0 and 26.7.0 agree
-  // byte for byte despite shipping different zlib builds (1.3.1 vs Chromium's 1.3.2.1-motley),
-  // because those forks optimise speed rather than match selection; Bun 1.3.14, which carries
-  // libdeflate, encodes the same bytes differently — 0.19% smaller on a tarball, 0.06% larger
-  // on prose. Every output is valid gzip and decompresses identically, so this costs nothing
-  // at install time and everything to an attestation that must name the published bytes.
+  // That reproducibility is per-RUNTIME: the encoder belongs to whatever executes this file.
+  // Measured 2026-08-11 on three corpora — Node 24.15.0 and 26.7.0 agree byte for byte despite
+  // shipping different zlib builds (1.3.1 vs Chromium's 1.3.2.1-motley), because those forks
+  // optimise speed rather than match selection. Bun 1.3.14 carries libdeflate and encodes the
+  // same input differently: 0.17-0.19% SMALLER on tar-shaped data (this package: 27,430 against
+  // 27,476 bytes) and 0.06% larger on prose. Every output is valid gzip whose plaintext is
+  // identical, so the runtime is free to differ per publisher — but a single release must not
+  // change runtime midway, because a repair re-run has to reproduce the published bytes exactly.
   return gzipSync(Buffer.concat(parts), { level: 9 });
 }

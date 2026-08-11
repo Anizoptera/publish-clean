@@ -61,6 +61,24 @@ supply-chain risk of its own, and this one has no transitive code to audit.
 `--provenance` additionally needs npm 11.5.1+ and a cloud CI runner. npm will not sign a
 publish that came from your laptop.
 
+### Running it under Bun packs a smaller tarball
+
+gzip encoding belongs to whichever runtime executes the CLI, and Bun's (libdeflate) beats
+Node's zlib on tar-shaped data: 0.17% smaller for this package, 0.28% for a sibling one, with
+a byte-identical archive inside. To get it, run the file rather than the bin — the bin's
+shebang sends it to Node, and so does `bunx`:
+
+```sh
+bun ./node_modules/.bin/publish-clean
+```
+
+Not `bunx --bun`, which forces Bun onto the `pnpm` this tool spawns as well; pnpm 11 needs
+`node:sqlite`, which Bun does not implement, and that is the error you get.
+
+Either runtime produces valid gzip with identical contents, so the choice is free. The one
+rule is not to switch runtimes _within_ a version: if a release is re-run to repair its
+artifacts, the bytes have to come out the same, and the two encoders do not agree.
+
 ## Package managers
 
 Why pnpm packs and npm publishes: pnpm is the only packer that resolves every workspace

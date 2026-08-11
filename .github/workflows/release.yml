@@ -59,9 +59,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Both versions come from `.tool-versions`, the single toolchain declaration
-      # asdf also reads. Bun builds `dist` and Node runs the CLI that packs and
-      # signs, so drift between a laptop and a runner is drift in the artifact.
+      # Both versions come from `.tool-versions`, the single toolchain declaration asdf also
+      # reads. Bun builds `dist` and runs the CLI that packs; Node is still required because
+      # `npm` is a Node script and it is npm that uploads and signs. Drift in either version
+      # is drift in the artifact, which is why neither is sourced from the runner's defaults.
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .tool-versions
@@ -112,11 +113,13 @@ jobs:
       # original order, and the gzip wrapper embeds no timestamp of its own. Verified
       # by packing the same input twice and comparing digests.
       #
-      # Run with `node`, never `bun`, however Bun-first the rest of this repository is: the
-      # gzip encoder is the runtime's, and Bun's (libdeflate) emits different bytes for the
-      # same input than Node's zlib. A repair re-run under the other runtime would attest and
-      # attach an artifact the registry does not have. Node versions agree with each other —
-      # measured across 24.15.0 and 26.7.0, see src/tarball.ts.
+      # Run with `bun`, and never switch a released tag to another runtime: the gzip encoder
+      # belongs to whoever executes the CLI. Bun's (libdeflate) packs this package into 27,430
+      # bytes against Node's 27,476 for byte-identical contents, which is why it is the one
+      # chosen here — but the same fact means a repair re-run under the other runtime would
+      # attest and attach an artifact the registry does not have. `.tool-versions` pins the
+      # exact Bun, and a re-run checks out the tag, so the pin travels with the release.
+      # Measurements and the Node-to-Node comparison: src/tarball.ts.
       - name: Pack, and publish unless this version is already on the registry
         run: |
           # pnpm is a devDependency, so the lockfile is the single place its version is
@@ -141,7 +144,7 @@ jobs:
             *-*) dist_tag=next ;;
             *) dist_tag=latest ;;
           esac
-          node dist/cli.js $mode --tarball-out release-artifacts -- --access public --tag "$dist_tag" --provenance
+          bun dist/cli.js $mode --tarball-out release-artifacts -- --access public --tag "$dist_tag" --provenance
 
       # npm's own provenance covers the registry; this is the second, registry-
       # independent path (`gh attestation verify`). The subject is the exact tarball

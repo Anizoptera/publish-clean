@@ -92,11 +92,21 @@ function readJson(file: string): JsonObject {
   return parsed;
 }
 
-function npmVersion(): readonly [number, number, number] {
-  const raw = run("npm", ["--version"], process.cwd()).trim();
+/**
+ * Asks an executable on PATH what version it is, e.g. `24.15.0` from node's `v24.15.0`.
+ *
+ * Both provenance floors are asked of PATH rather than read from this process, because the
+ * process that has to satisfy them is npm's, not this one. `npm` is a `#!/usr/bin/env node`
+ * script, so the Node enforcing the floor is whichever one PATH resolves — and that is not
+ * necessarily the one executing this file. Under Bun the gap is total: `process.versions.node`
+ * is a compatibility claim (1.3.14 reports 24.3.0) about a runtime that never runs npm at all,
+ * so reading it would answer a question nobody asked while looking exactly like a check.
+ */
+function toolVersion(command: string): readonly [number, number, number] {
+  const raw = run(command, ["--version"], process.cwd()).trim().replace(/^v/, "");
   const parts = raw.split(".").map((part) => Number.parseInt(part, 10));
   if (parts.length < 3 || parts.some((part) => Number.isNaN(part)))
-    throw new PublishCleanError(`Unable to parse npm version: ${raw}`);
+    throw new PublishCleanError(`Unable to parse ${command} version: ${raw}`);
   return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0];
 }
 
@@ -115,16 +125,15 @@ function publishEnv(): TrustedPublishEnv {
 
 function assertTrustedPublishingRuntime(pkg: JsonObject, publishArgs: readonly string[]): void {
   if (!wantsTrustedPublish(pkg, publishArgs, publishEnv())) return;
-  const actual = npmVersion();
-  if (!isAtLeast(actual, MIN_TRUSTED_NPM_VERSION))
+  const npm = toolVersion("npm");
+  if (!isAtLeast(npm, MIN_TRUSTED_NPM_VERSION))
     throw new PublishCleanError(
-      `Trusted npm publishing requires npm ${MIN_TRUSTED_NPM_VERSION.join(".")} or newer; found ${actual.join(".")}.`,
+      `Trusted npm publishing requires npm ${MIN_TRUSTED_NPM_VERSION.join(".")} or newer; found ${npm.join(".")}.`,
     );
-  const node = process.versions.node.split(".").map(Number);
-  const nodeVersion = [node[0] ?? 0, node[1] ?? 0, node[2] ?? 0] as const;
-  if (isAtLeast(nodeVersion, MIN_TRUSTED_NODE_VERSION)) return;
+  const node = toolVersion("node");
+  if (isAtLeast(node, MIN_TRUSTED_NODE_VERSION)) return;
   throw new PublishCleanError(
-    `Trusted npm publishing requires Node.js ${MIN_TRUSTED_NODE_VERSION.join(".")} or newer; found ${process.versions.node}.`,
+    `Trusted npm publishing requires Node.js ${MIN_TRUSTED_NODE_VERSION.join(".")} or newer; found ${node.join(".")}.`,
   );
 }
 
