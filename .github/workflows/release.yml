@@ -111,6 +111,12 @@ jobs:
       # deleting keys from the packed one, which leaves the surviving keys in their
       # original order, and the gzip wrapper embeds no timestamp of its own. Verified
       # by packing the same input twice and comparing digests.
+      #
+      # Run with `node`, never `bun`, however Bun-first the rest of this repository is: the
+      # gzip encoder is the runtime's, and Bun's (libdeflate) emits different bytes for the
+      # same input than Node's zlib. A repair re-run under the other runtime would attest and
+      # attach an artifact the registry does not have. Node versions agree with each other —
+      # measured across 24.15.0 and 26.7.0, see src/tarball.ts.
       - name: Pack, and publish unless this version is already on the registry
         run: |
           # pnpm is a devDependency, so the lockfile is the single place its version is
