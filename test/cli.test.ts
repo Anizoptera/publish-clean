@@ -21,7 +21,8 @@ interface Fixture {
  * applies, and the suite is free to run these concurrently.
  *
  * The spawn keeps its own bound as well, because a timeout is the only thing that ends a
- * wedged child: failing the test would otherwise leave the process alive.
+ * wedged child: failing the test would otherwise leave the process alive. It must stay under
+ * vitest's `testTimeout`, or vitest fails the case first and the child outlives the run.
  */
 const CLI_TIMEOUT_MS = 30_000;
 
