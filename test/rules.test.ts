@@ -136,12 +136,6 @@ describe.concurrent("manifest cleaning", () => {
     expect(cleaned.repository).toEqual({ type: "git", url: "git+https://example.test/x.git" });
   });
 
-  // `files` selected the packed bytes and cannot select again: the artifact it describes is
-  // already built, and an install extracts all of it unfiltered.
-  it("removes files, which no longer decides anything once the tarball exists", () => {
-    expect(stripManifest({ name: "x", files: ["index.js"] }, []).files).toBeUndefined();
-  });
-
   it("keeps only the scripts an install actually runs", () => {
     const cleaned = stripManifest(
       { name: "x", scripts: { build: "tsc", test: "vitest", postinstall: "node index.js" } },

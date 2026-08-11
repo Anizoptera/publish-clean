@@ -161,7 +161,12 @@ describe.concurrent("publish-clean", () => {
         name: "fixture-complete",
         version: "1.0.0",
         type: "module",
-        files: ["index.js", "index.d.ts"],
+        // `.gitignore` is both shipped and excludes a shipped file, which is the minimal shape
+        // that catches a manifest cleaner stripping `files`: npm would then have no selection
+        // instruction, fall back to this `.gitignore`, and drop `index.d.ts` from the final
+        // tarball. The CLI fails the publish outright when that happens, so this fixture needs
+        // no assertion of its own to stay red.
+        files: ["index.js", "index.d.ts", ".gitignore"],
         scripts: { build: "tsc", postinstall: "node index.js" },
         devDependencies: { typescript: "^5.0.0" },
         // Unrecognised, and each half of the response matters: staying silent hides the
@@ -175,7 +180,11 @@ describe.concurrent("publish-clean", () => {
         "publish-clean": { keepFields: ["contributes"] },
         ...consumerFacing,
       },
-      { "index.js": "export const ok = true;\n", "index.d.ts": "export {};\n" },
+      {
+        "index.js": "export const ok = true;\n",
+        "index.d.ts": "export {};\n",
+        ".gitignore": "index.d.ts\n",
+      },
     );
     const out = path.join(fx.root, "artifacts");
     try {
@@ -194,9 +203,6 @@ describe.concurrent("publish-clean", () => {
         await readFile(path.join(extractedPath(result.stdout), "package.json"), "utf8"),
       ) as Record<string, unknown>;
       expect(cleaned.devDependencies).toBeUndefined();
-      // `files` selected these very bytes and cannot select again: the artifact it describes
-      // is already packed, and an install extracts all of it unfiltered.
-      expect(cleaned.files).toBeUndefined();
       expect(cleaned["publish-clean"]).toBeUndefined();
       expect(cleaned.scripts).toEqual({ postinstall: "node index.js" });
       expect(cleaned.someToolConfig).toEqual({ threshold: 5 });
@@ -215,7 +221,9 @@ describe.concurrent("publish-clean", () => {
         unknown
       >;
       expect(shipped.devDependencies).toBeUndefined();
-      expect(shipped.files).toBeUndefined();
+      // The file this package's own `.gitignore` excludes: present only because the cleaned
+      // manifest still carries the selection instruction npm re-reads when it packs.
+      expect(readTarballFile(tarball, "index.d.ts")).toBe("export {};\n");
       expect(shipped.scripts).toEqual({ postinstall: "node index.js" });
       for (const [field, value] of Object.entries(consumerFacing))
         expect(shipped[field]).toEqual(value);
