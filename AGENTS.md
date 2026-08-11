@@ -61,4 +61,10 @@
   omitted. Also avoid landing a defect and its fix in one unreleased range under `fix:`: both entries
   publish, they read as cancelling, and they describe a bug no released version ever had. Needing to
   hand-curate a changelog before release is the symptom of either mistake.
+- A breaking change is marked `!` and releases as a MINOR while this package is pre-1.0, because
+  `release-please-config.json` sets `bump-minor-pre-major`. Without it release-please defaults that
+  flag to false (`options.bumpMinorPreMajor === true` in its default versioning strategy), so the
+  first `!` commit would have cut 1.0.0 — declaring the API stable as a side effect of describing a
+  change. Reaching 1.0.0 is a decision, never a bump. The config carries no comments, so the reason
+  lives here; its `$schema` is what catches a mistyped key, since the schema refuses unknown ones.
 - Run `bun run check` before committing.
