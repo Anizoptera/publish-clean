@@ -5,33 +5,32 @@ import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { assertDeclaredFiles, assertSameEntries, validatePackedFiles } from "./artifact";
+import { PublishCleanError } from "./error";
+import { isObject, stableJson, stringifyJson } from "./json";
+import type { JsonObject } from "./json";
 import {
-  MIN_TRUSTED_NODE_VERSION,
-  MIN_TRUSTED_NPM_VERSION,
   PUBLISH_ADVISORY,
-  PublishCleanError,
-  assertDeclaredFiles,
   assertFilesField,
   assertNoLostConsumerFields,
   assertNoMonorepoProtocols,
   assertPublicPackage,
-  assertRepositoryForTrustedPublish,
-  assertSameEntries,
   customDevFields,
-  isAtLeast,
-  isObject,
   keptFields,
   packageConfig,
-  stableJson,
-  stringifyJson,
   stripManifest,
   unrecognizedFieldsReport,
-  validatePackedFiles,
-  wantsTrustedPublish,
   withRegistry,
-} from "./rules";
-import type { JsonObject, TrustedPublishEnv } from "./rules";
+} from "./manifest";
 import { replaceTarballManifest } from "./tarball";
+import {
+  MIN_TRUSTED_NODE_VERSION,
+  MIN_TRUSTED_NPM_VERSION,
+  assertRepositoryForTrustedPublish,
+  isAtLeast,
+  wantsTrustedPublish,
+} from "./trusted-publish";
+import type { TrustedPublishEnv } from "./trusted-publish";
 
 const TOOL_PROBE_TIMEOUT_MS = 10_000;
 

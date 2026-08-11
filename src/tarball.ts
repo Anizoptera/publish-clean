@@ -15,7 +15,7 @@
  */
 import { gunzipSync, gzipSync } from "node:zlib";
 
-import { PublishCleanError } from "./rules";
+import { PublishCleanError } from "./error";
 
 const BLOCK = 512;
 const NAME_LEN = 100;
