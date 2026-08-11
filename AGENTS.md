@@ -1,18 +1,14 @@
 # @anizoptera/publish-clean
 
 - Keep this CLI dependency-free at runtime.
-- Use `pnpm pack` as the source of truth for package file selection and workspace/catalog resolution.
-  Never swap it for `bun pm pack` on the grounds that this repo runs on Bun. Measured against pnpm 11.21,
-  bun 1.3.14 and npm 11.19: file selection, file modes and `files` patterns are identical across all three,
-  so they decide nothing. pnpm resolves from the packing package's OWN `node_modules`, so it also packs a Bun
-  workspace (Bun gives each package its own) while Yarn needs a `pnpm-workspace.yaml` and one `pnpm install`
-  first, because Yarn hoists to the root; bun reads `bun.lock` and refuses whatever it did not install. Bun
-  additionally mangles an aliased workspace dep (`workspace:<name>@<range>`) into an invalid npm spec and
-  exits 0, and pnpm alone applies `publishConfig` field overrides. npm never adopted `workspace:` at all
-  and packs it verbatim, also exiting 0.
-- The price of pnpm is `bundleDependencies`: a symlinked store has nothing to copy, so pnpm refuses such a
-  package outright, standalone or not. The refusal is loud and names the fix (`nodeLinker: hoisted`). Do
-  not answer it by switching packers, which forfeits everything above.
+- Use `pnpm pack` as the source of truth for file selection and workspace/catalog resolution. NEVER swap it
+  for `bun pm pack` on the grounds that this repo runs on Bun, nor for `npm pack`. File selection is
+  identical across all three and decides nothing; pnpm alone resolves every workspace layout it can be
+  handed, applies `publishConfig` field overrides, and refuses what it cannot resolve instead of packing it
+  broken. Its one price is `bundleDependencies`, which pnpm refuses loudly while naming the fix
+  (`nodeLinker: hoisted`) — do not answer that by switching packers, which forfeits the rest. Measurements,
+  tool versions and the exact failure of each alternative: `docs/why-pnpm-and-npm.md`, which is also the
+  README's answer to "why do I need pnpm installed". Update it and this bullet together.
 - Pack exactly ONCE. The published artifact is pnpm's tarball with its `package/package.json` member
   rewritten in place (`src/tarball.ts`), never a repack of the cleaned directory. Packing again hands
   the file set to a second packer that re-derives it from `files` — the very field being stripped — so
