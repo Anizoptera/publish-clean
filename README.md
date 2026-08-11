@@ -7,10 +7,9 @@ dependencies. No deps, one JS file.
 [![npm version](https://img.shields.io/npm/v/@anizoptera/publish-clean?label=npm)](https://www.npmjs.com/package/@anizoptera/publish-clean)
 [![Signed provenance](https://img.shields.io/badge/provenance-signed-2ea44f?logo=npm&logoColor=white)](https://www.npmjs.com/package/@anizoptera/publish-clean#provenance)
 [![CI](https://github.com/Anizoptera/publish-clean/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/Anizoptera/publish-clean/actions/workflows/check.yml)
-[![License](https://img.shields.io/github/license/Anizoptera/publish-clean)](LICENSE)
-
-[![Runtime deps](https://img.shields.io/badge/runtime_deps-0-2ea44f)](package.json)
 [![Node >=22.14](https://img.shields.io/badge/node-%3E%3D22.14-339933?logo=node.js&logoColor=white)](package.json)
+[![Runtime deps](https://img.shields.io/badge/runtime_deps-0-2ea44f)](package.json)
+[![License](https://img.shields.io/github/license/Anizoptera/publish-clean)](LICENSE)
 
 When you run `npm publish`, two things ship that you probably did not mean to ship.
 
