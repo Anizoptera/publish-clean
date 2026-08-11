@@ -28,18 +28,33 @@ const TOOL_PROBE_TIMEOUT_MS = 10_000;
  *
  * `/d` skips registry AutoRun commands, which would otherwise execute inside a publish. Neither
  * `/s` nor `windowsVerbatimArguments` is used: without them Node applies its ordinary C-runtime
- * quoting to every argument, exactly as on any other platform, and there is no second escaping
- * layer to get wrong. The one residual is cmd's `%VAR%` expansion inside an argument, which no
- * argument this tool generates contains; a caller writing one after `--` gets it expanded.
+ * quoting to every argument, exactly as on any other platform, so this file owns no escaping.
+ * What it owns instead is the refusal below, which is what keeps that true.
  */
-function spawnArgs(command: string, args: readonly string[]): [string, string[]] {
-  return process.platform === "win32"
-    ? ["cmd.exe", ["/d", "/c", command, ...args]]
-    : [command, [...args]];
+export function spawnArgs(
+  command: string,
+  args: readonly string[],
+  platform: string,
+): [string, string[]] {
+  if (platform !== "win32") return [command, [...args]];
+  // Refused rather than escaped, because routing through cmd.exe adds a parsing layer above
+  // the one Node handles: libuv quotes an argument only when it holds a space, tab or quote
+  // (`quote_cmd_arg`, src/win/process.c), so anything here reaches cmd unquoted and cmd acts
+  // on it — `npm publish C:\R&D\x.tgz` would run `D\x.tgz` as a second command. Escaping it
+  // correctly means encoding cmd's quoting rules on the one step nobody can take back, where
+  // being subtly wrong corrupts a publish silently; refusing can only ever stop one, and says
+  // exactly which argument and why. Build the escaper when a real path like this appears.
+  const unsafe = [command, ...args].filter((argument) => /[&|<>^%()]/.test(argument));
+  if (unsafe.length > 0)
+    throw new PublishCleanError(
+      `On Windows these arguments cannot be passed safely, because cmd.exe would interpret them:\n${unsafe.join("\n")}\n` +
+        `Move the package to a path without & | < > ^ % ( ), or publish from Linux or macOS.`,
+    );
+  return ["cmd.exe", ["/d", "/c", command, ...args]];
 }
 
 export function run(command: string, args: readonly string[], cwd: string): string {
-  return execFileSync(...spawnArgs(command, args), {
+  return execFileSync(...spawnArgs(command, args, process.platform), {
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
@@ -57,7 +72,10 @@ export function run(command: string, args: readonly string[], cwd: string): stri
  * that says nothing about the one action that cannot be undone.
  */
 export function runAttached(command: string, args: readonly string[], cwd: string): void {
-  execFileSync(...spawnArgs(command, args), { cwd, stdio: ["ignore", "inherit", "inherit"] });
+  execFileSync(...spawnArgs(command, args, process.platform), {
+    cwd,
+    stdio: ["ignore", "inherit", "inherit"],
+  });
 }
 
 /** Child output survives only on the thrown error, and is lost unless read off it here. */
@@ -93,7 +111,7 @@ function toolFailureReason(cause: unknown): string {
 
 export function requireTool(name: string): void {
   try {
-    execFileSync(...spawnArgs(name, ["--version"]), {
+    execFileSync(...spawnArgs(name, ["--version"], process.platform), {
       stdio: ["ignore", "ignore", "pipe"],
       timeout: TOOL_PROBE_TIMEOUT_MS,
     });
