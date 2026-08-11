@@ -36,7 +36,10 @@
   `src/command.ts` would look. A shell space-joins the argument vector with NO escaping — Node
   runtime-deprecated it in v24 as injection (DEP0190) — and the arguments a caller writes after `--`
   go straight into the one irreversible step. The Windows job in `check.yml` is the only instrument
-  that grades that branch; delete it and the platform is unsupported again, verified by nothing.
+  that grades that branch; delete it and the platform is unsupported again, verified by nothing. It
+  grades BENIGN input only — it packs this repository, whose paths hold no cmd metacharacter — which
+  is exactly how a command-injection hole shipped in 0.7.0 under a green run. The hostile inputs live
+  in `test/command.test.ts`, where the platform is a parameter and every OS runs them.
 - One escape hatch relaxes exactly one policy. `--skip-file-check` and `--allow-suspicious` were a
   single flag until 0.6.0, so a package that legitimately declares no `files` array had to waive the
   artifact scan as well: a manifest convention and a content guard behind one switch, where nobody
