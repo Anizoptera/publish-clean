@@ -1,4 +1,10 @@
 #!/usr/bin/env node
+// Node, never bun, however much smaller Bun's gzip encoder packs (see src/tarball.ts). Node is
+// already guaranteed here — this tool spawns `npm`, which is itself a Node script — while Bun
+// is not, and the shebang is the hard requirement: on POSIX the installed bin is a symlink the
+// kernel resolves through this line, and npm's cmd-shim copies the interpreter name out of it
+// into the Windows shim. Changing it makes every manager demand `bun` on PATH. A publisher who
+// wants Bun's bytes runs the file path directly; the README says so.
 import { readFileSync } from "node:fs";
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
