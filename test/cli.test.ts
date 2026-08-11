@@ -111,11 +111,32 @@ function listTarball(tarball: string): string[] {
 // sharing nothing: the only reason they ever ran one at a time was the blocking spawn.
 // The work is real packing, so the ceiling is cores, not this setting.
 describe.concurrent("publish-clean", () => {
-  it("prints all supported options in help", async () => {
-    const result = await runCli(["--help"], process.cwd());
+  // Asserting the help *text* would restate it; what can actually rot is the promise it
+  // makes. Every flag the help advertises is fed back to the parser, so help that documents
+  // an option nobody implemented — or that outlives one — fails here instead of in a user's
+  // terminal. A value is supplied for every flag, because the parser rejects a bare string
+  // option and that rejection is not the drift under test.
+  it("advertises no flag its own parser rejects", async () => {
+    const help = await runCli(["--help"], process.cwd());
+    expect(help.status, `${help.stdout}\n${help.stderr}`).toBe(0);
+    const flags = [...help.stdout.matchAll(/^\s+(--[a-z-]+)/gm)].map((match) => match[1]);
+    expect(flags.length).toBeGreaterThan(5);
+    const probes = await Promise.all(
+      flags.map(
+        async (flag) => [flag, await runCli([`${flag}=x`, "--help"], process.cwd())] as const,
+      ),
+    );
+    for (const [flag, result] of probes)
+      expect(result.stderr, `${flag} is documented but the parser refuses it`).not.toContain(
+        "Unknown option",
+      );
+  });
+
+  it("reports the version of the package it was installed from", async () => {
+    const result = await runCli(["--version"], process.cwd());
+    const installed = JSON.parse(await readFile("package.json", "utf8")) as { version: string };
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-    expect(result.stdout).toContain("--no-git-checks");
-    expect(result.stdout).toContain("npm-publish-args");
+    expect(result.stdout.trim()).toBe(installed.version);
   });
 
   it("rejects unknown CLI options before publish args", async () => {
@@ -232,8 +253,17 @@ describe.concurrent("publish-clean", () => {
         expect(cleaned[field]).toEqual(value);
 
       // The report is the only output of a dry-run, so it has to describe the bytes that
-      // --tarball-out kept. A report listing files the retained tarball lacks is a lie.
-      for (const file of listTarball(tarball)) expect(result.stdout).toContain(file);
+      // --tarball-out kept, entry for entry in both directions. This is also the one case
+      // that holds this tool's own tar reader — which every guard's file list comes from —
+      // against the `tar` binary on a real pnpm archive. An instrument that agrees with
+      // nothing outside itself is not evidence, and a reader that quietly drops or invents
+      // an entry would leave every content check judging a file set nobody receives.
+      const lines = result.stdout.split("\n");
+      const listed = lines.slice(
+        lines.findIndex((line) => /^\[dry-run] \d+ files:$/.test(line)) + 1,
+        lines.findIndex((line) => line.startsWith("[dry-run] cleaned package.json")),
+      );
+      expect(listed.map((line) => line.trim()).sort()).toEqual(listTarball(tarball).sort());
     } finally {
       await cleanup(fx.root);
     }
@@ -466,12 +496,35 @@ exit 1
   // What only a real packer can answer is whether the file reaches the guard at all, and a
   // nested path is the case that decides it: an earlier version of this test used a nested
   // `.npmrc`, which npm and pnpm strip from tarballs at any depth, so the guard never saw it
-  // and the test only ever proved that packing happened. `--skip-file-check` is on to show
+  // and the test only ever proved that packing happened. `--allow-suspicious` is on to show
   // that it relaxes the suspicious-file check without ever relaxing the critical one.
   //
   // The abort is checked here too rather than in a run of its own: a guard that rejects a
   // package but leaves its extracted copy in the temp directory leaks the very secret it
   // just refused to publish, so the refusal and the cleanup are one behaviour.
+  // The two policies shared one flag until 0.6.0, so a package that legitimately declares no
+  // `files` array — a convention, not a safety property — had to pass a flag that also
+  // disarmed the artifact scan. That is the shape of an opt-out that quietly removes a guard
+  // nobody meant to remove, so the split is held here: relaxing the convention must leave the
+  // scan armed.
+  it("keeps scanning the artifact when the files-array requirement is waived", async () => {
+    const fx = await fixture(
+      { name: "fixture-no-files-field", version: "1.0.0" },
+      { "index.js": "module.exports = 1;\n", "index.test.js": "// shipped by accident\n" },
+    );
+    try {
+      const result = await runCli(
+        ["--dry-run", "--no-git-checks", "--skip-file-check", fx.dir],
+        process.cwd(),
+      );
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("Suspicious files in package artifact");
+      expect(result.stderr).toContain("index.test.js");
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
+
   it("refuses a leaked key nested in the package, and leaves nothing behind", async () => {
     const fx = await fixture(
       {
@@ -487,7 +540,7 @@ exit 1
     const temp = await mkdtemp(path.join(tmpdir(), "publish-clean-tmp-"));
     try {
       const result = await runCli(
-        ["--dry-run", "--no-git-checks", "--skip-file-check", fx.dir],
+        ["--dry-run", "--no-git-checks", "--allow-suspicious", fx.dir],
         process.cwd(),
         { TMPDIR: temp },
       );

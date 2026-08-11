@@ -21,12 +21,22 @@
   (`libnpmpublish` builds the attestation subject from `ssri.fromData(tarballData)`), so the
   attestation covers exactly what this tool produced. Publishing a tarball also runs no lifecycle
   scripts at all — `libnpmpack` gates `prepack`/`postpack` on a directory spec.
-- Every guard reads the tarball that gets uploaded — its `tar` listing, or the directory extracted
-  from it. Never validate an intermediate: a check against the extracted _source_ tarball, or a
-  directory the tool wrote itself, proves things about bytes nobody receives and needs a second
-  check to confirm the first still applies. One artifact, checked once, is why the guards here are
-  short.
+- Every guard reads the tarball that gets uploaded, decoded from the file on disk after it is
+  written. Never validate an intermediate: a check against the source tarball, the in-memory value
+  that produced the artifact, or a directory the tool wrote itself, proves things about bytes
+  nobody receives and needs a second check to confirm the first still applies. One artifact,
+  checked once, is why the guards here are short.
+- `src/tarball.ts` is the ONLY reader and writer of archive bytes. Do not reintroduce the `tar`
+  binary: it was a required tool on every user's machine and one spawn plus one decompression per
+  question asked, for a job this file already does — and it answers in lines, so it cannot express
+  a filename containing one. Tests may use it freely, and one case pins this reader against it on a
+  real pnpm archive; that cross-check is the reason a hand-written parser is acceptable here.
 - Never weaken critical artifact checks for secrets, `node_modules`, Git internals, or broken export paths.
+- One escape hatch relaxes exactly one policy. `--skip-file-check` and `--allow-suspicious` were a
+  single flag until 0.6.0, so a package that legitimately declares no `files` array had to waive the
+  artifact scan as well: a manifest convention and a content guard behind one switch, where nobody
+  waiving the first intends the second. Splitting a shared opt-out is not a breaking change worth
+  avoiding.
 - Never delete a check because the new structure makes its failure "impossible". That argument is the
   new code vouching for itself, and here the structure is always the tar rewriter — the one place this
   tool authors bytes, guarding the one step nobody can take back. These checks read values the pipeline

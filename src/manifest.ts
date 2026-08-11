@@ -306,14 +306,53 @@ export function assertFilesField(pkg: JsonObject, skip: boolean): void {
   }
 }
 
+/**
+ * Every key this tool reads out of the manifest's `publish-clean` block. Naming them is what
+ * makes a typo an error instead of a silent no-op — and a silent no-op here is not cosmetic:
+ * `devFeilds` publishes the field the author meant to strip, and nothing in the output says so.
+ */
+const CONFIG_KEYS = new Set([
+  "allowSuspicious",
+  "devFields",
+  "keepFields",
+  "noGitChecks",
+  "registry",
+  "skipFileCheck",
+]);
+
 export function packageConfig(pkg: JsonObject): JsonObject {
   const config = pkg["publish-clean"];
-  return isObject(config) ? config : {};
+  if (!isObject(config)) return {};
+  const unknown = Object.keys(config).filter((key) => !CONFIG_KEYS.has(key));
+  if (unknown.length > 0)
+    throw new PublishCleanError(
+      `Unknown "publish-clean" manifest options:\n${unknown.join("\n")}\n` +
+        `Valid options: ${[...CONFIG_KEYS].join(", ")}`,
+    );
+  return config;
 }
 
-export function customDevFields(config: JsonObject): string[] {
-  if (!Array.isArray(config.devFields)) return [];
-  const fields = config.devFields.filter((field): field is string => typeof field === "string");
+/**
+ * Reads a string-list option, refusing anything else outright rather than filtering it out.
+ * A number or a nested object in this list is a mistake in the manifest, and skipping it
+ * silently means the author's intent is lost with no signal anywhere.
+ */
+function stringList(config: JsonObject, key: string): readonly string[] {
+  const value = config[key];
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string"))
+    throw new PublishCleanError(`publish-clean.${key} must be an array of strings.`);
+  return value as readonly string[];
+}
+
+export function customDevFields(config: JsonObject): readonly string[] {
+  const fields = stringList(config, "devFields");
+  const kept = new Set(stringList(config, "keepFields"));
+  const contradictory = fields.filter((field) => kept.has(field));
+  if (contradictory.length > 0)
+    throw new PublishCleanError(
+      `These fields are listed as both devFields and keepFields, which asks to strip and to publish the same key:\n${contradictory.join("\n")}`,
+    );
   const unsafe = fields.filter((field) => RUNTIME_MANIFEST_FIELDS.has(field));
   if (unsafe.length > 0)
     throw new PublishCleanError(
@@ -334,6 +373,5 @@ export function customDevFields(config: JsonObject): string[] {
  * next one, including a real leak.
  */
 export function keptFields(config: JsonObject): readonly string[] {
-  if (!Array.isArray(config.keepFields)) return [];
-  return config.keepFields.filter((field): field is string => typeof field === "string");
+  return stringList(config, "keepFields");
 }

@@ -7,7 +7,7 @@ dependencies. No deps, one JS file.
 [![npm version](https://img.shields.io/npm/v/@anizoptera/publish-clean?label=npm)](https://www.npmjs.com/package/@anizoptera/publish-clean)
 [![Signed provenance](https://img.shields.io/badge/provenance-signed-2ea44f?logo=npm&logoColor=white)](https://www.npmjs.com/package/@anizoptera/publish-clean#provenance)
 [![CI](https://github.com/Anizoptera/publish-clean/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/Anizoptera/publish-clean/actions/workflows/check.yml)
-[![Node >=22.14](https://img.shields.io/badge/node-%3E%3D22.14-339933?logo=node.js&logoColor=white)](package.json)
+[![Node >=22](https://img.shields.io/badge/node-%3E%3D22-339933?logo=node.js&logoColor=white)](package.json)
 [![Runtime deps](https://img.shields.io/badge/runtime_deps-0-2ea44f)](package.json)
 [![License](https://img.shields.io/github/license/Anizoptera/publish-clean)](LICENSE)
 
@@ -47,11 +47,14 @@ choices are argued, with measurements, in
 **Whatever you start it with, `pnpm` prepares the package and `npm` uploads it, so both
 must be on `PATH`.** A Bun, npm or Yarn project needs pnpm installed too, including in CI.
 
-Also needs `tar` and Node.js 22.14+. Below 22.14 npm cannot mint provenance.
+Node.js 22+ runs it. npm provenance additionally needs 22.14+, because below that npm
+cannot mint it.
 
 That installs one package and nothing else. `publish-clean` has zero runtime
-dependencies: it is a single file that talks to `pnpm`, `npm` and `tar` through the
-tools you already have. For something that sits on your publish path and handles your
+dependencies: it is a single file that talks to `pnpm` and `npm`, and reads and rewrites
+the tarball itself, so there is nothing else to have on the machine.
+
+For something that sits on your publish path and handles your
 registry credentials, that matters. A publishing tool with a dependency tree is a
 supply-chain risk of its own, and this one has no transitive code to audit.
 
@@ -256,6 +259,9 @@ nothing can alter the artifact after it was checked.
 - the package is marked `private: true`
 - the working tree has uncommitted changes (`--no-git-checks` to allow it)
 - the package has no non-empty `files` array (`--skip-file-check` to allow it)
+- the tarball holds tests, CI config, a lockfile or a `tsconfig` (`--allow-suspicious` to
+  allow it — a separate switch from the one above, so waiving a manifest convention never
+  silently disarms the artifact scan)
 - the tarball holds something that should never ship: a `.env`, an `.npmrc`, `.git`,
   `node_modules`, or a private key. This one has no off switch, by any flag or config key
 - a dependency is still written as `catalog:`, `workspace:`, `link:` or `portal:`, which
@@ -319,6 +325,7 @@ choices like dist-tags on the command line and stable project policy in the mani
   "publish-clean": {
     "registry": "https://registry.npmjs.org",
     "skipFileCheck": false,
+    "allowSuspicious": false,
     "noGitChecks": false,
     "devFields": ["customBuildOnlyField"],
     "keepFields": ["contributes"]
@@ -326,17 +333,19 @@ choices like dist-tags on the command line and stable project policy in the mani
 }
 ```
 
-| Flag                | `package.json`  | What it does                                                                               |
-| ------------------- | --------------- | ------------------------------------------------------------------------------------------ |
-| `--dry-run`         | -               | Run everything up to the publish, then print the file list and the cleaned `package.json`. |
-| `--guard-only`      | -               | Run everything up to the publish and exit, printing nothing.                               |
-| `--tarball-out DIR` | -               | Copy the final tarball into `DIR` before publishing.                                       |
-| `--registry URL`    | `registry`      | Set `publishConfig.registry` on the cleaned manifest, and publish to it.                   |
-| `--skip-file-check` | `skipFileCheck` | Drop the suspicious-file check and the required `files` array.                             |
-| `--no-git-checks`   | `noGitChecks`   | Allow publishing from a dirty working tree.                                                |
-| -                   | `devFields`     | Extra manifest fields to strip.                                                            |
-| -                   | `keepFields`    | Fields that belong in the published package, so stop reporting them.                       |
-| `-h`, `--help`      | -               | Print usage.                                                                               |
+| Flag                 | `package.json`    | What it does                                                                               |
+| -------------------- | ----------------- | ------------------------------------------------------------------------------------------ |
+| `--dry-run`          | -                 | Run everything up to the publish, then print the file list and the cleaned `package.json`. |
+| `--guard-only`       | -                 | Run everything up to the publish and exit, printing nothing.                               |
+| `--tarball-out DIR`  | -                 | Copy the final tarball into `DIR` before publishing.                                       |
+| `--registry URL`     | `registry`        | Set `publishConfig.registry` on the cleaned manifest, and publish to it.                   |
+| `--skip-file-check`  | `skipFileCheck`   | Allow a manifest with no `files` array.                                                    |
+| `--allow-suspicious` | `allowSuspicious` | Allow tests, CI config, lockfiles or `tsconfig` in the artifact.                           |
+| `--no-git-checks`    | `noGitChecks`     | Allow publishing from a dirty working tree.                                                |
+| -                    | `devFields`       | Extra manifest fields to strip.                                                            |
+| -                    | `keepFields`      | Fields that belong in the published package, so stop reporting them.                       |
+| `-h`, `--help`       | -                 | Print usage, every flag, and the config keys.                                              |
+| `-v`, `--version`    | -                 | Print the installed version.                                                               |
 
 Arguments after `--` go to `npm publish`. Pass the dist-tag explicitly: `--tag latest` for
 a normal public release.
@@ -350,7 +359,10 @@ every mode, before the publish, so you get the validated artifact even if the up
 `registry` pins where the package goes, so it cannot end up on whatever registry the
 machine happens to be pointed at.
 
-`skipFileCheck` does not touch the leak checks.
+`skipFileCheck` and `allowSuspicious` are deliberately two switches. A missing `files`
+array is a manifest convention some packages do not follow; tests or a lockfile in the
+tarball is content nobody meant to ship. Neither touches the leak checks, which have no
+off switch at all.
 
 `noGitChecks` is what you need when you publish from a build directory, or from a checkout
 that is not a git repository at all.

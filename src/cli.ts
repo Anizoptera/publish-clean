@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { assertDeclaredFiles, assertSameEntries, validatePackedFiles } from "./artifact";
 import { PublishCleanError } from "./error";
@@ -22,7 +23,8 @@ import {
   unrecognizedFieldsReport,
   withRegistry,
 } from "./manifest";
-import { replaceTarballManifest } from "./tarball";
+import { manifestText, packageFiles, readArchive, replaceManifest } from "./tarball";
+import type { TarArchive } from "./tarball";
 import {
   MIN_TRUSTED_NODE_VERSION,
   MIN_TRUSTED_NPM_VERSION,
@@ -33,6 +35,51 @@ import {
 import type { TrustedPublishEnv } from "./trusted-publish";
 
 const TOOL_PROBE_TIMEOUT_MS = 10_000;
+
+/**
+ * The whole interface in one screen, because this is where an out-of-context reader lands:
+ * the flags, the manifest config block that sets the same policies durably, and the `--`
+ * convention that decides which arguments this tool reads and which npm does. Anything a
+ * user must know to publish correctly belongs here, not only in the README, which is not
+ * installed next to the binary.
+ */
+const HELP = `publish-clean [options] [package-dir] [-- npm publish args]
+
+Packs with pnpm, strips developer-only fields from the packed manifest, validates the
+artifact, and publishes that exact tarball with npm. Arguments after \`--\` go to
+\`npm publish\` untouched (e.g. --access public --tag next --provenance).
+
+Options:
+  --dry-run              Pack, clean and validate; print the file list and manifest, publish nothing.
+  --guard-only           Same checks, no output and no publish. For a pre-publish gate.
+  --tarball-out DIR      Also write the validated tarball into DIR, for attestation or release upload.
+  --registry URL         Publish to URL, and record it in the artifact's publishConfig.
+  --no-git-checks        Publish from a working tree with uncommitted changes.
+  --skip-file-check      Allow a manifest with no "files" array.
+  --allow-suspicious     Allow tests, CI config, lockfiles or tsconfig in the published artifact.
+  -h, --help             Show this help.
+  -v, --version          Show the publish-clean version.
+
+Manifest configuration, under a "publish-clean" key in package.json:
+  devFields    string[]  Extra fields to strip. Refused for fields consumers resolve.
+  keepFields   string[]  Fields to acknowledge, so they stop being reported as unrecognised.
+  registry     string    Default for --registry.
+  noGitChecks  boolean   Default for --no-git-checks.
+  skipFileCheck boolean  Default for --skip-file-check.
+  allowSuspicious boolean Default for --allow-suspicious.
+
+Requires pnpm and npm on PATH. npm provenance additionally requires Node.js 22.14+ and
+npm 11.5.1+, and only a cloud CI runner can produce it.`;
+
+/**
+ * Read from the installed manifest rather than baked in at build time, so the number cannot
+ * drift from the package a user actually has — which is the only reason anyone asks a tool
+ * for its version.
+ */
+function ownVersion(): string {
+  const manifest = readJson(fileURLToPath(new URL("../package.json", import.meta.url)));
+  return typeof manifest.version === "string" ? manifest.version : "unknown";
+}
 
 function readJson(file: string): JsonObject {
   let parsed: unknown;
@@ -161,44 +208,36 @@ function assertCleanGit(packageDir: string, skip: boolean): void {
     if (output) throw new PublishCleanError(`Source package has uncommitted changes:\n${output}`);
   } catch (error) {
     if (error instanceof PublishCleanError) throw error;
-    throw new PublishCleanError("Unable to verify source git status.", {
-      cause: error,
-    });
+    // git's own words, not a guess at them: outside a repository it says so exactly, and the
+    // reader's next action ("this is not a git checkout" vs "git is not installed") differs.
+    // The top-level handler only unwraps the error it is given, so the child's output has to
+    // be carried into the message here or it is lost.
+    const stderr = outputFromError(error, "stderr");
+    throw new PublishCleanError(
+      `Unable to verify source git status${stderr ? `: ${stderr}` : ""}.\nPass --no-git-checks to publish without this check.`,
+      { cause: error },
+    );
   }
 }
 
 /**
- * The file list every content guard judges, read out of the archive by `tar` rather than from
- * an extracted copy: this is the same enumeration a consumer's installer sees, and it needs no
- * filesystem to exist.
- *
- * `tar tzf` prints one name per line, so a filename containing a newline would arrive as two
- * entries. That is safe in the only direction that matters, because every guard here fails
- * closed: splitting a name can only add entries to a leak scan that refuses on any match, and a
- * declared path whose name was split is then absent and refused as missing.
+ * Reads an archive from disk, so every judgement is made about bytes that exist as a file
+ * rather than about a buffer this process is holding. The final artifact is read back this
+ * way after it is written, which also proves the write itself landed whole.
  */
-function listTarballFiles(tarball: string, cwd: string): string[] {
-  return run("tar", ["tzf", tarball], cwd)
-    .trim()
-    .split("\n")
-    .filter(Boolean)
-    .map((file) => file.replaceAll(path.sep, "/"))
-    .map((file) => (file.startsWith("package/") ? file.slice(8) : file))
-    .filter((file) => file.length > 0 && !file.endsWith("/"))
-    .sort();
+async function readTarball(tarball: string): Promise<TarArchive> {
+  return readArchive(await readFile(tarball));
 }
 
-function readTarballJson(tarball: string, file: string, cwd: string): JsonObject {
+function manifestOf(archive: TarArchive, label: string): JsonObject {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(run("tar", ["xOzf", tarball, `package/${file}`], cwd)) as unknown;
+    parsed = JSON.parse(manifestText(archive)) as unknown;
   } catch (cause) {
-    throw new PublishCleanError(`Unable to read JSON from ${path.basename(tarball)}: ${file}`, {
-      cause,
-    });
+    throw new PublishCleanError(`Unable to parse package.json inside ${label}.`, { cause });
   }
   if (!isObject(parsed))
-    throw new PublishCleanError(`${file} in ${path.basename(tarball)} must contain a JSON object.`);
+    throw new PublishCleanError(`package.json inside ${label} must contain a JSON object.`);
   return parsed;
 }
 
@@ -228,11 +267,14 @@ async function soleTarball(packRoot: string): Promise<string> {
 async function packAndClean(
   packageDir: string,
   opts: {
+    /** Publish an artifact carrying tests, CI config, lockfiles or tsconfig anyway. */
+    allowSuspicious: boolean;
     dryRun: boolean;
     guardOnly: boolean;
     noGitChecks: boolean;
     publishArgs: readonly string[];
     registry: null | string;
+    /** Publish a package whose manifest declares no `files` array. */
     skipFileCheck: boolean;
     /**
      * Directory to copy the final tarball into before publishing, so callers can
@@ -245,14 +287,18 @@ async function packAndClean(
 ): Promise<void> {
   requireTool("pnpm");
   requireTool("npm");
-  requireTool("tar");
   warnIfNonPnpmLifecycle();
 
   const sourcePkgPath = path.join(packageDir, "package.json");
   const sourcePkg = readJson(sourcePkgPath);
   if (!opts.guardOnly && !opts.dryRun) assertTrustedPublishingRuntime(sourcePkg, opts.publishArgs);
   const config = packageConfig(sourcePkg);
+  // Two independent policies, never one switch. The `files` requirement is a manifest
+  // convention some packages legitimately do not follow; the artifact scan is what keeps
+  // tests, CI config and lockfiles out of a published package. Sharing a flag meant opting
+  // out of the convention silently disarmed the scan.
   const skipFileCheck = opts.skipFileCheck || config.skipFileCheck === true;
+  const allowSuspicious = opts.allowSuspicious || config.allowSuspicious === true;
   const noGitChecks = opts.noGitChecks || config.noGitChecks === true;
   const registry = opts.registry ?? (typeof config.registry === "string" ? config.registry : null);
   const extraDevFields = customDevFields(config);
@@ -266,12 +312,13 @@ async function packAndClean(
   try {
     run("pnpm", ["pack", "--pack-destination", root], packageDir);
     const tarball = await soleTarball(root);
+    const packed = await readTarball(tarball);
 
     // Cleaned straight out of the packed tarball and written back into a copy of that same
     // tarball: no intermediate directory to clean, and no second packer that could re-decide
     // the file set from the `files` field this strips.
     const cleanedPkg = withRegistry(
-      stripManifest(readTarballJson(tarball, "package.json", root), extraDevFields),
+      stripManifest(manifestOf(packed, "the packed tarball"), extraDevFields),
       registry,
     );
     const unrecognized = unrecognizedFieldsReport(cleanedPkg, keepFields);
@@ -280,23 +327,19 @@ async function packAndClean(
     const publishRoot = path.join(root, "publish");
     await mkdir(publishRoot);
     const finalTarball = path.join(publishRoot, path.basename(tarball));
-    await writeFile(
-      finalTarball,
-      replaceTarballManifest(await readFile(tarball), stringifyJson(cleanedPkg)),
-    );
+    await writeFile(finalTarball, replaceManifest(packed, stringifyJson(cleanedPkg)));
 
-    // Every guard reads the artifact that gets uploaded, and nothing else. Validating an
-    // extracted copy instead would prove things about a directory nobody receives.
-    const finalFiles = listTarballFiles(finalTarball, root);
-    assertSameEntries(listTarballFiles(tarball, root), finalFiles);
-    validatePackedFiles(finalFiles, skipFileCheck);
+    // Every guard reads the artifact that gets uploaded, and nothing else — decoded again
+    // from the file just written, never from the buffer that produced it. Validating the
+    // in-memory value instead would let a bad write, or a defect in the rewriter, pass every
+    // check and still ship.
+    const published = await readTarball(finalTarball);
+    const finalFiles = packageFiles(published);
+    assertSameEntries(packageFiles(packed), finalFiles);
+    validatePackedFiles(finalFiles, allowSuspicious);
     assertDeclaredFiles(cleanedPkg, finalFiles);
 
-    // Read back out of the final tarball, by tar, so the check is against the shipped bytes
-    // rather than against the object this process just built. Reading the one member costs
-    // one process; extracting the whole archive to reach it writes every file to disk for
-    // nothing, and the directory it leaves is then somebody's problem to delete.
-    const shippedPkg = readTarballJson(finalTarball, "package.json", root);
+    const shippedPkg = manifestOf(published, "the published tarball");
     assertNoMonorepoProtocols(shippedPkg);
     // A tripwire for this tool's own bugs: every field it would catch is either kept by design
     // or removed on request, and a removal on request is excluded from the comparison. Its
@@ -352,6 +395,7 @@ async function main(): Promise<void> {
     args: cliArgs,
     allowPositionals: true,
     options: {
+      "allow-suspicious": { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
       "guard-only": { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
@@ -359,14 +403,17 @@ async function main(): Promise<void> {
       registry: { type: "string", default: undefined },
       "skip-file-check": { type: "boolean", default: false },
       "tarball-out": { type: "string", default: undefined },
+      version: { type: "boolean", short: "v", default: false },
     },
     strict: true,
   });
 
+  if (parsed.values.version) {
+    console.log(ownVersion());
+    return;
+  }
   if (parsed.values.help) {
-    console.log(
-      "publish-clean [--dry-run] [--guard-only] [--no-git-checks] [--registry URL] [--skip-file-check] [--tarball-out DIR] [package-dir] [-- npm-publish-args]",
-    );
+    console.log(HELP);
     return;
   }
   if (parsed.positionals.length > 1)
@@ -376,6 +423,7 @@ async function main(): Promise<void> {
 
   const packageDir = path.resolve(String(parsed.positionals[0] ?? "."));
   await packAndClean(packageDir, {
+    allowSuspicious: parsed.values["allow-suspicious"] === true,
     dryRun: parsed.values["dry-run"] === true,
     guardOnly: parsed.values["guard-only"] === true,
     noGitChecks: parsed.values["no-git-checks"] === true,

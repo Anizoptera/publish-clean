@@ -14,15 +14,23 @@ import {
   wantsTrustedPublish,
 } from "../src/trusted-publish";
 
-// `engines.node` is what a consumer's installer checks before running anything; the constant is
-// what this tool checks before publishing. One floor, stated in two files no compiler relates,
-// and drift means either the manifest promises support the tool refuses or the refusal names a
-// version that is not the real floor. Nothing else can catch that.
-it("declares the Node floor it enforces", () => {
+// Two different floors that look like one. `engines.node` is what a consumer's installer
+// checks before running anything; the constant is what npm needs to MINT PROVENANCE, which
+// only some publishes ask for. Setting engines to the provenance floor refuses to install for
+// everyone publishing to a private registry with a token — a case this tool serves fine — and
+// makes the runtime check that explains the provenance requirement unreachable. So the
+// invariant is an ordering, not an equality, and it is stated in two files no compiler
+// relates.
+it("does not promise less than the provenance floor it enforces", () => {
   const manifest = JSON.parse(readFileSync("package.json", "utf8")) as {
     engines: { node: string };
   };
-  expect(manifest.engines.node).toBe(`>=${MIN_TRUSTED_NODE_VERSION.join(".")}`);
+  expect(manifest.engines.node).toMatch(/^>=\d+\.\d+\.\d+$/);
+  const [major = 0, minor = 0, patch = 0] = manifest.engines.node.slice(2).split(".").map(Number);
+  expect(
+    isAtLeast(MIN_TRUSTED_NODE_VERSION, [major, minor, patch]),
+    `engines.node ${manifest.engines.node} sits above the provenance floor ${MIN_TRUSTED_NODE_VERSION.join(".")}: that refuses installs this tool serves, and makes its own provenance check unreachable`,
+  ).toBe(true);
 });
 
 describe.concurrent("npm version floor", () => {

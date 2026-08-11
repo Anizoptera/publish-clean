@@ -8,7 +8,7 @@
 import { gunzipSync, gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 
-import { replaceTarballManifest } from "../src/tarball";
+import { packageFiles, readArchive, replaceManifest } from "../src/tarball";
 
 const BLOCK = 512;
 
@@ -59,14 +59,14 @@ function entries(tgz: Buffer): Record<string, string> {
 
 const MANIFEST = "package/package.json";
 
-describe("replaceTarballManifest", () => {
+describe("manifest rewriting", () => {
   it("replaces only the manifest and leaves every neighbour byte-identical", () => {
     const source = archive([
       { name: "package/lib/a.js", body: "a\n" },
       { name: MANIFEST, body: `{"name":"x","files":["lib"]}` },
       { name: "package/lib/b.js", body: "b\n" },
     ]);
-    const result = entries(replaceTarballManifest(source, `{"name":"x"}`));
+    const result = entries(replaceManifest(readArchive(source), `{"name":"x"}`));
     expect(result).toEqual({
       "package/lib/a.js": "a\n",
       [MANIFEST]: `{"name":"x"}`,
@@ -82,7 +82,7 @@ describe("replaceTarballManifest", () => {
       { name: MANIFEST, body: "{}" },
       { name: "package/lib/a.js", body: "a\n" },
     ]);
-    const result = entries(replaceTarballManifest(source, grown));
+    const result = entries(replaceManifest(readArchive(source), grown));
     expect(result[MANIFEST]).toBe(grown);
     expect(result["package/lib/a.js"]).toBe("a\n");
   });
@@ -96,7 +96,7 @@ describe("replaceTarballManifest", () => {
       { name: "PaxHeader", body: "deep\n" },
       { name: MANIFEST, body: "{}" },
     ]);
-    const result = replaceTarballManifest(source, `{"name":"x"}`);
+    const result = replaceManifest(readArchive(source), `{"name":"x"}`);
     expect(entries(result)["PaxHeader"]).toBe("deep\n");
     expect(gunzipSync(result).length).toBe(gunzipSync(source).length);
   });
@@ -109,7 +109,7 @@ describe("replaceTarballManifest", () => {
       { name: "package/decoy", body: `{"name":"evil"}` },
       { name: MANIFEST, body: "{}" },
     ]);
-    expect(() => replaceTarballManifest(source, "{}")).toThrow(/renaming an entry/);
+    expect(() => replaceManifest(readArchive(source), "{}")).toThrow(/renaming an entry/);
   });
 
   it("refuses a GNU long-name entry, the other way to rename onto the manifest", () => {
@@ -121,7 +121,7 @@ describe("replaceTarballManifest", () => {
       { name: "package/decoy", body: `{"name":"evil"}` },
       { name: MANIFEST, body: "{}" },
     ]);
-    expect(() => replaceTarballManifest(source, "{}")).toThrow(/GNU long-name/);
+    expect(() => replaceManifest(readArchive(source), "{}")).toThrow(/GNU long-name/);
   });
 
   it("refuses a duplicated manifest rather than guessing which one an extractor keeps", () => {
@@ -129,18 +129,58 @@ describe("replaceTarballManifest", () => {
       { name: MANIFEST, body: `{"name":"first"}` },
       { name: MANIFEST, body: `{"name":"second"}` },
     ]);
-    expect(() => replaceTarballManifest(source, "{}")).toThrow(/more than once/);
+    expect(() => replaceManifest(readArchive(source), "{}")).toThrow(/more than once/);
   });
 
   it("refuses an archive with no manifest instead of publishing one without", () => {
     expect(() =>
-      replaceTarballManifest(archive([{ name: "package/a.js", body: "a\n" }]), "{}"),
+      replaceManifest(readArchive(archive([{ name: "package/a.js", body: "a\n" }])), "{}"),
     ).toThrow(/does not contain/);
   });
 
   it("refuses a manifest entry that is not a regular file", () => {
     // A symlink here would publish a manifest whose content depends on the extraction target.
     const source = archive([{ name: MANIFEST, body: "", type: "2" }]);
-    expect(() => replaceTarballManifest(source, "{}")).toThrow(/not a regular file/);
+    expect(() => replaceManifest(readArchive(source), "{}")).toThrow(/not a regular file/);
+  });
+});
+
+/**
+ * The reader replaced four `tar` subprocesses, so these cases hold it to what that binary
+ * guaranteed and to what it could not: a truncated archive must be refused rather than read
+ * as one that simply ended, and the file list must survive names `tar tzf`'s line-per-name
+ * output cannot express.
+ */
+describe("archive reading", () => {
+  /** Re-gzips a prefix of the decoded bytes, the shape a partial write leaves on disk. */
+  function truncated(source: Buffer, bytes: number): Buffer {
+    return gzipSync(gunzipSync(source).subarray(0, bytes));
+  }
+
+  it("refuses an archive whose entry runs past the end", () => {
+    const source = archive([{ name: "package/a.js", body: "x".repeat(600) }]);
+    expect(() => readArchive(truncated(source, BLOCK + 600))).toThrow(/runs past the end/);
+  });
+
+  it("refuses an archive that stops inside a header", () => {
+    const source = archive([
+      { name: "package/a.js", body: "a" },
+      { name: "package/b.js", body: "b" },
+    ]);
+    expect(() => readArchive(truncated(source, BLOCK * 2 + 100))).toThrow(/truncated/);
+  });
+
+  it("keeps a filename a line-based listing would split in two", () => {
+    const source = archive([{ name: "package/we\nird.js", body: "x" }]);
+    expect(packageFiles(readArchive(source))).toEqual(["we\nird.js"]);
+  });
+
+  it("lists only files: no directories, no pax headers", () => {
+    const source = archive([
+      { name: "package/dir/", body: "", type: "5" },
+      { name: "PaxHeader/package/a.js", body: "30 mtime=1700000000.0\n", type: "x" },
+      { name: "package/a.js", body: "a" },
+    ]);
+    expect(packageFiles(readArchive(source))).toEqual(["a.js"]);
   });
 });

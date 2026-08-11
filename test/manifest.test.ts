@@ -12,6 +12,7 @@ import {
   assertPublicPackage,
   customDevFields,
   keptFields,
+  packageConfig,
   stripManifest,
   unrecognizedFieldsReport,
   withRegistry,
@@ -93,10 +94,35 @@ describe.concurrent("author configuration", () => {
     expect(customDevFields({ devFields: ["someToolConfig"] })).toEqual(["someToolConfig"]);
   });
 
-  it("ignores a malformed configuration rather than acting on half of it", () => {
+  it("reads an absent configuration as no configuration", () => {
     expect(customDevFields({})).toEqual([]);
-    expect(customDevFields({ devFields: "dependencies" })).toEqual([]);
-    expect(keptFields({ keepFields: [1, "contributes"] })).toEqual(["contributes"]);
+    expect(keptFields({})).toEqual([]);
+  });
+
+  // Acting on the readable half of a malformed option is the failure mode that matters here:
+  // the author asked for a field to be stripped, and a silently dropped entry publishes it
+  // with nothing anywhere saying so.
+  it("refuses a malformed option instead of acting on the part it can read", () => {
+    expect(() => customDevFields({ devFields: "dependencies" })).toThrow(/array of strings/);
+    expect(() => keptFields({ keepFields: [1, "contributes"] })).toThrow(/array of strings/);
+  });
+
+  it("refuses a field listed as both stripped and kept", () => {
+    expect(() =>
+      customDevFields({ devFields: ["contributes"], keepFields: ["contributes"] }),
+    ).toThrow(/both devFields and keepFields/);
+  });
+
+  // A typo in this block is invisible in the artifact: `devFeilds` publishes the very field
+  // the author wrote the config to remove.
+  it("refuses an unknown option key rather than ignoring it", () => {
+    expect(() => packageConfig({ "publish-clean": { devFeilds: ["x"] } })).toThrow(
+      /Unknown "publish-clean" manifest options/,
+    );
+  });
+
+  it("passes through a manifest with no configuration block", () => {
+    expect(packageConfig({})).toEqual({});
   });
 });
 

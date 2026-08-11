@@ -3,6 +3,43 @@
 Notable changes per release, newest first. This file is the source of the GitHub Release
 notes: the section for a version is published verbatim when its tag is pushed.
 
+## [0.6.0] - 2026-08-11
+
+### Changed
+
+- **`--skip-file-check` no longer disables the artifact scan.** It waived two unrelated
+  policies at once: the `files`-array requirement, a manifest convention some packages do not
+  follow, and the scan that keeps tests, CI config, lockfiles and `tsconfig` out of the
+  published tarball. Waiving the convention now leaves the scan armed. Use the new
+  `--allow-suspicious` (or `"allowSuspicious": true`) if you relied on the old combined
+  behaviour.
+- **`tar` is no longer required.** The tool reads and rewrites the archive itself, so `pnpm`
+  and `npm` are the only executables it needs. This also removes four subprocesses and four
+  decompressions per run, detects a truncated archive instead of reading it as one that
+  simply ended, and handles a filename containing a newline, which a line-based `tar tzf`
+  listing cannot express.
+- **The published tarball is compressed at gzip's maximum level.** Measured on this package:
+  26,440 bytes, against 26,699 at the previous default and 26,500 as pnpm packed it. Output
+  stays byte-identical across runs, so a re-run still reproduces a published artifact exactly.
+- **`engines.node` is now `>=22.0.0`.** 0.5.0 declared the provenance floor, 22.14, and so
+  refused to install for anyone publishing to a private registry with a token — a case this
+  tool supports. Provenance still requires 22.14, checked at the moment it is requested.
+- **An unknown key under `"publish-clean"` in `package.json` is now an error**, as is a
+  `devFields`/`keepFields` value that is not an array of strings, or a field listed in both.
+  A typo such as `devFeilds` previously did nothing at all and published the field it was
+  written to strip.
+
+### Added
+
+- `--version` / `-v`, and a `--help` that documents every flag and every manifest config key.
+- `--allow-suspicious`, the artifact-scan half of the old `--skip-file-check`.
+
+### Fixed
+
+- A failing `git status` now reports what git said. It was replaced with "Unable to verify
+  source git status", which hid the difference between "this is not a git repository" and
+  "git is not installed" — and did not mention `--no-git-checks`.
+
 ## [0.5.0] - 2026-08-11
 
 ### Changed

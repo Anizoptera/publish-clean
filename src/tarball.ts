@@ -1,5 +1,6 @@
 /**
- * Replaces the manifest inside a packed tarball without repacking it.
+ * Reads and rewrites a packed npm tarball. The only place this tool decodes or authors
+ * archive bytes, and the only reader every guard consults.
  *
  * The pipeline packs once, with pnpm, because that packer decides the file set. Cleaning the
  * manifest by unpacking and packing again hands that decision to a second packer, which
@@ -9,9 +10,15 @@
  * into.
  *
  * Every entry other than the manifest is copied as opaque bytes and never decoded, so entry
- * shapes this code does not model — pax extended headers, ustar prefix splitting, GNU long
- * names — survive untouched. Only walking is universal: an entry's length is always its
- * header block plus its size rounded up to a block, whatever the type.
+ * shapes this code does not model — pax extended headers, ustar prefix splitting — survive
+ * untouched. Only walking is universal: an entry's length is always its header block plus its
+ * size rounded up to a block, whatever the type.
+ *
+ * Reading here rather than through the `tar` binary is what makes the whole tool depend on
+ * nothing but Node: one archive is decompressed once and answers every question about it
+ * (file list, manifest bytes, rewrite), instead of one spawn and one decompression per
+ * question. It is also the stricter reader — `tar tzf` prints one name per line, so a path
+ * containing a newline arrives as two entries there and as itself here.
  */
 import { gunzipSync, gzipSync } from "node:zlib";
 
@@ -33,6 +40,9 @@ const MANIFEST_PATH = "package/package.json";
 /** Extended (`x`) and global (`g`) pax headers carry key/value overrides for other entries. */
 const PAX_TYPES = new Set(["x", "g"]);
 
+/** Tar's flag for a directory entry. Directories are not files a consumer imports. */
+const DIRECTORY_TYPE = "5";
+
 /**
  * GNU's long-name entry, whose payload is the real path of the entry that follows it while
  * that entry's own header reads `././@LongLink`.
@@ -44,6 +54,25 @@ const PAX_TYPES = new Set(["x", "g"]);
  * it renames a symlink target, which cannot collide with an entry path.
  */
 const GNU_LONG_NAME = "L";
+
+export interface TarEntry {
+  /** Archive path as written, e.g. `package/dist/cli.js`. */
+  readonly name: string;
+  /** Tar type flag: `0` or empty for a regular file, `5` directory, `2` symlink, `x`/`g` pax. */
+  readonly type: string;
+  /** Header block, kept whole so a rewrite can reuse every field it does not change. */
+  readonly header: Buffer;
+  /** Entry contents, without the padding that follows them. */
+  readonly body: Buffer;
+  /** Header, body and padding as one slice, so copying an entry is byte-exact. */
+  readonly raw: Buffer;
+}
+
+export interface TarArchive {
+  readonly entries: readonly TarEntry[];
+  /** The end-of-archive zero blocks and their padding, kept byte for byte. */
+  readonly tail: Buffer;
+}
 
 function field(block: Buffer, offset: number, length: number): string {
   return block.toString("utf8", offset, offset + length).replace(/\0.*/s, "");
@@ -93,51 +122,99 @@ function reheader(original: Buffer, size: number): Buffer {
 }
 
 /**
- * Returns the gzipped tarball with `package/package.json` replaced by `manifest`.
+ * Decodes a gzipped tarball into its entries, refusing every shape whose meaning this tool
+ * cannot state unambiguously.
  *
- * Refuses anything it cannot rewrite unambiguously. Duplicate manifest entries are a refusal
- * rather than a last-one-wins guess, because extractors disagree about which survives and the
- * published manifest would then depend on the extractor rather than on this tool.
+ * A duplicate manifest is a refusal rather than a last-one-wins guess, because extractors
+ * disagree about which survives and the published manifest would then depend on the extractor
+ * rather than on this tool. A short final block is a truncation: an archive that ends
+ * mid-entry would otherwise read as a valid one that simply stops, which is exactly how a
+ * partial write becomes a published package.
  */
-export function replaceTarballManifest(archive: Buffer, manifest: string): Buffer {
-  const tar = gunzipSync(archive);
-  const parts: Buffer[] = [];
-  let replaced = false;
+export function readArchive(gzipped: Buffer): TarArchive {
+  const tar = gunzipSync(gzipped);
+  const entries: TarEntry[] = [];
+  let tail = tar.subarray(tar.length);
 
   for (let offset = 0; offset < tar.length;) {
     const header = tar.subarray(offset, offset + BLOCK);
+    if (header.length < BLOCK)
+      throw new PublishCleanError("Tarball ends mid-header; the archive is truncated.");
     const name = field(header, 0, NAME_LEN);
     if (name === "") {
       // Zero block: the end-of-archive marker and its padding, kept byte for byte.
-      parts.push(tar.subarray(offset));
+      tail = tar.subarray(offset);
       break;
     }
+
     const size = entrySize(header);
     const end = offset + BLOCK + BLOCK * Math.ceil(size / BLOCK);
+    if (end > tar.length)
+      throw new PublishCleanError(`Tarball entry ${name} runs past the end of the archive.`);
     const type = field(header, TYPE_OFFSET, 1);
+    const body = tar.subarray(offset + BLOCK, offset + BLOCK + size);
 
     if (type === GNU_LONG_NAME)
       throw new PublishCleanError("Tarball uses GNU long-name entries, which this tool refuses.");
-    if (PAX_TYPES.has(type))
-      assertNoManifestOverride(tar.subarray(offset + BLOCK, offset + BLOCK + size));
-
+    if (PAX_TYPES.has(type)) assertNoManifestOverride(body);
     if (name === MANIFEST_PATH) {
-      if (replaced)
-        throw new PublishCleanError(`Tarball contains ${MANIFEST_PATH} more than once.`);
       if (type !== "0" && type !== "")
         throw new PublishCleanError(`${MANIFEST_PATH} is not a regular file in the tarball.`);
-      const body = Buffer.from(manifest, "utf8");
-      parts.push(
-        reheader(header, body.length),
-        body,
-        Buffer.alloc(BLOCK * Math.ceil(body.length / BLOCK) - body.length),
-      );
-      replaced = true;
-    } else parts.push(tar.subarray(offset, end));
+      if (entries.some((entry) => entry.name === MANIFEST_PATH))
+        throw new PublishCleanError(`Tarball contains ${MANIFEST_PATH} more than once.`);
+    }
 
+    entries.push({ name, type, header, body, raw: tar.subarray(offset, end) });
     offset = end;
   }
 
-  if (!replaced) throw new PublishCleanError(`Tarball does not contain ${MANIFEST_PATH}.`);
-  return gzipSync(Buffer.concat(parts));
+  return { entries, tail };
+}
+
+/**
+ * The paths a consumer's installer writes, with the `package/` prefix stripped — the list every
+ * content guard judges. Directories and pax headers are dropped: neither is a file anyone
+ * imports, and a pax header's own name (`PaxHeader`) names no file at all.
+ */
+export function packageFiles(archive: TarArchive): string[] {
+  return archive.entries
+    .filter((entry) => entry.type !== DIRECTORY_TYPE && !PAX_TYPES.has(entry.type))
+    .map((entry) => (entry.name.startsWith("package/") ? entry.name.slice(8) : entry.name))
+    .filter((name) => name.length > 0 && !name.endsWith("/"))
+    .sort();
+}
+
+function manifestEntry(archive: TarArchive): TarEntry {
+  const entry = archive.entries.find((candidate) => candidate.name === MANIFEST_PATH);
+  if (!entry) throw new PublishCleanError(`Tarball does not contain ${MANIFEST_PATH}.`);
+  return entry;
+}
+
+/** The manifest exactly as the archive carries it, for parsing by the caller. */
+export function manifestText(archive: TarArchive): string {
+  return manifestEntry(archive).body.toString("utf8");
+}
+
+/** Returns the gzipped tarball with `package/package.json` replaced by `manifest`. */
+export function replaceManifest(archive: TarArchive, manifest: string): Buffer {
+  const target = manifestEntry(archive);
+  const body = Buffer.from(manifest, "utf8");
+  const parts = archive.entries.map((entry) =>
+    entry === target
+      ? Buffer.concat([
+          reheader(entry.header, body.length),
+          body,
+          Buffer.alloc(BLOCK * Math.ceil(body.length / BLOCK) - body.length),
+        ])
+      : entry.raw,
+  );
+  parts.push(archive.tail);
+  // Every consumer of this package downloads these bytes forever, and this rewrite decides
+  // their compression — not the packer's. `level: 9` is gzip's maximum and the strongest
+  // setting the format allows without leaving zlib: measured on this package, it produces
+  // 26,440 bytes against 26,699 at the default level 6 and 26,500 as pnpm packed it, for
+  // about 1ms. `memLevel: 9` was measured too and rejected: no gain here and 384 bytes
+  // WORSE on a 2.5MB corpus. Node writes no mtime into the gzip header, so the output stays
+  // byte-identical across runs, which is what lets a re-run repair a release truthfully.
+  return gzipSync(Buffer.concat(parts), { level: 9 });
 }
