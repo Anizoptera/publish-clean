@@ -333,6 +333,11 @@ async function packAndClean(
     assertFinalTarballIncludesCleanedFiles(cleanedFiles, finalFiles);
     const finalPkg = readTarballJson(finalTarball, "package.json", extracted);
     assertNoMonorepoProtocols(finalPkg);
+    // A tripwire for this tool's own bugs, and the only guard here no fixture can trigger:
+    // every field it would catch is either kept by design or removed on request, and a
+    // removal on request is excluded from the comparison. So it fires only if cleaning or
+    // npm starts losing something, which is exactly when nothing else would notice. Its
+    // decision is exercised directly in the rules suite; deleting this call breaks no test.
     assertNoLostConsumerFields(sourcePkg, finalPkg, extraDevFields);
     if (stableJson(finalPkg) !== stableJson(cleanedPkg))
       throw new PublishCleanError("Final npm tarball manifest differs from the cleaned manifest.");

@@ -132,140 +132,120 @@ describe.concurrent("publish-clean", () => {
     }
   });
 
-  it("strips author-only manifest fields and validates declared files", async () => {
+  // One package carrying every happy-path concern at once, asserted from a single run.
+  // The cost here is two real package managers and a tarball, and that cost buys one thing:
+  // what pnpm and npm actually do to a manifest this tool cleaned. That answer does not vary
+  // with the field under inspection, so a run per field bought nothing but wall-clock. Each
+  // rule's own matrix is exercised directly in the rules suite.
+  //
+  // Run from inside the package with publish args after `--` and no positional, because that
+  // is the shape the release workflow uses: it also proves those args are not mistaken for
+  // the package directory, and that the directory defaults to the working one.
+  it("publishes a correct artifact from a package declaring every kind of field", async () => {
+    // Fields a consumer or the registry resolves. Cleaning is subtraction, so it fails by
+    // taking too much, and a field that quietly vanished leaves no trace in the artifact.
+    // `repository` is the sharpest case: losing it breaks provenance verification while the
+    // package still installs fine. Condition order inside `exports` must survive
+    // byte-identical as well — a reordered or partly dropped map still installs and still
+    // imports, just from the wrong file, on one runtime only.
+    const consumerFacing = {
+      description: "fixture",
+      repository: { type: "git", url: "git+https://example.test/x.git" },
+      funding: "https://example.test/fund",
+      engines: { node: ">=20" },
+      sideEffects: false,
+      exports: { ".": { types: "./index.d.ts", bun: "./index.js", import: "./index.js" } },
+    };
     const fx = await fixture(
       {
-        name: "fixture-ok",
+        name: "fixture-complete",
         version: "1.0.0",
         type: "module",
-        files: ["index.js"],
-        exports: "./index.js",
+        files: ["index.js", "index.d.ts"],
         scripts: { build: "tsc", postinstall: "node index.js" },
         devDependencies: { typescript: "^5.0.0" },
+        // Unrecognised, and each half of the response matters: staying silent hides the
+        // drift, and dropping the field would break a consumer who does read it.
+        someToolConfig: { threshold: 5 },
+        // Unrecognised but acknowledged. A report whose only resolution deletes the field is
+        // unusable for an ecosystem this tool does not know — a VS Code extension needs
+        // `contributes` in the artifact to work at all — so keepFields must silence the
+        // report while leaving the field in place.
+        contributes: { commands: [] },
+        "publish-clean": { keepFields: ["contributes"] },
+        ...consumerFacing,
       },
-      { "index.js": "export const ok = true;\n" },
-    );
-    try {
-      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
-      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      const pkg = JSON.parse(
-        await readFile(path.join(extractedPath(result.stdout), "package.json"), "utf8"),
-      ) as Record<string, unknown>;
-      expect(pkg.devDependencies).toBeUndefined();
-      // `files` selected these very bytes and cannot select again: the artifact it
-      // describes is already packed, and an install extracts all of it unfiltered.
-      expect(pkg.files).toBeUndefined();
-      expect(pkg.scripts).toEqual({ postinstall: "node index.js" });
-      await cleanupExtracted(result.stdout);
-    } finally {
-      await cleanup(fx.root);
-    }
-  });
-
-  it("does not treat publish args after -- as the package directory", async () => {
-    const fx = await fixture(
-      { name: "fixture-publish-args", version: "1.0.0", files: ["index.js"] },
-      { "index.js": "module.exports = 1;\n" },
-    );
-    try {
-      const result = await runCli(["--dry-run", "--no-git-checks", "--", "--tag", "next"], fx.dir);
-      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      expect(result.stdout).toContain("[dry-run] Extracted package at:");
-      await cleanupExtracted(result.stdout);
-    } finally {
-      await cleanup(fx.root);
-    }
-  });
-
-  it("reports and keeps the final npm tarball in dry-run output", async () => {
-    const fx = await fixture(
-      { name: "fixture-final-tarball", version: "1.0.0", files: ["index.js"] },
-      { "index.js": "module.exports = 1;\n" },
-    );
-    try {
-      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
-      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      expect(finalTarballPath(result.stdout)).toMatch(/\.tgz$/);
-      await cleanupExtracted(result.stdout);
-    } finally {
-      await cleanup(fx.root);
-    }
-  });
-
-  it("keeps the final npm tarball manifest cleaned", async () => {
-    const fx = await fixture(
-      {
-        name: "fixture-final-manifest",
-        version: "1.0.0",
-        files: ["index.js"],
-        devDependencies: { typescript: "^5.0.0" },
-        scripts: { build: "tsc" },
-      },
-      { "index.js": "module.exports = 1;\n" },
-    );
-    try {
-      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
-      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      const pkg = JSON.parse(
-        readTarballFile(finalTarballPath(result.stdout), "package.json"),
-      ) as Record<string, unknown>;
-      expect(pkg.devDependencies).toBeUndefined();
-      expect(pkg.scripts).toBeUndefined();
-      await cleanupExtracted(result.stdout);
-    } finally {
-      await cleanup(fx.root);
-    }
-  });
-
-  // A release pipeline must attach and attest the exact bytes that reach the registry,
-  // so the retained copy has to be byte-identical to the tarball the CLI publishes —
-  // not a re-pack, which would differ and make any attestation a lie.
-  it("keeps a byte-identical copy of the published tarball", async () => {
-    const fx = await fixture(
-      { name: "fixture-tarball-out", version: "1.0.0", files: ["index.js"] },
-      { "index.js": "module.exports = 1;\n" },
+      { "index.js": "export const ok = true;\n", "index.d.ts": "export {};\n" },
     );
     const out = path.join(fx.root, "artifacts");
     try {
       const result = await runCli(
-        ["--dry-run", "--no-git-checks", "--tarball-out", out, fx.dir],
-        process.cwd(),
+        ["--dry-run", "--no-git-checks", "--tarball-out", out, "--", "--tag", "next"],
+        fx.dir,
+        // Not pnpm, so the lifecycle warning fires: this tool packs with pnpm and silently
+        // getting another packer's file selection is the failure it warns about.
+        { npm_config_user_agent: "npm/11.0.0 node/v24" },
       );
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      const kept = path.join(out, path.basename(finalTarballPath(result.stdout)));
-      expect(await readFile(kept)).toEqual(await readFile(finalTarballPath(result.stdout)));
+      expect(result.stderr).toContain("packs with pnpm");
+      expect(result.stderr).toContain("npm/11.0.0");
+
+      const cleaned = JSON.parse(
+        await readFile(path.join(extractedPath(result.stdout), "package.json"), "utf8"),
+      ) as Record<string, unknown>;
+      expect(cleaned.devDependencies).toBeUndefined();
+      // `files` selected these very bytes and cannot select again: the artifact it describes
+      // is already packed, and an install extracts all of it unfiltered.
+      expect(cleaned.files).toBeUndefined();
+      expect(cleaned["publish-clean"]).toBeUndefined();
+      expect(cleaned.scripts).toEqual({ postinstall: "node index.js" });
+      expect(cleaned.someToolConfig).toEqual({ threshold: 5 });
+      expect(cleaned.contributes).toEqual({ commands: [] });
+
+      expect(result.stderr).toContain("someToolConfig");
+      expect(result.stderr).toContain(`"devFields": ["someToolConfig"]`);
+      expect(result.stderr).not.toContain("contributes");
+
+      // The tarball is the artifact that reaches the registry; the cleaned directory is only
+      // an intermediate, so every promise above has to hold in the packed bytes too.
+      const tarball = finalTarballPath(result.stdout);
+      expect(tarball).toMatch(/\.tgz$/);
+      const shipped = JSON.parse(readTarballFile(tarball, "package.json")) as Record<
+        string,
+        unknown
+      >;
+      expect(shipped.devDependencies).toBeUndefined();
+      expect(shipped.files).toBeUndefined();
+      expect(shipped.scripts).toEqual({ postinstall: "node index.js" });
+      for (const [field, value] of Object.entries(consumerFacing))
+        expect(shipped[field]).toEqual(value);
+
+      // A release pipeline attaches and attests the exact bytes that reach the registry, so
+      // the retained copy has to be the published tarball itself and not a re-pack, which
+      // would differ and make any attestation a lie.
+      const kept = path.join(out, path.basename(tarball));
+      expect(await readFile(kept)).toEqual(await readFile(tarball));
+
       await cleanupExtracted(result.stdout);
     } finally {
       await cleanup(fx.root);
     }
   });
 
-  // `pack` runs the package's `prepare`/`prepack` scripts and forwards their stdout.
-  // Build tools log there as a matter of course, so a foreign package's own build
-  // chatter must never be mistaken for packer output.
-  it("packs a package whose prepare script writes to stdout", async () => {
+  // Both halves attack the same assumption — that packer stdout is a clean, parseable
+  // report — so one package under both conditions asks the question once. `pack` runs the
+  // package's `prepare`/`prepack` scripts and forwards their output, and build tools log
+  // there as a matter of course; `NPM_CONFIG_JSON` restructures npm's own output from a
+  // config file the CLI never sees. This is why the tarball is located on disk rather than
+  // parsed out of stdout: a package with a logging build step was once unpublishable.
+  it("finds the packed tarball through build chatter and reconfigured packer output", async () => {
     const fx = await fixture(
       {
-        name: "fixture-noisy-prepare",
+        name: "fixture-noisy-pack",
         version: "1.0.0",
         files: ["index.js"],
         scripts: { prepare: "node -e \"console.log('building the package')\"" },
       },
-      { "index.js": "module.exports = 1;\n" },
-    );
-    try {
-      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
-      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      expect(finalTarballPath(result.stdout)).toMatch(/\.tgz$/);
-      await cleanupExtracted(result.stdout);
-    } finally {
-      await cleanup(fx.root);
-    }
-  });
-
-  it("finds the packed tarball even when npm config requests JSON output", async () => {
-    const fx = await fixture(
-      { name: "fixture-json-pack", version: "1.0.0", files: ["index.js"] },
       { "index.js": "module.exports = 1;\n" },
     );
     try {
@@ -411,37 +391,6 @@ exit 1
     }
   });
 
-  it("treats publishConfig provenance as trusted publishing", async () => {
-    const fx = await fixture(
-      {
-        name: "fixture-publish-config-provenance",
-        version: "1.0.0",
-        files: ["index.js"],
-        publishConfig: { provenance: true },
-      },
-      { "index.js": "module.exports = 1;\n" },
-    );
-    const bin = path.join(fx.root, "bin");
-    try {
-      await mkdir(bin);
-      await writeShim(
-        path.join(bin, "npm"),
-        `#!/bin/sh
-if [ "$1" = "--version" ]; then echo "11.5.0"; exit 0; fi
-echo "unexpected npm $*" >&2
-exit 1
-`,
-      );
-      const result = await runCli(["--no-git-checks", fx.dir], process.cwd(), {
-        PATH: `${bin}:${process.env.PATH ?? ""}`,
-      });
-      expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain("requires npm 11.5.1");
-    } finally {
-      await cleanup(fx.root);
-    }
-  });
-
   it("rejects GitHub trusted publishing when repository metadata does not match", async () => {
     const fx = await fixture(
       {
@@ -517,29 +466,17 @@ exit 1
     }
   });
 
-  it("refuses critical leaked files even when suspicious checks are skipped", async () => {
-    const fx = await fixture(
-      { name: "fixture-leak", version: "1.0.0", files: ["index.js", ".env"] },
-      { "index.js": "module.exports = 1;\n", ".env": "TOKEN=secret\n" },
-    );
-    try {
-      const result = await runCli(
-        ["--dry-run", "--no-git-checks", "--skip-file-check", fx.dir],
-        process.cwd(),
-      );
-      expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain("Critical files must not be published");
-    } finally {
-      await cleanup(fx.root);
-    }
-  });
-
-  // Nested paths are the interesting case: a critical file is easy to spot at the
-  // package root and easy to miss one directory down. The leaked secret here is a
-  // private key rather than a nested `.npmrc`, because npm and pnpm strip `.npmrc`
-  // from tarballs at any depth — a fixture the packer refuses to emit can never
-  // reach this guard and only ever proves that packing happened.
-  it("refuses critical leaked files in nested package paths", async () => {
+  // The pattern matrix lives in the rules suite, where a filename costs nothing to judge.
+  // What only a real packer can answer is whether the file reaches the guard at all, and a
+  // nested path is the case that decides it: an earlier version of this test used a nested
+  // `.npmrc`, which npm and pnpm strip from tarballs at any depth, so the guard never saw it
+  // and the test only ever proved that packing happened. `--skip-file-check` is on to show
+  // that it relaxes the suspicious-file check without ever relaxing the critical one.
+  //
+  // The abort is checked here too rather than in a run of its own: a guard that rejects a
+  // package but leaves its extracted copy in the temp directory leaks the very secret it
+  // just refused to publish, so the refusal and the cleanup are one behaviour.
+  it("refuses a leaked key nested in the package, and leaves nothing behind", async () => {
     const fx = await fixture(
       {
         name: "fixture-nested-leak",
@@ -551,27 +488,6 @@ exit 1
         "config/deploy.key": "-----BEGIN PRIVATE KEY-----\n",
       },
     );
-    try {
-      const result = await runCli(
-        ["--dry-run", "--no-git-checks", "--skip-file-check", fx.dir],
-        process.cwd(),
-      );
-      expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain("config/deploy.key");
-    } finally {
-      await cleanup(fx.root);
-    }
-  });
-
-  it("removes temporary package extraction after validation failure", async () => {
-    const fx = await fixture(
-      {
-        name: "fixture-temp-cleanup",
-        version: "1.0.0",
-        files: ["index.js", ".env"],
-      },
-      { "index.js": "module.exports = 1;\n", ".env": "TOKEN=secret\n" },
-    );
     const temp = await mkdtemp(path.join(tmpdir(), "publish-clean-tmp-"));
     try {
       const result = await runCli(
@@ -580,9 +496,11 @@ exit 1
         { TMPDIR: temp },
       );
       expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("Critical files must not be published");
+      expect(result.stderr).toContain("config/deploy.key");
+      expect(result.stdout).not.toContain("Final tarball");
       const leftovers = (await readdir(temp)).filter((name) => name.startsWith("publish-clean-"));
       expect(leftovers).toEqual([]);
-      expect(result.stdout).not.toContain("Final tarball");
     } finally {
       await cleanup(fx.root);
       await cleanup(temp);
@@ -624,6 +542,10 @@ exit 1
     }
   });
 
+  // End-to-end because the claim is about pnpm, not about the rule: pnpm rewrites some
+  // workspace specs while packing and leaves `link:` verbatim, and only a real pack says
+  // which. Published with one, the package is uninstallable for everyone and the version
+  // cannot be taken back.
   it("fails unresolved monorepo-only dependency protocols", async () => {
     const fx = await fixture(
       {
@@ -644,27 +566,9 @@ exit 1
     }
   });
 
-  it("rejects devFields entries that would remove runtime manifest fields", async () => {
-    const fx = await fixture(
-      {
-        name: "fixture-protected-devfield",
-        version: "1.0.0",
-        files: ["index.js"],
-        dependencies: { bad: "link:../bad" },
-        "publish-clean": { devFields: ["dependencies"] },
-      },
-      { "index.js": "module.exports = 1;\n" },
-    );
-    try {
-      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
-      expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain("publish-clean.devFields");
-      expect(result.stderr).toContain("dependencies");
-    } finally {
-      await cleanup(fx.root);
-    }
-  });
-
+  // Only a real pack answers this: `main` and `bin` are validated against the file set pnpm
+  // actually emitted, and the shapes here are the ones a naive check misses — a bare path
+  // with no `./`, a value nested in a map, and one nested two maps deep.
   it("validates non-dot-slash main, bin, and typesVersions paths", async () => {
     const fx = await fixture(
       {
@@ -683,182 +587,6 @@ exit 1
       expect(result.stderr).toContain("missing.js");
       expect(result.stderr).toContain("bin/missing.js");
       expect(result.stderr).toContain("missing.d.ts");
-    } finally {
-      await cleanup(fx.root);
-    }
-  });
-
-  it("rejects manifest paths that escape the packed package root", async () => {
-    const fx = await fixture(
-      {
-        name: "fixture-path-traversal",
-        version: "1.0.0",
-        files: ["index.js"],
-        exports: "./../fixture-path-traversal-1.0.0.tgz",
-      },
-      { "index.js": "module.exports = 1;\n" },
-    );
-    try {
-      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
-      expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain("Manifest declares invalid package paths");
-      expect(result.stderr).toContain("../fixture-path-traversal-1.0.0.tgz");
-    } finally {
-      await cleanup(fx.root);
-    }
-  });
-
-  it("warns when invoked from a non-pnpm lifecycle", async () => {
-    const fx = await fixture(
-      { name: "fixture-user-agent", version: "1.0.0", files: ["index.js"] },
-      { "index.js": "module.exports = 1;\n" },
-    );
-    try {
-      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd(), {
-        npm_config_user_agent: "npm/11.0.0 node/v24",
-      });
-      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      expect(result.stderr).toContain("packs with pnpm");
-      expect(result.stderr).toContain("npm/11.0.0");
-      await cleanupExtracted(result.stdout);
-    } finally {
-      await cleanup(fx.root);
-    }
-  });
-
-  // The report exists because the strip list cannot know about tools invented after it was
-  // written. Both halves matter and can fail independently: staying silent hides the drift,
-  // and dropping the field would break a consumer who does read it. A recognised field
-  // appearing in the report would be just as bad, because a report nobody trusts is noise.
-  it("reports an unrecognised manifest field and still publishes it", async () => {
-    const fx = await fixture(
-      {
-        name: "fixture-unknown-field",
-        version: "1.0.0",
-        files: ["index.js"],
-        funding: "https://example.test/fund",
-        someToolConfig: { threshold: 5 },
-      },
-      { "index.js": "module.exports = 1;\n" },
-    );
-    try {
-      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
-      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      expect(result.stderr).toContain("someToolConfig");
-      expect(result.stderr).toContain(`"devFields": ["someToolConfig"]`);
-      expect(result.stderr).not.toContain("funding");
-
-      const extracted = /^\[dry-run\] Extracted package at: (.+)$/m.exec(result.stdout)?.[1];
-      const shipped = JSON.parse(
-        await readFile(path.join(String(extracted).trim(), "package.json"), "utf8"),
-      ) as Record<string, unknown>;
-      expect(shipped.someToolConfig).toEqual({ threshold: 5 });
-      expect(shipped.funding).toBe("https://example.test/fund");
-
-      await cleanupExtracted(result.stdout);
-    } finally {
-      await cleanup(fx.root);
-    }
-  });
-
-  // The package's headline promise is that a private key cannot reach the registry, so the
-  // ways a key file evades a pattern are the failures that matter most. Both cases here
-  // shipped silently before: an SSH key carries no extension, and on the case-insensitive
-  // filesystems most packages are built on, `Server.PEM` is the same file as `server.pem`.
-  // One package carrying every evasion at once, rather than one pipeline per filename:
-  // the patterns are a pure decision over a path list, so re-running two package managers
-  // per name buys nothing. It also asks the harder question, which per-name cases could
-  // not: a guard that stopped at the FIRST offender passed every one of them.
-  it("refuses to publish every private key it can recognise, naming all of them", async () => {
-    const secrets = ["id_rsa", "deploy/id_ed25519", "Server.PEM", "certs/private.Key"];
-    const fx = await fixture(
-      {
-        name: "fixture-key-leak",
-        version: "1.0.0",
-        files: ["index.js", ...secrets.map((s) => s.split("/")[0]!)],
-      },
-      {
-        "index.js": "module.exports = 1;\n",
-        ...Object.fromEntries(secrets.map((s) => [s, "PRIVATE KEY\n"])),
-      },
-    );
-    try {
-      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
-      expect(result.status, `${result.stdout}\n${result.stderr}`).not.toBe(0);
-      expect(result.stderr).toContain("Critical files must not be published");
-      for (const secret of secrets) expect(result.stderr).toContain(secret);
-    } finally {
-      await cleanup(fx.root);
-    }
-  });
-
-  // Cleaning is subtraction, so it fails by taking too much, and a field that quietly
-  // vanished leaves no trace in the artifact. `repository` is the sharpest case: losing it
-  // breaks provenance verification while the package still installs fine.
-  it("publishes every consumer-facing field the source declared", async () => {
-    const declared = {
-      description: "fixture",
-      repository: { type: "git", url: "git+https://example.test/x.git" },
-      funding: "https://example.test/fund",
-      engines: { node: ">=20" },
-      sideEffects: false,
-      // Condition order decides which build each consumer gets, so this must survive
-      // byte-identical: a reordered or partially dropped map still installs and still
-      // imports, just from the wrong file, on one runtime only.
-      exports: { ".": { types: "./index.d.ts", bun: "./index.js", import: "./index.js" } },
-    };
-    const fx = await fixture(
-      {
-        name: "fixture-kept-fields",
-        version: "1.0.0",
-        files: ["index.js", "index.d.ts"],
-        ...declared,
-      },
-      { "index.js": "module.exports = 1;\n", "index.d.ts": "export {};\n" },
-    );
-    try {
-      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
-      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      const tarball = /^\[dry-run\] Final tarball at: (.+)$/m.exec(result.stdout)?.[1];
-      const shipped = JSON.parse(
-        spawnSync("tar", ["xzOf", String(tarball).trim(), "package/package.json"], {
-          encoding: "utf8",
-        }).stdout,
-      ) as Record<string, unknown>;
-      for (const [field, value] of Object.entries(declared)) expect(shipped[field]).toEqual(value);
-      await cleanupExtracted(result.stdout);
-    } finally {
-      await cleanup(fx.root);
-    }
-  });
-
-  // A report whose only resolution deletes the field is unusable for any package whose
-  // ecosystem this tool does not know: a VS Code extension needs `contributes` in the
-  // artifact to work at all. keepFields must silence the report while leaving the field in
-  // place, or the author's only options are a permanent warning or a broken package.
-  it("stops reporting a field acknowledged through keepFields, and still ships it", async () => {
-    const fx = await fixture(
-      {
-        name: "fixture-keep-field",
-        version: "1.0.0",
-        files: ["index.js"],
-        contributes: { commands: [] },
-        "publish-clean": { keepFields: ["contributes"] },
-      },
-      { "index.js": "module.exports = 1;\n" },
-    );
-    try {
-      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
-      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      expect(result.stderr).not.toContain("contributes");
-
-      const extracted = /^\[dry-run\] Extracted package at: (.+)$/m.exec(result.stdout)?.[1];
-      const shipped = JSON.parse(
-        await readFile(path.join(String(extracted).trim(), "package.json"), "utf8"),
-      ) as Record<string, unknown>;
-      expect(shipped.contributes).toEqual({ commands: [] });
-
-      await cleanupExtracted(result.stdout);
     } finally {
       await cleanup(fx.root);
     }
