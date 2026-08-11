@@ -44,4 +44,11 @@
 - A change anyone outside this repository can observe MUST be committed as `fix` or `feat`, however
   internal the edit looks. release-please cuts a release from those two types alone, so the same change
   typed `refactor` or `chore` ships with no version of its own, or never ships at all.
+- The converse binds equally: a change nobody outside can observe MUST NOT be typed `feat`, `fix`, `perf`
+  or `refactor`. Those four are this repo's published changelog sections and release-please keys sections
+  on TYPE alone, so a scope hides nothing — `perf(test)` and `fix(test)` land in a public release note
+  beside real user-facing work. Type test and tooling work `test:`, `chore:`, `ci:` or `docs:`, which are
+  omitted. Also avoid landing a defect and its fix in one unreleased range under `fix:`: both entries
+  publish, they read as cancelling, and they describe a bug no released version ever had. Needing to
+  hand-curate a changelog before release is the symptom of either mistake.
 - Run `bun run check` before committing.
