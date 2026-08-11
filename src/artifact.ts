@@ -1,8 +1,8 @@
 /**
  * What the published tarball may carry, and what it must. Every rule here judges a file list —
- * the paths `tar` reads out of the archive, with the `package/` prefix already stripped — never
- * a directory on disk, because that list is what a consumer's installer unpacks and it needs no
- * filesystem to exist.
+ * the archive's entry paths with the `package/` prefix already stripped — never a directory on
+ * disk, because that list is what a consumer's installer unpacks and it needs no filesystem to
+ * exist.
  *
  * Ambient inputs arrive as parameters and never by reaching for them — no process, filesystem or
  * argv here. `cli.ts` owns the effects.
@@ -65,8 +65,10 @@ export function validatePackedFiles(files: readonly string[], skipSuspicious: bo
  * dropped file: the leak checks only ask what is present, and a package missing a file installs
  * fine and then fails at import, on a version the registry keeps forever.
  *
- * Both lists are read out of the archives by `tar`, an instrument that cannot share a mistake
- * with the walk being checked.
+ * The two lists come from the same reader, so this cannot catch a defect in the reader itself —
+ * only one in the rewrite, which is what it is for. Independence from the reader is bought
+ * elsewhere, by the case in test/cli.test.ts that compares the list this reader prints against
+ * `tar tzf` of the same tarball — an instrument that cannot share a mistake with this one.
  */
 export function assertSameEntries(packed: readonly string[], published: readonly string[]): void {
   const before = new Set(packed);
