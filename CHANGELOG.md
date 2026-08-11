@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.4.0](https://github.com/Anizoptera/publish-clean/compare/v0.3.0...v0.4.0) (2026-08-11)
+
+
+### Features
+
+* pack once and rewrite the manifest in place, dropping the second pack ([f9a24ec](https://github.com/Anizoptera/publish-clean/commit/f9a24ec4c3e7d3e3b55eebe006c27483d4db273e))
+
+  The published artifact is the tarball `pnpm pack` produced, with only its
+  `package.json` member replaced. Previously the cleaned directory was packed a
+  second time by npm, which re-derived the file set from `files` — the field
+  cleaning removes — and so fell back to `.gitignore`/`.npmignore` for exclusion.
+  A package that shipped an ignore file excluding another of its own shipped
+  files could therefore lose it.
+
+  Three consequences for what you publish. `files` is now stripped from the
+  published manifest, since nothing re-selects after packing and the registry
+  deletes the field anyway. The artifact keeps pnpm's normalised entry metadata
+  instead of the build machine's user and group names. And no lifecycle script
+  runs after the pack, because npm skips `prepack`/`postpack` when it is handed
+  a tarball rather than a directory.
+
+  Provenance is unaffected: npm uploads the tarball byte for byte and signs the
+  digest of exactly those bytes.
+
+
+### Internal changes
+
+* make the rules module actually pure, and cover what nothing covered ([3f3a9d3](https://github.com/Anizoptera/publish-clean/commit/3f3a9d3311218acd71bd04069ed952548ea6b372))
+* move registry pinning into the rules, where it can be tested ([a52f922](https://github.com/Anizoptera/publish-clean/commit/a52f922f7a774bded0b3bfe16221fc1115084a89))
+* separate the publish rules from the effects that run them ([3ec88cd](https://github.com/Anizoptera/publish-clean/commit/3ec88cd6a5495a94c039d240c629d4df0cbf67ac))
+
 ## [0.3.0](https://github.com/Anizoptera/publish-clean/compare/v0.2.0...v0.3.0) (2026-08-11)
 
 
