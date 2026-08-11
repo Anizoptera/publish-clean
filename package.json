@@ -50,7 +50,6 @@
     "build": "tsdown",
     "prepare": "tsdown",
     "prepublishOnly": "pnpm run build && node dist/cli.js --guard-only",
-    "build:tsc": "tsc -p tsconfig.build.json && chmod +x dist/cli.js",
     "check": "bun run format:check && bun run claude-link:check && bun run typecheck && bun run build && bun run test:built && bun run tracked-artifacts:check && bun run cleaned-artifact:check",
     "cleaned-artifact:check": "bun scripts/check-cleaned-artifact.ts",
     "claude-link:check": "test -L CLAUDE.md && test \"$(readlink CLAUDE.md)\" = AGENTS.md",

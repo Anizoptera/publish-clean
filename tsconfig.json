@@ -5,8 +5,12 @@
     "declaration": true,
     "declarationMap": true,
     "exactOptionalPropertyTypes": true,
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    // The shipped artifact is a single file: rolldown resolves every intra-package import at
+    // build time and Vitest resolves them under test, so no relative specifier here ever
+    // reaches Node's resolver. NodeNext would still demand the `./x.js` suffix those two
+    // resolvers do not want, which is a runtime contract this package does not have.
+    "module": "preserve",
+    "moduleResolution": "bundler",
     "outDir": "dist",
     "target": "ES2022",
     "lib": ["ES2022"],
