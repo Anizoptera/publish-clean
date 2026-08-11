@@ -6,16 +6,15 @@ export default defineConfig({
   entry: ["src/cli.ts"],
   format: "esm",
   fixedExtension: false,
-  // Deliberately close to a no-op. Identifiers, whitespace and comments all survive, so
-  // the published file stays readable: this package sits on a publish path and handles
-  // registry credentials, and anyone who wants to audit the code they are about to trust
-  // should be able to read it in node_modules without fetching the repository. Only the
-  // genuinely dead parts are dropped.
-  minify: {
-    mangle: false,
-    compress: { dropDebugger: true },
-    codegen: { removeWhitespace: false },
-  },
+  // Off, so `dist/cli.js` reads as the source does. This package sits on a publish path and
+  // handles registry credentials, so someone deciding whether to trust it must be able to
+  // audit the file in `node_modules` and see the same code the repository shows. Measured
+  // 2026-08-11: enabling it costs 1,157 gzipped bytes on a once-per-developer devDependency
+  // and buys a file an auditor can no longer diff against `src/` — `mangle: false` does not
+  // prevent that, because compress alone rewrote `const` to `let`, `===` to `==`, an early
+  // return into a nested branch, and `if (a) b()` into `a && b()`. Comments survived and
+  // described control flow that no longer matched them.
+  minify: false,
   treeshake: { moduleSideEffects: false },
   deps: { neverBundle: true },
   outDir: "dist",
@@ -38,6 +37,4 @@ export default defineConfig({
   // asserted directly on the cleaned artifact in scripts/check-cleaned-artifact.ts,
   // where it is checked against what consumers actually install.
   publint: { enabled: "local-only", level: "error", strict: true },
-
-  //banner: { js: '#!/usr/bin/env node' },
 });
