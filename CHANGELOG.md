@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/Anizoptera/publish-clean/compare/v0.4.0...v0.5.0) (2026-08-11)
+
+
+### Features
+
+* require Node.js 22.14, the version npm needs to sign a publish ([b427414](https://github.com/Anizoptera/publish-clean/commit/b427414a7589752f08e0bb8c538e56c56cc57416))
+
+
+### Bug Fixes
+
+* check the tarball that ships, and publish it from the package directory ([3b7feed](https://github.com/Anizoptera/publish-clean/commit/3b7feed291c6b2a27cda4fc60257be9557a2e854))
+* stop dry-run from leaking a temp tree on every run ([ca7d846](https://github.com/Anizoptera/publish-clean/commit/ca7d8462fc045f97a0cab0685965e803fa35af34))
+* **tarball:** refuse GNU long-name entries in the packed archive ([f94cc46](https://github.com/Anizoptera/publish-clean/commit/f94cc46e662caba2ba791b0ecb80ed59acc4d342))
+
 ## [0.4.0](https://github.com/Anizoptera/publish-clean/compare/v0.3.0...v0.4.0) (2026-08-11)
 
 
