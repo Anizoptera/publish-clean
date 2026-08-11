@@ -17,7 +17,34 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The lane, run on the tagged commit by CI rather than trusted to have run on a laptop.
+  # `preversion` fails fast before the bump, but it is not a gate: a hand-made tag, a
+  # `git commit --no-verify` habit, or any bypass reaches the registry, and an npm version is
+  # permanent. This job is separate rather than a step of the publish because permissions are
+  # per-job: it holds none, so the test suite -- which puts fake executables on PATH and runs
+  # fixture lifecycle scripts -- never executes beside a live OIDC identity. It also removes
+  # the reason the CLI would behave differently under test, since `ACTIONS_ID_TOKEN_REQUEST_URL`
+  # is undefined here.
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .tool-versions
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .tool-versions
+          package-manager-cache: false
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+
   publish:
+    needs: verify
     runs-on: ubuntu-latest
     # Bounded because the runner default is six hours and this workflow serialises on a
     # concurrency group that never cancels: one wedged run blocks every later release until
@@ -71,13 +98,9 @@ jobs:
       # on whatever future day the token expires instead of on the run that broke it.
       - run: bun run build
 
-      # This job holds the publish credential and the OIDC token, so it does the
-      # minimum that needs them: pack, publish, attest, attach. `bun run check` is not
-      # repeated here — it would execute the test suite, which builds shell shims and
-      # packs fixture packages, right next to a live npm token. The lane still gates the
-      # release: `preversion` runs it locally and a non-zero exit aborts the bump, so no
-      # tag exists to push. Do not restate that as "Check already ran on this commit" —
-      # the tagged commit is the version bump, created after Check last ran.
+      # This job holds the publish credential and the OIDC token, so it does the minimum
+      # that needs them: pack, publish, attest, attach. The lane runs in `verify` above,
+      # which this job waits on and which holds no permissions at all.
       #
       # Every step below is repeatable, because a run that publishes and then fails
       # otherwise leaves the registry, the tag and the Release permanently out of
