@@ -24,7 +24,9 @@ good it looks otherwise.
 - `npm publish` does the upload, because provenance lives there.
 - Validate the final tarball, not just the repository tree or the cleaned directory. The
   tarball is what users get.
-- Never modify the source tree. Only the extracted copy gets cleaned.
+- Never modify the source tree, and pack only once. The manifest is cleaned in an extracted
+  copy and written back into the packed tarball as a member replacement; repacking that copy
+  would hand the file set to a second packer that re-derives it from the stripped `files`.
 - This is not a release manager. Versions, changelogs, tags, GitHub Releases and dist-tag
   policy belong to other tools.
 - No rewriting of source content, including doc or comment stripping.

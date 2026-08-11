@@ -181,14 +181,14 @@ publish-clean packages/my-lib -- --access public --tag next
 
 ```mermaid
 flowchart TD
-  A[Your package directory] -->|pnpm pack| B[Tarball 1 - pnpm decides the file set]
+  A[Your package directory] -->|pnpm pack| B[Tarball - pnpm decides the file set]
   B --> C[Extract into a temp directory]
   C --> D{No leaked files?}
-  D --> E[Rewrite package.json for consumers]
+  D --> E[Clean package.json for consumers]
   E --> F{Every declared main/exports/bin/types path exists?}
-  F -->|npm pack --ignore-scripts| G[Tarball 2 - the bytes that ship]
-  G --> H{Same files, same manifest, still no leaks?}
-  H --> I[npm publish tarball 2]
+  F -->|replace the package.json member| G[Same tarball, cleaned manifest]
+  G --> H{Same files, expected manifest, still no leaks?}
+  H --> I[npm publish that tarball]
 ```
 
 Any gate that fails exits non-zero and nothing is published. `--dry-run` and
@@ -279,20 +279,32 @@ The obvious alternative is what a lot of hand-rolled release scripts do: edit
 and then your repo is sitting on a manifest nobody meant to keep. It also can't be run
 twice at once. Cleaning a copy has neither problem and costs a directory in `/tmp`.
 
-### Why npm packs the cleaned copy a second time
+### Why the tarball is edited instead of packed again
 
 Give npm a directory and it packs during the upload, so the bytes that reach the registry
-only come into existence after the last check has run.
+only come into existence after the last check has run. Packing first means they exist
+before anything is uploaded: they can be listed, scanned for leaks, kept with
+`--tarball-out` for a build attestation, and then published as themselves. What you
+inspect is what ships.
 
-Packing first means they exist before anything is uploaded. They can be listed, compared
-against the cleaned directory, scanned for leaks again, kept with `--tarball-out` for a
-build attestation, and then published as themselves. What you inspect is what ships. If
-cleaning ever dropped a real file, you find out here instead of from a bug report.
+So the manifest has to be cleaned inside a tarball that already exists. The obvious way is
+to unpack, edit, and pack again — and it is wrong. `files` is a packing instruction, and
+cleaning removes it, because it is useless to anyone installing the package. A second pack
+then has nothing left to select with, falls back to your `.gitignore`/`.npmignore` for
+exclusion, and quietly drops files the first pack included. A package shipping a
+`.gitignore` that excludes any other shipped file loses it.
 
-The second pack uses `--ignore-scripts`. The first one doesn't, deliberately: `pnpm pack`
-runs your `prepare` and `prepack` scripts, which is how your build output gets into the
-package at all. Running them again on the cleaned copy could only change it after it was
-checked.
+Editing avoids the whole question. Only the `package/package.json` member is replaced;
+every other entry is copied without being decoded, so the file set stays exactly what pnpm
+chose and entry shapes this tool does not model (pax headers for long paths, prefix
+splitting) pass through untouched. It also keeps pnpm's normalised metadata — owner `0:0`,
+a fixed timestamp, mode 644 — which a plain `tar` invocation would replace with the build
+machine's own user and group names.
+
+Lifecycle scripts run once, at the first pack. `pnpm pack` runs your `prepare` and
+`prepack`, which is how build output reaches the package at all. Nothing runs afterwards:
+npm skips `prepack`/`postpack` when it is handed a tarball rather than a directory, so
+nothing can alter the artifact after it was checked.
 
 ### Why npm does the publishing
 

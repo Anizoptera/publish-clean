@@ -24,15 +24,14 @@ export const DEV_FIELDS = new Set([
   // happens, so removing it here cannot open a bypass. In a published manifest npm never
   // reads it back.
   "private",
-  // `files` is deliberately ABSENT from this set, though nothing downstream of publication
-  // reads it: npm's registry normalisation drops it from the served version document, and an
-  // install extracts every entry unfiltered. It stays because THIS pipeline packs a second
-  // time, and an explicit `files` is what makes both packers select the same set — each
-  // overrides its own default exclusions for a path the field names. Remove it and npm has no
-  // instruction left, so it falls back to `.gitignore`/`.npmignore` (`npm warn
-  // gitignore-fallback`) and drops what pnpm selected. Measured with `files` as the only
-  // variable: retained -> `.gitignore lib/a.js lib/b.js package.json`; stripped -> `lib/a.js
-  // package.json`. Stripping is correct only once nothing downstream re-selects files.
+  // A packing instruction, spent once the tarball exists: the published artifact is that
+  // tarball with its manifest replaced, so nothing re-derives a file set from this field, and
+  // an install extracts every entry unfiltered. npm agrees — its registry normalisation drops
+  // `files` from the served version document while keeping `exports` and `sideEffects`, which
+  // are what actually resolve. Stripping it is safe ONLY while no second packer runs; a
+  // pipeline that packs again from the cleaned directory would silently lose files, because
+  // npm then falls back to `.gitignore`/`.npmignore` for exclusion.
+  "files",
   "stylelint",
   "trustedDependencies",
   "wireit",
@@ -154,16 +153,6 @@ export const REGISTRY_MANIFEST_FIELDS = new Set([
 ]);
 
 /**
- * Read by a packer, never by anything downstream of publication — so these belong in neither
- * set above, whose question is what a consumer or the registry reads, yet reporting them as
- * unrecognised would nag on every publish. `files` is retained rather than stripped because
- * this pipeline packs a second time and npm re-reads it there; see DEV_FIELDS for the
- * measurement. It is deliberately absent from the lost-field guard: losing it corrupts the
- * artifact, but the tarball comparison already catches that, and it is not consumer-facing.
- */
-export const PACKER_MANIFEST_FIELDS = new Set(["files"]);
-
-/**
  * Refuses a published manifest that lost a field the source declared and consumers read.
  *
  * Every other check here asks whether something got in that should not have. This asks the
@@ -222,7 +211,6 @@ export function unrecognizedFieldsReport(pkg: JsonObject, kept: readonly string[
     (field) =>
       !RUNTIME_MANIFEST_FIELDS.has(field) &&
       !REGISTRY_MANIFEST_FIELDS.has(field) &&
-      !PACKER_MANIFEST_FIELDS.has(field) &&
       !acknowledged.has(field),
   );
   if (unrecognized.length === 0) return null;
@@ -497,17 +485,6 @@ export function validatePackedFiles(files: readonly string[], skipSuspicious: bo
   );
   if (suspicious.length > 0)
     throw new PublishCleanError(`Suspicious files in package artifact:\n${suspicious.join("\n")}`);
-}
-
-export function assertFinalTarballIncludesCleanedFiles(
-  cleanedFiles: readonly string[],
-  finalFiles: readonly string[],
-): void {
-  const missing = cleanedFiles.filter((file) => !finalFiles.includes(file)).sort();
-  if (missing.length === 0) return;
-  throw new PublishCleanError(
-    `Final npm tarball dropped files from the cleaned package:\n${missing.join("\n")}`,
-  );
 }
 
 /**

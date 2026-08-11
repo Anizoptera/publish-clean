@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   PublishCleanError,
   assertFilesField,
-  assertFinalTarballIncludesCleanedFiles,
   assertNoLostConsumerFields,
   assertNoMonorepoProtocols,
   assertPublicPackage,
@@ -363,26 +362,6 @@ describe.concurrent("trusted publishing intent", () => {
         ["--provenance"],
         LOCAL,
       ),
-    ).not.toThrow();
-  });
-});
-
-// A tripwire for npm, not for the author: the cleaned directory has already been validated, so
-// anything the final pack silently omits would ship a package missing a file that passed every
-// earlier check. No fixture can provoke it, which is exactly why the rule is exercised here.
-describe.concurrent("final tarball completeness", () => {
-  it("refuses a tarball that dropped a validated file, naming what went missing", () => {
-    expect(() =>
-      assertFinalTarballIncludesCleanedFiles(
-        ["index.js", "index.d.ts", "nested/deep.js"],
-        ["index.js"],
-      ),
-    ).toThrow("index.d.ts");
-  });
-
-  it("accepts a tarball that carries more than the cleaned directory", () => {
-    expect(() =>
-      assertFinalTarballIncludesCleanedFiles(["index.js"], ["index.js", "package.json"]),
     ).not.toThrow();
   });
 });

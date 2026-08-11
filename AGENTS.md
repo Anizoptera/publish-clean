@@ -13,12 +13,23 @@
 - The price of pnpm is `bundleDependencies`: a symlinked store has nothing to copy, so pnpm refuses such a
   package outright, standalone or not. The refusal is loud and names the fix (`nodeLinker: hoisted`). Do
   not answer it by switching packers, which forfeits everything above.
-- Use `npm pack` and `npm publish` for the final cleaned tarball and registry upload.
+- Pack exactly ONCE. The published artifact is pnpm's tarball with its `package/package.json` member
+  rewritten in place (`src/tarball.ts`), never a repack of the cleaned directory. Packing again hands
+  the file set to a second packer that re-derives it from `files` — the very field being stripped — so
+  it falls back to `.gitignore`/`.npmignore` and silently drops entries pnpm selected. Rewriting also
+  inherits pnpm's normalisation (uid/gid 0, fixed mtime, mode 644) that a plain `tar` invocation
+  replaces with the build machine's own identity. Do not reintroduce a second pack to "validate" the
+  output; validate the rewritten bytes instead.
+- Use `npm publish <tarball>` for registry upload. It uploads those bytes verbatim
+  (`pacote`'s FileFetcher streams the file), and provenance signs their sha512
+  (`libnpmpublish` builds the attestation subject from `ssri.fromData(tarballData)`), so the
+  attestation covers exactly what this tool produced. Publishing a tarball also runs no lifecycle
+  scripts at all — `libnpmpack` gates `prepack`/`postpack` on a directory spec.
 - Never weaken critical artifact checks for secrets, `node_modules`, Git internals, or broken export paths.
 - The published package carries what consumers and the registry read, and nothing else. Dangerous content
   and useless content are both targets: a shipped tool-config block is noise every installer downloads
   forever. The manifest is the ONLY surface authorised for this — file selection belongs to `pnpm pack`,
-  and file contents are never rewritten. Unrecognised fields ship and are reported, never dropped
+  and no other file's contents are ever altered. Unrecognised fields ship and are reported, never dropped
   silently: dropping a key some consumer resolves breaks a stranger's build with no signal here.
 - Do not add package-manager-specific behavior unless tests prove the published tarball invariant.
 - Split CLI args at `--` before parsing; everything after it belongs to `npm publish`.

@@ -161,11 +161,10 @@ describe.concurrent("publish-clean", () => {
         name: "fixture-complete",
         version: "1.0.0",
         type: "module",
-        // `.gitignore` is both shipped and excludes a shipped file, which is the minimal shape
-        // that catches a manifest cleaner stripping `files`: npm would then have no selection
-        // instruction, fall back to this `.gitignore`, and drop `index.d.ts` from the final
-        // tarball. The CLI fails the publish outright when that happens, so this fixture needs
-        // no assertion of its own to stay red.
+        // `.gitignore` is shipped AND excludes a shipped file. Nothing may re-derive the file
+        // set after pnpm selected it, and this is the shape that proves it: a pipeline that
+        // packed a second time would find no `files` in the cleaned manifest, fall back to
+        // this `.gitignore`, and drop `index.d.ts` from the published tarball.
         files: ["index.js", "index.d.ts", ".gitignore"],
         scripts: { build: "tsc", postinstall: "node index.js" },
         devDependencies: { typescript: "^5.0.0" },
@@ -221,8 +220,10 @@ describe.concurrent("publish-clean", () => {
         unknown
       >;
       expect(shipped.devDependencies).toBeUndefined();
-      // The file this package's own `.gitignore` excludes: present only because the cleaned
-      // manifest still carries the selection instruction npm re-reads when it packs.
+      // Stripped, and the entry below proves that costs nothing: the file this package's own
+      // `.gitignore` excludes still ships, because the tarball was rewritten rather than
+      // repacked and no packer consults `files` again.
+      expect(shipped.files).toBeUndefined();
       expect(readTarballFile(tarball, "index.d.ts")).toBe("export {};\n");
       expect(shipped.scripts).toEqual({ postinstall: "node index.js" });
       for (const [field, value] of Object.entries(consumerFacing))

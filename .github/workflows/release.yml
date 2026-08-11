@@ -83,9 +83,11 @@ jobs:
       # Every step below is repeatable, because a run that publishes and then fails
       # otherwise leaves the registry, the tag and the Release permanently out of
       # step with no way back: npm refuses to republish a version, so an existing
-      # version packs in dry-run mode instead. `npm pack` normalises file mtimes,
-      # so the re-packed bytes equal the published ones and stay a truthful
-      # attestation subject.
+      # version packs in dry-run mode instead. Those bytes equal the published ones,
+      # so they stay a truthful attestation subject: pnpm normalises every tar header
+      # it writes (owner 0:0, a fixed mtime, mode 644), the manifest is rewritten from
+      # a key-sorted serialisation, and the gzip wrapper embeds no timestamp of its
+      # own. Verified by packing the same input twice and comparing digests.
       - name: Pack, and publish unless this version is already on the registry
         run: |
           # pnpm is a devDependency, so the lockfile is the single place its version is

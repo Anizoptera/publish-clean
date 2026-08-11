@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
-import { copyFile, mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -10,7 +10,6 @@ import {
   PUBLISH_ADVISORY,
   PublishCleanError,
   assertFilesField,
-  assertFinalTarballIncludesCleanedFiles,
   assertNoLostConsumerFields,
   assertNoMonorepoProtocols,
   assertPublicPackage,
@@ -31,6 +30,7 @@ import {
   withRegistry,
 } from "./rules";
 import type { JsonObject, TrustedPublishEnv } from "./rules";
+import { replaceTarballManifest } from "./tarball";
 
 const TOOL_PROBE_TIMEOUT_MS = 10_000;
 
@@ -330,28 +330,36 @@ async function packAndClean(
     assertNoMonorepoProtocols(cleanedPkg);
     const unrecognized = unrecognizedFieldsReport(cleanedPkg, keepFields);
     if (unrecognized) console.warn(unrecognized);
-    await writeFile(packedPkgPath, stringifyJson(cleanedPkg));
     assertDeclaredFiles(cleanedPkg, extracted);
-    const cleanedFiles: string[] = [];
-    await walkFiles(extracted, extracted, cleanedFiles);
+    // Not read by anything downstream: the tarball below is rewritten from pnpm's, not packed
+    // from this directory. It is written so the directory a dry-run points the operator at
+    // shows the manifest that will actually ship rather than the pre-cleaning one.
+    await writeFile(packedPkgPath, stringifyJson(cleanedPkg));
 
-    const finalPackRoot = path.join(root, "npm-pack");
-    await mkdir(finalPackRoot);
-    run("npm", ["pack", "--ignore-scripts", "--pack-destination", finalPackRoot], extracted);
-    const finalTarball = await soleTarball(finalPackRoot, "npm pack");
-    const finalFiles = listTarballFiles(finalTarball, extracted);
+    // The published artifact is pnpm's tarball with one member replaced, so its file set is
+    // pnpm's by construction and no second packer can re-decide it. Everything below verifies
+    // the bytes that will be uploaded, which is the only artifact whose contents still matter.
+    const publishRoot = path.join(root, "publish");
+    await mkdir(publishRoot);
+    const finalTarball = path.join(publishRoot, path.basename(tarball));
+    await writeFile(
+      finalTarball,
+      replaceTarballManifest(await readFile(tarball), stringifyJson(cleanedPkg)),
+    );
+
+    const finalFiles = listTarballFiles(finalTarball, root);
     validatePackedFiles(finalFiles, skipFileCheck);
-    assertFinalTarballIncludesCleanedFiles(cleanedFiles, finalFiles);
-    const finalPkg = readTarballJson(finalTarball, "package.json", extracted);
+    const finalPkg = readTarballJson(finalTarball, "package.json", root);
     assertNoMonorepoProtocols(finalPkg);
-    // A tripwire for this tool's own bugs, and the only guard here no fixture can trigger:
-    // every field it would catch is either kept by design or removed on request, and a
-    // removal on request is excluded from the comparison. So it fires only if cleaning or
-    // npm starts losing something, which is exactly when nothing else would notice. Its
-    // decision is exercised directly in the rules suite; deleting this call breaks no test.
+    // A tripwire for this tool's own bugs: every field it would catch is either kept by design
+    // or removed on request, and a removal on request is excluded from the comparison. Its
+    // decision is exercised directly in the rules suite.
     assertNoLostConsumerFields(sourcePkg, finalPkg, extraDevFields);
+    // Reads back what the rewrite actually wrote. The manifest is the one member this tool
+    // authors rather than copies, so this is the check that the rewrite produced the bytes the
+    // guards above approved, and not merely bytes that happen to parse.
     if (stableJson(finalPkg) !== stableJson(cleanedPkg))
-      throw new PublishCleanError("Final npm tarball manifest differs from the cleaned manifest.");
+      throw new PublishCleanError("Rewritten tarball manifest differs from the cleaned manifest.");
 
     // Copied before publishing, and in every mode, so the retained bytes are exactly
     // the validated artifact regardless of whether the publish itself succeeds.
