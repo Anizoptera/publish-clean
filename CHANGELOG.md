@@ -3,6 +3,32 @@
 Notable changes per release, newest first. This file is the source of the GitHub Release
 notes: the section for a version is published verbatim when its tag is pushed.
 
+## [0.7.1] - 2026-08-11
+
+### Fixed
+
+- **Windows: an argument `cmd.exe` would interpret is now refused instead of being passed
+  through.** 0.7.0 began running `pnpm` and `npm` through `cmd.exe`, which parses the command
+  line a second time, and Node quotes an argument only when it holds a space, tab or quote. A
+  path or a forwarded argument containing `& | < > ^ %` therefore reached `cmd` unquoted:
+  publishing from `C:\R&D\pkg` would have packed a truncated path and run the remainder as a
+  separate command. Only 0.7.0 is affected, and only on Windows. Such an argument now stops the
+  run and is named; escaping them correctly is worth doing when a real path needs it.
+- **Tar header checksums are verified.** The rewriter computes one for the block it authors and
+  nothing checked it, so that computation vouched for itself — and an archive whose headers some
+  extractors reject could have shipped with every guard green.
+- **The provenance floor is checked against the Node that runs npm**, rather than the runtime
+  running this tool. `npm` is a `#!/usr/bin/env node` script, so those differ whenever the two
+  are not the same install — and entirely under Bun, where `process.versions.node` is a
+  compatibility claim about a runtime that never executes npm.
+
+### Changed
+
+- **Running under Bun packs a smaller tarball**, 0.17–0.28% on real packages, with a
+  byte-identical archive inside; Bun carries libdeflate where Node has zlib. The README explains
+  how to get it — and why `bun publish-clean`, `bun run publish-clean` and `bunx publish-clean`
+  all silently run Node instead.
+
 ## [0.7.0] - 2026-08-11
 
 ### Added
