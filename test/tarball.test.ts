@@ -92,7 +92,7 @@ describe("replaceTarballManifest", () => {
     // walk must copy both without interpreting either. pnpm emits exactly this for any path
     // longer than 255 characters.
     const source = archive([
-      { name: "PaxHeader", body: `30 path=package/lib/${"d".repeat(260)}.js\n`, type: "x" },
+      { name: "PaxHeader", body: `285 path=package/lib/${"d".repeat(260)}.js\n`, type: "x" },
       { name: "PaxHeader", body: "deep\n" },
       { name: MANIFEST, body: "{}" },
     ]);
@@ -105,11 +105,23 @@ describe("replaceTarballManifest", () => {
     // Otherwise the archive extracts a manifest no guard ever saw: the checks read the entry
     // rewritten here while an extractor honours the override and writes a different one.
     const source = archive([
-      { name: "PaxHeader", body: `26 path=${MANIFEST}\n`, type: "x" },
+      { name: "PaxHeader", body: `29 path=${MANIFEST}\n`, type: "x" },
       { name: "package/decoy", body: `{"name":"evil"}` },
       { name: MANIFEST, body: "{}" },
     ]);
     expect(() => replaceTarballManifest(source, "{}")).toThrow(/renaming an entry/);
+  });
+
+  it("refuses a GNU long-name entry, the other way to rename onto the manifest", () => {
+    // Same substitution as the pax case, in the encoding pnpm does not emit: the real path
+    // is the payload of this entry and the next entry's header carries only a placeholder,
+    // so a walk that reads header names alone cannot see where it points.
+    const source = archive([
+      { name: "././@LongLink", body: `${MANIFEST}\0`, type: "L" },
+      { name: "package/decoy", body: `{"name":"evil"}` },
+      { name: MANIFEST, body: "{}" },
+    ]);
+    expect(() => replaceTarballManifest(source, "{}")).toThrow(/GNU long-name/);
   });
 
   it("refuses a duplicated manifest rather than guessing which one an extractor keeps", () => {

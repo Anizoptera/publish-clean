@@ -33,6 +33,18 @@ const MANIFEST_PATH = "package/package.json";
 /** Extended (`x`) and global (`g`) pax headers carry key/value overrides for other entries. */
 const PAX_TYPES = new Set(["x", "g"]);
 
+/**
+ * GNU's long-name entry, whose payload is the real path of the entry that follows it while
+ * that entry's own header reads `././@LongLink`.
+ *
+ * Refused for the same reason a pax `path=` override is: it renames the following entry, so it
+ * can point at `package/package.json` and the archive then extracts a manifest no guard here
+ * ever saw. pnpm emits pax and never this, so refusing costs nothing and closes the second way
+ * to rename an entry onto the one path this tool authors. `K` (long *link* name) is left alone:
+ * it renames a symlink target, which cannot collide with an entry path.
+ */
+const GNU_LONG_NAME = "L";
+
 function field(block: Buffer, offset: number, length: number): string {
   return block.toString("utf8", offset, offset + length).replace(/\0.*/s, "");
 }
@@ -104,6 +116,8 @@ export function replaceTarballManifest(archive: Buffer, manifest: string): Buffe
     const end = offset + BLOCK + BLOCK * Math.ceil(size / BLOCK);
     const type = field(header, TYPE_OFFSET, 1);
 
+    if (type === GNU_LONG_NAME)
+      throw new PublishCleanError("Tarball uses GNU long-name entries, which this tool refuses.");
     if (PAX_TYPES.has(type))
       assertNoManifestOverride(tar.subarray(offset + BLOCK, offset + BLOCK + size));
 
