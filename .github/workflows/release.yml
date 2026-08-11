@@ -72,11 +72,12 @@ jobs:
       - run: bun run build
 
       # This job holds the publish credential and the OIDC token, so it does the
-      # minimum that needs them: pack, publish, attest, attach. The repository's
-      # verification lane is `bun run check`, which the Check workflow already ran on
-      # this exact commit without any credentials — repeating it here would execute
-      # the test suite, which builds shell shims and packs fixture packages, right
-      # next to a live npm token.
+      # minimum that needs them: pack, publish, attest, attach. `bun run check` is not
+      # repeated here — it would execute the test suite, which builds shell shims and
+      # packs fixture packages, right next to a live npm token. The lane still gates the
+      # release: `preversion` runs it locally and a non-zero exit aborts the bump, so no
+      # tag exists to push. Do not restate that as "Check already ran on this commit" —
+      # the tagged commit is the version bump, created after Check last ran.
       #
       # Every step below is repeatable, because a run that publishes and then fails
       # otherwise leaves the registry, the tag and the Release permanently out of
@@ -102,7 +103,16 @@ jobs:
             echo "$spec is already on the registry; re-packing to repair the release artifacts."
             mode="--dry-run"
           fi
-          node dist/cli.js $mode --tarball-out release-artifacts -- --access public --tag latest --provenance
+          # A bare `npm install` resolves whatever `latest` points at, so a prerelease must
+          # never carry it — that would hand every consumer a release candidate. Semver puts
+          # a hyphen only in the prerelease component, and the step above already proved the
+          # tag equals the manifest version, so the tag name decides this. `next` is the
+          # conventional prerelease dist-tag, not a requirement; change it deliberately.
+          case "${GITHUB_REF_NAME#v}" in
+            *-*) dist_tag=next ;;
+            *) dist_tag=latest ;;
+          esac
+          node dist/cli.js $mode --tarball-out release-artifacts -- --access public --tag "$dist_tag" --provenance
 
       # npm's own provenance covers the registry; this is the second, registry-
       # independent path (`gh attestation verify`). The subject is the exact tarball

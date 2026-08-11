@@ -43,7 +43,10 @@
 - The publish job holds the npm credential and the OIDC identity, so it only builds, publishes, attests, and attaches. Never run `bun run check` there: Check already ran it on the same commit without credentials, and re-running it executes the test suite — which puts fake executables on `PATH` and runs fixture lifecycle scripts — beside a live token. It also behaves differently, because `id-token: write` defines `ACTIONS_ID_TOKEN_REQUEST_URL` and the CLI treats that as a trusted-publish context.
 - Every release step must survive a re-run, because a run that publishes and then fails is otherwise unrepairable. Only the npm publish refuses; skip it when the version is already on the registry and let the remaining steps run.
 - `CHANGELOG.md` is excluded from the formatter. `git-cliff` writes sections into it, and a formatter that reflows generated output turns every release into a lane failure.
-- Publish commands must pass `--tag latest` explicitly unless intentionally proving another npm dist-tag.
+- The npm dist-tag is derived from the tag, never hardcoded: a version with a prerelease
+  component publishes as `next`, everything else as `latest`. A bare `npm install` resolves
+  `latest`, so a hardcoded one hands every consumer the next release candidate the moment
+  someone runs `pnpm version prerelease`. Pass an explicit `--tag` only to prove another one.
 - Use `--provenance` for public npmjs.com releases; trusted publishing requires Node.js 22.14.0+ and npm 11.5.1+.
 - The primary pre-publish self-application check is the freshly built `dist/cli.js` against its cleaned artifact.
 - After npm publication, registry-install smoke checks may update this repo to the published package and regenerate the lockfile, but they do not replace the built-current CLI gate.

@@ -57,6 +57,7 @@
     "format:check": "oxfmt --check .",
     "prepare": "tsdown",
     "prepublishOnly": "pnpm run build && node dist/cli.js --guard-only",
+    "preversion": "bun run check",
     "test": "bun run build && bun run test:built",
     "test:built": "vitest run && bun test test/*.bun.test.ts",
     "tracked-artifacts:check": "test -z \"$(git ls-files dist)\"",
