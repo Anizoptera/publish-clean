@@ -1,7 +1,7 @@
 {
   "name": "@anizoptera/publish-clean",
   "version": "0.4.0",
-  "description": "Publish npm packages with a consumer-only package.json. Refuses to ship a .env, a private key, or an unresolved workspace dependency.",
+  "description": "Pre-publish npm package cleaner that strips common useless noise and crap from package.json; prevents accidental publication of unwanted things and unresolved dependencies. No deps, one JS file.",
   "keywords": [
     "bun",
     "cleanup",

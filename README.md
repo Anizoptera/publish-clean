@@ -1,7 +1,8 @@
 # @anizoptera/publish-clean
 
-Publish npm packages with a consumer-only `package.json`. Refuses to ship a `.env`, a
-private key, or an unresolved workspace dependency.
+Pre-publish npm package cleaner that strips common useless noise and crap from
+`package.json`; prevents accidental publication of unwanted things and unresolved
+dependencies. No deps, one JS file.
 
 [![npm version](https://img.shields.io/npm/v/@anizoptera/publish-clean?label=npm)](https://www.npmjs.com/package/@anizoptera/publish-clean)
 [![Signed provenance](https://img.shields.io/badge/provenance-signed-2ea44f?logo=npm&logoColor=white)](https://www.npmjs.com/package/@anizoptera/publish-clean#provenance)
