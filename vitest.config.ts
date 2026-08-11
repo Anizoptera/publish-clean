@@ -5,15 +5,16 @@ export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
     exclude: ["test/**/*.bun.test.ts"],
-    // One case = one core. Measured: a full pack pipeline is 0.67s wall for 0.70s of CPU, so
-    // it is compute, not disk — the cases spend their time parsing two package managers'
-    // bundles, and each waits on its own child rather than overlapping with it. Cores is
-    // therefore the throughput ceiling and anything above it only adds contention.
-    // Oversubscribing measured ~2x slower than this arithmetic predicts on a four-core
-    // runner, and a literal here is worse still: one tuned on a sixteen-thread machine is a
-    // six-fold oversubscription there, whose only symptom is every case blowing its
+    // Derived, never a literal: one tuned on a sixteen-thread machine is a six-fold
+    // oversubscription of a four-core runner, and the only symptom is every case blowing its
     // wall-clock timeout while total CPU stays healthy.
-    maxConcurrency: availableParallelism(),
+    //
+    // Doubled because a case is not one solid core of work. It is 0.67s wall for 0.70s of
+    // CPU, but that CPU sits in two package-manager children with the harness idle between
+    // them, around spawns, a temp directory and a tar. Sizing to cores exactly leaves those
+    // gaps unfilled and measured slower on the runner than doubling; above 2x there is
+    // nothing left to fill and contention wins.
+    maxConcurrency: availableParallelism() * 2,
     // Above the timeout `runCli` puts on the child, deliberately. Whichever bound fires first
     // decides the failure, and only the child's can actually kill the process — vitest failing
     // a case leaves its spawn running. Ordering them the other way leaks exactly what that
