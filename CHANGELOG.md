@@ -3,6 +3,29 @@
 Notable changes per release, newest first. This file is the source of the GitHub Release
 notes: the section for a version is published verbatim when its tag is pushed.
 
+## [0.7.0] - 2026-08-11
+
+### Added
+
+- **Windows works.** `pnpm` and `npm` on Windows are `.cmd` shims, which Node cannot launch
+  directly, so every run failed claiming the package manager was "not available in PATH" —
+  about a package manager that was installed and working. Both are now run through `cmd.exe`,
+  and a Windows job in CI publishes this package in dry-run mode on every push, so the
+  platform is verified rather than assumed.
+
+### Fixed
+
+- **A truncated tarball is now refused.** An archive that ended exactly on an entry boundary,
+  with its end-of-archive marker missing, was read as one that simply stopped: every entry in
+  it parses cleanly, so nothing in the walk could feel the truncation. Publishing then wrote
+  an archive with no terminator at all.
+
+### Changed
+
+- **A release now publishes only after the full check lane passes in CI**, on the tagged
+  commit, in a job that holds no credentials. A hand-made tag, or any local bypass, could
+  previously reach the registry — and an npm version is permanent.
+
 ## [0.6.0] - 2026-08-11
 
 ### Changed
