@@ -22,8 +22,9 @@ export default defineConfig({
   platform: "node",
   shims: false, // disable all shims/polyfills
   sourcemap: false,
-  // Must not exceed the floor promised by package.json engines.node.
-  target: ["es2022", "node20"],
+  // Must not exceed the floor promised by package.json engines.node, which is the Node version
+  // npm's trusted publishing needs — this tool cannot do its job below it.
+  target: ["es2022", "node22"],
   tsconfig: "./tsconfig.build.json",
 
   // publint reads the manifest against the emitted files, so it needs no plugin beyond

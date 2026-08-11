@@ -9,7 +9,7 @@ private key, or an unresolved workspace dependency.
 [![License](https://img.shields.io/github/license/Anizoptera/publish-clean)](LICENSE)
 
 [![Runtime deps](https://img.shields.io/badge/runtime_deps-0-2ea44f)](package.json)
-[![Node >=20](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](package.json)
+[![Node >=22.14](https://img.shields.io/badge/node-%3E%3D22.14-339933?logo=node.js&logoColor=white)](package.json)
 [![pnpm pack + npm publish](https://img.shields.io/badge/pnpm_pack%20%2B%20npm_publish-f69220?logo=pnpm&logoColor=white)](https://pnpm.io/cli/pack)
 [![Bun checked](https://img.shields.io/badge/Bun-checked-000000?logo=bun&logoColor=white)](https://bun.sh/docs/cli/test)
 
@@ -48,10 +48,13 @@ tools you already have. For something that sits on your publish path and handles
 registry credentials, that matters. A publishing tool with a dependency tree is a
 supply-chain risk of its own, and this one has no transitive code to audit.
 
-Needs Node.js 20+, and `pnpm`, `npm` and `tar` on `PATH`.
+Needs Node.js 22.14+, and `pnpm`, `npm` and `tar` on `PATH`. That floor is npm's, not
+ours: below it npm cannot mint provenance, and signing the release is what this tool is
+for. The code would run on older Node, but a build of it that cannot sign is not worth
+supporting — and Node 20 left support in April 2026 anyway.
 
-`--provenance` also needs Node.js 22.14+, npm 11.5.1+, and a cloud CI runner. npm will
-not sign a publish that came from your laptop.
+`--provenance` additionally needs npm 11.5.1+ and a cloud CI runner. npm will not sign a
+publish that came from your laptop.
 
 ## Package managers
 

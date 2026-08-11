@@ -3,14 +3,27 @@
  * npm will not sign with. Both decisions read only their arguments, so the environment a real
  * Actions run would provide is passed in rather than set process-wide.
  */
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
+  MIN_TRUSTED_NODE_VERSION,
   assertRepositoryForTrustedPublish,
   githubRepositorySlug,
   isAtLeast,
   wantsTrustedPublish,
 } from "../src/trusted-publish";
+
+// `engines.node` is what a consumer's installer checks before running anything; the constant is
+// what this tool checks before publishing. One floor, stated in two files no compiler relates,
+// and drift means either the manifest promises support the tool refuses or the refusal names a
+// version that is not the real floor. Nothing else can catch that.
+it("declares the Node floor it enforces", () => {
+  const manifest = JSON.parse(readFileSync("package.json", "utf8")) as {
+    engines: { node: string };
+  };
+  expect(manifest.engines.node).toBe(`>=${MIN_TRUSTED_NODE_VERSION.join(".")}`);
+});
 
 describe.concurrent("npm version floor", () => {
   const min = [11, 5, 1] as const;
