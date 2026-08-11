@@ -1,7 +1,45 @@
+import { readFileSync } from "node:fs";
+
 import { defineConfig } from "tsdown";
+
+/**
+ * Two lines on the one file consumers install: what it is, and its licence.
+ *
+ * The licence line is the SPDX short-form identifier, which is the entire standard for
+ * declaring a file's licence to a scanner that sees the file and nothing around it. REUSE
+ * 3.3 requires the tag be followed by a valid SPDX License Expression and terminated by a
+ * newline — hence line comments, not a `/* *\/` block, whose closing delimiter would sit
+ * inside the tag value for every parser to strip and none is obliged to. It goes directly
+ * under the shebang because that is where scanners and the kernel convention expect it.
+ *
+ * A copyright notice is deliberately absent. REUSE compliance would additionally want one
+ * `SPDX-FileCopyrightText:` line per holder; the holders are declared in LICENSE, which
+ * ships in the same tarball, and restating them here creates a second place to update.
+ *
+ * Every value is read from the manifest, so the artifact cannot claim a licence or a version
+ * the package does not. Nothing volatile goes in — no build date, no machine, no git hash —
+ * because the artifact must stay byte-identical across runs, which is what lets a re-run
+ * reproduce a published tarball exactly.
+ */
+const manifest: Record<string, unknown> = JSON.parse(
+  readFileSync(new URL("package.json", import.meta.url), "utf8"),
+);
+const field = (key: string): string => {
+  const value = manifest[key];
+  // Fails the build rather than emitting `undefined` into every consumer's copy, where no
+  // later check looks and no test would notice.
+  if (typeof value !== "string" || value === "")
+    throw new Error(`package.json "${key}" must be a non-empty string for the dist banner.`);
+  return value;
+};
+const banner = [
+  `// SPDX-License-Identifier: ${field("license")}`,
+  `// ${field("name")} ${field("version")} | ${field("homepage")}`,
+].join("\n");
 
 // https://tsdown.dev/options/config-file
 export default defineConfig({
+  banner: { js: banner },
   clean: true,
   entry: ["src/cli.ts"],
   format: "esm",
