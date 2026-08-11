@@ -93,6 +93,34 @@ function entrySize(block: Buffer): number {
 }
 
 /**
+ * Verifies a header block against the checksum tar stores inside it.
+ *
+ * This is the format's own integrity check over the 512 bytes that say where an entry starts,
+ * how long it is and what it is called — the fields a walk trusts absolutely. The gzip CRC
+ * already covers every byte of the archive, so on a packed tarball this is redundant; it is
+ * here because the rewrite AUTHORS one of these blocks, and a checksum nothing verifies is a
+ * value vouching for itself. Reading the written artifact back runs this over that block.
+ *
+ * Both sums are accepted because tar has two historical conventions: the standard sums the
+ * bytes unsigned, while older implementations summed them as signed chars. The two agree for
+ * every all-ASCII header and diverge the moment a name carries a byte above 127, so refusing
+ * the signed form would reject valid archives holding non-ASCII filenames.
+ */
+function assertChecksum(header: Buffer, name: string): void {
+  const stored = Number.parseInt(field(header, CHECKSUM_OFFSET, 8).trim(), 8);
+  let unsigned = 0;
+  let signed = 0;
+  for (const [index, byte] of header.entries()) {
+    // The checksum is defined over the header with its own field read as eight spaces.
+    const value = index >= CHECKSUM_OFFSET && index < CHECKSUM_OFFSET + 8 ? 0x20 : byte;
+    unsigned += value;
+    signed += value > 127 ? value - 256 : value;
+  }
+  if (stored !== unsigned && stored !== signed)
+    throw new PublishCleanError(`Tarball entry ${name} has a corrupt header checksum.`);
+}
+
+/**
  * Rejects a pax header that renames another entry onto the manifest path.
  *
  * Without this the archive could extract a `package.json` that no check ever saw: the guards
@@ -147,6 +175,7 @@ export function readArchive(gzipped: Buffer): TarArchive {
       break;
     }
 
+    assertChecksum(header, name);
     const size = entrySize(header);
     const end = offset + BLOCK + BLOCK * Math.ceil(size / BLOCK);
     if (end > tar.length)

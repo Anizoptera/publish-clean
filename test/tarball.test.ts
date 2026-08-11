@@ -179,6 +179,15 @@ describe("archive reading", () => {
     expect(() => readArchive(gzipSync(withoutMarker))).toThrow(/no end-of-archive marker/);
   });
 
+  // The rewriter authors one header block and computes its checksum, so a reader that never
+  // verifies one lets that computation vouch for itself. Reading the written artifact back
+  // is what turns this into a check on the bytes this tool wrote.
+  it("refuses a header whose stored checksum does not match its bytes", () => {
+    const source = gunzipSync(archive([{ name: "package/a.js", body: "a" }]));
+    source.write("package/b.js", 0, 100, "utf8");
+    expect(() => readArchive(gzipSync(source))).toThrow(/corrupt header checksum/);
+  });
+
   it("keeps a filename a line-based listing would split in two", () => {
     const source = archive([{ name: "package/we\nird.js", body: "x" }]);
     expect(packageFiles(readArchive(source))).toEqual(["we\nird.js"]);
