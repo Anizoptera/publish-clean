@@ -46,13 +46,13 @@
 - The npm dist-tag is derived from the tag, never hardcoded: a version with a prerelease
   component publishes as `next`, everything else as `latest`. A bare `npm install` resolves
   `latest`, so a hardcoded one hands every consumer the next release candidate the moment
-  someone runs `pnpm version prerelease`. Pass an explicit `--tag` only to prove another one.
+  someone runs `bun run release prerelease`. Pass an explicit `--tag` only to prove another one.
 - Use `--provenance` for public npmjs.com releases; trusted publishing requires Node.js 22.14.0+ and npm 11.5.1+.
 - The primary pre-publish self-application check is the freshly built `dist/cli.js` against its cleaned artifact.
 - After npm publication, registry-install smoke checks may update this repo to the published package and regenerate the lockfile, but they do not replace the built-current CLI gate.
 - Releasing is four commands and no bot: `bun run changelog v<next>` drafts the section from the
-  commits since the last tag, you EDIT it, you COMMIT it, then `pnpm version <next>` and
-  `git push --follow-tags`. The commit is not optional bookkeeping: `pnpm version` aborts on a
+  commits since the last tag, you EDIT it, you COMMIT it, then `bun run release <next>` and
+  `git push --follow-tags`. The commit is not optional bookkeeping: the bump aborts on a
   dirty tree (`ERR_PNPM_UNCLEAN_WORKING_TREE`), so the drafted section must already be committed.
   The `version` script refuses to commit or tag when `CHANGELOG.md` has no section for the new
   version, and the workflow refuses to publish when that section is empty.
@@ -66,5 +66,5 @@
   breaking change is a MINOR. Do not delegate this to a tool that infers it from commits: measured
   2026-08-11, `git-cliff --bumped-version` answers `v1.0.0` for a `feat!` commit on 0.4.0.
 - Tags must be annotated. A lightweight `git tag v0.5.0` fails outright under `tag.gpgSign = true`
-  ("fatal: no tag message?"); `pnpm version` annotates, which is the reason to use it over `git tag`.
+  ("fatal: no tag message?"); `bun run release` annotates, which is the reason to use it over `git tag`.
 - Run `bun run check` before committing.

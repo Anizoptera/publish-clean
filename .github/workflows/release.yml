@@ -1,6 +1,6 @@
 name: Release
 
-# A release is a pushed tag, and nothing else is. `pnpm version <patch|minor|major>` bumps
+# A release is a pushed tag, and nothing else is. `bun run release <patch|minor|major>` bumps
 # the manifest, commits and tags in one step, so the tag and the published version cannot
 # disagree; `git push --follow-tags` starts this workflow. Dispatch is the repair path —
 # select the tag ref and every step below re-runs against it.
@@ -45,7 +45,7 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
-      # The tag names the release; the manifest names what npm publishes. `pnpm version`
+      # The tag names the release; the manifest names what npm publishes. `bun run release`
       # writes both from one input, so they agree unless a tag was made by hand — in which
       # case this stops before anything reaches the registry. Without it the mismatch first
       # appears as an artifact attached to the wrong GitHub Release, after the npm version
