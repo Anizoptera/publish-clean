@@ -18,7 +18,8 @@ dependencies and passing it to `publint` and `@arethetypeswrong/cli`.
 ## Design rules
 
 These are not preferences. A change that breaks one of them will be rejected however
-good it looks otherwise.
+good it looks otherwise. `AGENTS.md` carries the reasoning and the measurements behind
+each, which is the place to start if you want to argue with one.
 
 - Runtime dependencies stay at zero.
 - `pnpm pack` decides what is in the package. Do not add file-selection rules of our own.
@@ -34,6 +35,17 @@ good it looks otherwise.
 - Leak checks do not get weaker. Ever.
 - `dist/` is never tracked.
 
+## Commits
+
+Focused Conventional Commits, with enough body that the next maintainer understands why
+the change exists.
+
+Pick the type by what a user can observe, not by how the edit looks. release-please cuts
+releases from `feat` and `fix` alone, so anything a consumer can see must be one of those
+even when the diff looks internal, and anything they cannot see must not be (`test:`,
+`chore:`, `ci:`, `docs:` are omitted from the changelog). A breaking change is marked `!`
+and releases as a minor while this package is pre-1.0.
+
 ## Workflows
 
 Run this before committing workflow changes:
@@ -41,9 +53,6 @@ Run this before committing workflow changes:
 ```bash
 actions-up --yes
 ```
-
-Use focused Conventional Commits. Include enough body context that the next
-maintainer understands why the change exists.
 
 ## Conduct
 
