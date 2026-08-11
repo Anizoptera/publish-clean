@@ -503,41 +503,21 @@ exit 1
     }
   });
 
-  // The mode that reports instead of publishing used to keep its tree so the caller could
-  // look inside it, and nobody ever deleted one. The report is the output now; nothing is
-  // kept unless --tarball-out asks for it.
-  it("leaves no temporary tree after a successful dry-run", async () => {
+  // Both modes leave the pack block through an early return; a failed guard leaves through a
+  // throw, covered by the leaked-key test above. One `finally` deletes the tree for all three.
+  // --dry-run used to keep its tree so the caller could look inside it, and nobody ever deleted
+  // one, so the invariant is asserted per exit rather than per line.
+  it.each(["--dry-run", "--guard-only"])("leaves no temporary tree after %s", async (flag) => {
     const fx = await fixture(
-      { name: "fixture-dry-run-cleanup", version: "1.0.0", files: ["index.js"] },
+      { name: "fixture-cleanup", version: "1.0.0", files: ["index.js"] },
       { "index.js": "module.exports = 1;\n" },
     );
     const temp = await mkdtemp(path.join(tmpdir(), "publish-clean-tmp-"));
     try {
-      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd(), {
+      const result = await runCli([flag, "--no-git-checks", fx.dir], process.cwd(), {
         TMPDIR: temp,
       });
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      expect(result.stdout).toContain("index.js");
-      const leftovers = (await readdir(temp)).filter((name) => name.startsWith("publish-clean-"));
-      expect(leftovers).toEqual([]);
-    } finally {
-      await cleanup(fx.root);
-      await cleanup(temp);
-    }
-  });
-
-  it("removes temporary package extraction after guard-only success", async () => {
-    const fx = await fixture(
-      { name: "fixture-guard-cleanup", version: "1.0.0", files: ["index.js"] },
-      { "index.js": "module.exports = 1;\n" },
-    );
-    const temp = await mkdtemp(path.join(tmpdir(), "publish-clean-tmp-"));
-    try {
-      const result = await runCli(["--guard-only", "--no-git-checks", fx.dir], process.cwd(), {
-        TMPDIR: temp,
-      });
-      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      expect(result.stdout).not.toContain("[dry-run]");
       const leftovers = (await readdir(temp)).filter((name) => name.startsWith("publish-clean-"));
       expect(leftovers).toEqual([]);
     } finally {
