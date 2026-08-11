@@ -65,12 +65,15 @@ publish that came from your laptop.
 
 gzip encoding belongs to whichever runtime executes the CLI, and Bun's (libdeflate) beats
 Node's zlib on tar-shaped data: 0.17% smaller for this package, 0.28% for a sibling one, with
-a byte-identical archive inside. To get it, run the file rather than the bin — the bin's
-shebang sends it to Node, and so does `bunx`:
+a byte-identical archive inside. To get it, pass Bun the **file path**:
 
 ```sh
 bun ./node_modules/.bin/publish-clean
 ```
+
+Naming the bin instead does not work, and does not say so: `bun publish-clean`,
+`bun run publish-clean` and `bunx publish-clean` all hand the file to the OS, which honours
+its `#!/usr/bin/env node` shebang and runs Node. They succeed, and you get Node's bytes.
 
 Not `bunx --bun`, which forces Bun onto the `pnpm` this tool spawns as well; pnpm 11 needs
 `node:sqlite`, which Bun does not implement, and that is the error you get.
