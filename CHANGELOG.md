@@ -3,6 +3,17 @@
 Notable changes per release, newest first. This file is the source of the GitHub Release
 notes: the section for a version is published verbatim when its tag is pushed.
 
+## [0.7.3] - 2026-08-11
+
+### Added
+
+- **`dist/cli.js` declares its own licence and version**, in two line comments under the
+  shebang: `// SPDX-License-Identifier: Apache-2.0`, then the package name, version and
+  homepage. A licence scanner that sees this file and nothing around it can now identify what
+  it may do with it, and a reader who opens it in `node_modules` knows which version they are
+  looking at without resolving the manifest beside it. Both values are read from `package.json`
+  at build time, so the artifact cannot claim a licence or version the package does not.
+
 ## [0.7.2] - 2026-08-11
 
 ### Changed
