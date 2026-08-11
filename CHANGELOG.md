@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.4.0](https://github.com/Anizoptera/publish-clean/compare/v0.3.0...v0.4.0) (2026-08-11)
+
+
+### Features
+
+* pack once and rewrite the manifest in place, dropping the second pack ([f9a24ec](https://github.com/Anizoptera/publish-clean/commit/f9a24ec4c3e7d3e3b55eebe006c27483d4db273e))
+
+
+### Bug Fixes
+
+* stop shipping `files`, and kill a shim recursion in the tests ([c604f4c](https://github.com/Anizoptera/publish-clean/commit/c604f4cbd31ab53f34273b58f76ffccc41f7106f))
+* stop stripping `files`, which the final npm pack still reads ([10d0e93](https://github.com/Anizoptera/publish-clean/commit/10d0e933bd8f2ec404132b11659834aadd6c09aa))
+* **test:** derive test concurrency and order the two timeouts ([fcadfb8](https://github.com/Anizoptera/publish-clean/commit/fcadfb8bf34189ebc5cc8f71a1c6466b7c16655b))
+
+
+### Performance
+
+* **test:** restore doubled test concurrency ([d44ae96](https://github.com/Anizoptera/publish-clean/commit/d44ae96e134b821450eeb6863caf38368d89bd81))
+* **test:** run the CLI suite concurrently ([0e6fb4a](https://github.com/Anizoptera/publish-clean/commit/0e6fb4afc27bf9580fef6ed369e67f47b08c8e2a))
+* **test:** size test concurrency to cores, not double ([edd692f](https://github.com/Anizoptera/publish-clean/commit/edd692ff4726e58f9a483f54596f81ae94881df5))
+
+
+### Internal changes
+
+* make the rules module actually pure, and cover what nothing covered ([3f3a9d3](https://github.com/Anizoptera/publish-clean/commit/3f3a9d3311218acd71bd04069ed952548ea6b372))
+* move registry pinning into the rules, where it can be tested ([a52f922](https://github.com/Anizoptera/publish-clean/commit/a52f922f7a774bded0b3bfe16221fc1115084a89))
+* separate the publish rules from the effects that run them ([3ec88cd](https://github.com/Anizoptera/publish-clean/commit/3ec88cd6a5495a94c039d240c629d4df0cbf67ac))
+
 ## [0.3.0](https://github.com/Anizoptera/publish-clean/compare/v0.2.0...v0.3.0) (2026-08-11)
 
 
