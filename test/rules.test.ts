@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   PublishCleanError,
   assertFilesField,
+  assertFinalTarballIncludesCleanedFiles,
   assertNoLostConsumerFields,
   assertNoMonorepoProtocols,
   assertPublicPackage,
@@ -12,8 +13,8 @@ import {
   isAtLeast,
   keptFields,
   normalizeDeclaredPath,
-  reportUnrecognizedFields,
   stripManifest,
+  unrecognizedFieldsReport,
   validatePackedFiles,
   wantsTrustedPublish,
 } from "../src/rules";
@@ -24,17 +25,6 @@ import {
  * breadth, because every case there costs two package managers and a tarball. The evasions
  * that matter are cheap here, so this is where the matrices live.
  */
-
-/** Runs `fn` and returns what it wrote to `console.warn`, which is where reports go. */
-function captured(fn: () => void): string {
-  const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-  try {
-    fn();
-    return warn.mock.calls.map((call) => call.join(" ")).join("\n");
-  } finally {
-    warn.mockRestore();
-  }
-}
 
 describe.concurrent("critical file patterns", () => {
   // The package's headline promise is that a private key cannot reach the registry, so the
@@ -80,6 +70,50 @@ describe.concurrent("critical file patterns", () => {
   it("passes a package that carries none of them", () => {
     expect(() =>
       validatePackedFiles(["index.js", "index.d.ts", "README.md", "src/env.js"], false),
+    ).not.toThrow();
+  });
+});
+
+// The default hygiene check, and the one an author meets most often: it refuses outright
+// rather than warning, so a package shipping its own test tree or lockfile cannot publish
+// until someone decides. `--skip-file-check` exists precisely because that verdict is a
+// judgement call, unlike a leaked key, which is never one.
+describe.concurrent("suspicious file patterns", () => {
+  const junk = [
+    "test/index.test.js",
+    "tests/helper.js",
+    "__tests__/x.js",
+    "__snapshots__/x.snap",
+    "coverage/lcov.info",
+    ".github/workflows/ci.yml",
+    "tsconfig.json",
+    "tsconfig.build.json",
+    "pnpm-lock.yaml",
+    "bun.lock",
+    "package-lock.json",
+    "src/index.test.ts",
+    "src/index.spec.tsx",
+  ];
+
+  for (const file of junk) {
+    it(`refuses to publish ${file}`, () => {
+      expect(() => validatePackedFiles(["index.js", file], false)).toThrow("Suspicious files");
+    });
+  }
+
+  it("lets the author overrule the whole judgement at once", () => {
+    expect(() => validatePackedFiles(["index.js", ...junk], true)).not.toThrow();
+  });
+
+  // The patterns are anchored at a path segment, so a file that merely CONTAINS one of these
+  // words is ordinary source and must publish untouched — over-refusing here would make the
+  // default unusable and push every author to the escape hatch.
+  it("does not refuse ordinary source that merely reads like it", () => {
+    expect(() =>
+      validatePackedFiles(
+        ["latest/index.js", "src/contest.js", "protests.js", "my-tsconfig.json.js", "testing.js"],
+        false,
+      ),
     ).not.toThrow();
   });
 });
@@ -137,7 +171,7 @@ describe.concurrent("manifest cleaning", () => {
 
 describe.concurrent("unrecognised field report", () => {
   it("names the field and offers both resolutions", () => {
-    const message = captured(() => reportUnrecognizedFields({ name: "x", someTool: {} }, []));
+    const message = unrecognizedFieldsReport({ name: "x", someTool: {} }, []);
     expect(message).toContain("someTool");
     expect(message).toContain(`"devFields": ["someTool"]`);
     expect(message).toContain(`"keepFields": ["someTool"]`);
@@ -145,17 +179,13 @@ describe.concurrent("unrecognised field report", () => {
 
   // A report nobody trusts is noise, so a field the tool knows must never appear in it.
   it("stays silent about recognised fields", () => {
-    expect(
-      captured(() => reportUnrecognizedFields({ name: "x", funding: "u", exports: {} }, [])),
-    ).toBe("");
+    expect(unrecognizedFieldsReport({ name: "x", funding: "u", exports: {} }, [])).toBeNull();
   });
 
   // A report whose only resolution deletes the field is unusable for any ecosystem this tool
   // does not know: a VS Code extension needs `contributes` in the artifact to work at all.
   it("stays silent about a field acknowledged through keepFields", () => {
-    expect(
-      captured(() => reportUnrecognizedFields({ name: "x", contributes: {} }, ["contributes"])),
-    ).toBe("");
+    expect(unrecognizedFieldsReport({ name: "x", contributes: {} }, ["contributes"])).toBeNull();
   });
 });
 
@@ -272,45 +302,92 @@ describe.concurrent("publishable manifest", () => {
   });
 });
 
-// Not concurrent: these read the ambient environment, and stubbing it is process-wide.
-describe("trusted publishing intent", () => {
+describe.concurrent("trusted publishing intent", () => {
+  const LOCAL = {};
+  // What a workflow granting `id-token: write` looks like — the permission that makes an
+  // unflagged publish produce provenance, and the only reason to infer the intent at all.
+  const CI = {
+    ACTIONS_ID_TOKEN_REQUEST_URL: "https://token.actions.example/",
+    GITHUB_ACTIONS: "true",
+    GITHUB_REPOSITORY: "Anizoptera/publish-clean",
+  };
+
   it("is declared by --provenance", () => {
-    expect(wantsTrustedPublish({}, ["--provenance"])).toBe(true);
+    expect(wantsTrustedPublish({}, ["--provenance"], LOCAL)).toBe(true);
   });
 
   it("is declared by publishConfig.provenance, which npm reads without the flag", () => {
-    expect(wantsTrustedPublish({ publishConfig: { provenance: true } }, [])).toBe(true);
+    expect(wantsTrustedPublish({ publishConfig: { provenance: true } }, [], LOCAL)).toBe(true);
   });
 
-  it("is not assumed from an ordinary publish", () => {
-    vi.stubEnv("GITHUB_ACTIONS", "");
-    expect(wantsTrustedPublish({ publishConfig: { provenance: false } }, [])).toBe(false);
-    vi.unstubAllEnvs();
+  it("is inferred from a workflow that can mint an OIDC token", () => {
+    expect(wantsTrustedPublish({}, [], CI)).toBe(true);
+  });
+
+  // Actions without that permission cannot produce provenance, so inferring the intent there
+  // would fail the publish on a runtime requirement the author never asked for.
+  it("is not assumed from an ordinary publish, in Actions or out of it", () => {
+    expect(wantsTrustedPublish({ publishConfig: { provenance: false } }, [], LOCAL)).toBe(false);
+    expect(wantsTrustedPublish({}, [], { GITHUB_ACTIONS: "true" })).toBe(false);
   });
 
   it("refuses to publish under an identity the repository does not claim", () => {
-    vi.stubEnv("GITHUB_ACTIONS", "true");
-    vi.stubEnv("GITHUB_REPOSITORY", "Anizoptera/publish-clean");
-    try {
-      expect(() =>
-        assertRepositoryForTrustedPublish(
-          { repository: { type: "git", url: "git+https://github.com/Other/repo.git" } },
-          ["--provenance"],
-        ),
-      ).toThrow("repository.url must match");
-      expect(() => assertRepositoryForTrustedPublish({}, ["--provenance"])).toThrow(
-        "repository.url to match",
-      );
-      expect(() =>
-        assertRepositoryForTrustedPublish(
-          {
-            repository: { type: "git", url: "git+https://github.com/Anizoptera/publish-clean.git" },
-          },
-          ["--provenance"],
-        ),
-      ).not.toThrow();
-    } finally {
-      vi.unstubAllEnvs();
-    }
+    expect(() =>
+      assertRepositoryForTrustedPublish(
+        { repository: { type: "git", url: "git+https://github.com/Other/repo.git" } },
+        ["--provenance"],
+        CI,
+      ),
+    ).toThrow("repository.url must match");
+  });
+
+  it("refuses a trusted publish that declares no repository at all", () => {
+    expect(() => assertRepositoryForTrustedPublish({}, ["--provenance"], CI)).toThrow(
+      "repository.url to match",
+    );
+  });
+
+  it("accepts the repository it is actually running in", () => {
+    expect(() =>
+      assertRepositoryForTrustedPublish(
+        {
+          repository: { type: "git", url: "git+https://github.com/Anizoptera/publish-clean.git" },
+        },
+        ["--provenance"],
+        CI,
+      ),
+    ).not.toThrow();
+  });
+
+  // Outside Actions nothing claims an identity to contradict, and this tool must not block an
+  // ordinary local or third-party-CI publish that asks for provenance.
+  it("does not police the repository when no identity is asserted", () => {
+    expect(() =>
+      assertRepositoryForTrustedPublish(
+        { repository: { type: "git", url: "git+https://github.com/Other/repo.git" } },
+        ["--provenance"],
+        LOCAL,
+      ),
+    ).not.toThrow();
+  });
+});
+
+// A tripwire for npm, not for the author: the cleaned directory has already been validated, so
+// anything the final pack silently omits would ship a package missing a file that passed every
+// earlier check. No fixture can provoke it, which is exactly why the rule is exercised here.
+describe.concurrent("final tarball completeness", () => {
+  it("refuses a tarball that dropped a validated file, naming what went missing", () => {
+    expect(() =>
+      assertFinalTarballIncludesCleanedFiles(
+        ["index.js", "index.d.ts", "nested/deep.js"],
+        ["index.js"],
+      ),
+    ).toThrow("index.d.ts");
+  });
+
+  it("accepts a tarball that carries more than the cleaned directory", () => {
+    expect(() =>
+      assertFinalTarballIncludesCleanedFiles(["index.js"], ["index.js", "package.json"]),
+    ).not.toThrow();
   });
 });

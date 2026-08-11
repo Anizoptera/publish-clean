@@ -22,14 +22,14 @@ import {
   keptFields,
   normalizeDeclaredPath,
   packageConfig,
-  reportUnrecognizedFields,
+  unrecognizedFieldsReport,
   stableJson,
   stringifyJson,
   stripManifest,
   validatePackedFiles,
   wantsTrustedPublish,
 } from "./rules";
-import type { JsonObject } from "./rules";
+import type { JsonObject, TrustedPublishEnv } from "./rules";
 
 const TOOL_PROBE_TIMEOUT_MS = 10_000;
 
@@ -119,8 +119,21 @@ function npmVersion(): readonly [number, number, number] {
   return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0];
 }
 
+/**
+ * The single place the ambient environment is read for publish decisions. Naming the three
+ * variables here keeps `process` out of the rules and makes the whole environmental surface of
+ * a publish visible at once, rather than spread across the guards that consult it.
+ */
+function publishEnv(): TrustedPublishEnv {
+  return {
+    ACTIONS_ID_TOKEN_REQUEST_URL: process.env.ACTIONS_ID_TOKEN_REQUEST_URL,
+    GITHUB_ACTIONS: process.env.GITHUB_ACTIONS,
+    GITHUB_REPOSITORY: process.env.GITHUB_REPOSITORY,
+  };
+}
+
 function assertTrustedPublishingRuntime(pkg: JsonObject, publishArgs: readonly string[]): void {
-  if (!wantsTrustedPublish(pkg, publishArgs)) return;
+  if (!wantsTrustedPublish(pkg, publishArgs, publishEnv())) return;
   const actual = npmVersion();
   if (!isAtLeast(actual, MIN_TRUSTED_NPM_VERSION))
     throw new PublishCleanError(
@@ -318,7 +331,8 @@ async function packAndClean(
       cleanedPkg.publishConfig = publishConfig;
     }
     assertNoMonorepoProtocols(cleanedPkg);
-    reportUnrecognizedFields(cleanedPkg, keepFields);
+    const unrecognized = unrecognizedFieldsReport(cleanedPkg, keepFields);
+    if (unrecognized) console.warn(unrecognized);
     await writeFile(packedPkgPath, stringifyJson(cleanedPkg));
     assertDeclaredFiles(cleanedPkg, extracted);
     const cleanedFiles: string[] = [];
@@ -359,7 +373,7 @@ async function packAndClean(
       return;
     }
 
-    assertRepositoryForTrustedPublish(cleanedPkg, opts.publishArgs);
+    assertRepositoryForTrustedPublish(cleanedPkg, opts.publishArgs, publishEnv());
     const publishArgs = registry
       ? ["publish", finalTarball, "--registry", registry, ...opts.publishArgs]
       : ["publish", finalTarball, ...opts.publishArgs];

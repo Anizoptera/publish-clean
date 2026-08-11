@@ -3,6 +3,10 @@
  * filesystem or argv in reach. The split is not cosmetic: these are the rules that say what
  * ships, and each is worth exercising directly, one input to one output, rather than through
  * two package managers and a tarball. cli.ts owns the effects and wires them to these.
+ *
+ * Ambient inputs arrive as parameters, never by reaching for them: reading `process.env` from
+ * here would make these cases depend on state a test can only set process-wide, which is both
+ * a mock and a race against every case running beside it.
  */
 import path from "node:path";
 
@@ -148,19 +152,6 @@ export const REGISTRY_MANIFEST_FIELDS = new Set([
 ]);
 
 /**
- * Names the fields that survived cleaning without anyone recognising them.
- *
- * The strip list can only ever describe tools that existed when it was written, so every
- * new `package.json` key some tool invents ships to consumers until a human notices. This
- * cannot be fixed by keeping only recognised fields: that would silently drop a key some
- * consumer genuinely resolves, and the breakage would surface in a stranger's project
- * rather than here. So the field ships, and the maintainer is told it did, with the exact
- * config that would drop it next time.
- *
- * Reported on stderr because it is advice about the package, not an error in it. Nothing
- * about the published artifact depends on whether anyone reads this.
- */
-/**
  * Refuses a published manifest that lost a field the source declared and consumers read.
  *
  * Every other check here asks whether something got in that should not have. This asks the
@@ -198,7 +189,22 @@ export function assertNoLostConsumerFields(
     );
 }
 
-export function reportUnrecognizedFields(pkg: JsonObject, kept: readonly string[]): void {
+/**
+ * Names the fields that survived cleaning without anyone recognising them.
+ *
+ * The strip list can only ever describe tools that existed when it was written, so every new
+ * `package.json` key some tool invents ships to consumers until a human notices. This cannot
+ * be fixed by keeping only recognised fields: that would silently drop a key some consumer
+ * genuinely resolves, and the breakage would surface in a stranger's project rather than here.
+ * So the field ships, and the maintainer is told it did, with the exact config that would drop
+ * it next time. It is advice about the package, not an error in it — nothing about the
+ * published artifact depends on whether anyone reads it.
+ *
+ * Returned rather than printed, so the message is this function's value and can be asserted
+ * whole. Writing to `console` from here would make that assertion a spy on a process-wide
+ * object, which two cases running side by side can clobber.
+ */
+export function unrecognizedFieldsReport(pkg: JsonObject, kept: readonly string[]): null | string {
   const acknowledged = new Set(kept);
   const unrecognized = Object.keys(pkg).filter(
     (field) =>
@@ -206,13 +212,13 @@ export function reportUnrecognizedFields(pkg: JsonObject, kept: readonly string[
       !REGISTRY_MANIFEST_FIELDS.has(field) &&
       !acknowledged.has(field),
   );
-  if (unrecognized.length === 0) return;
-  console.warn(
+  if (unrecognized.length === 0) return null;
+  return (
     `publish-clean: these manifest fields are not recognised and were published as-is:\n` +
-      `${unrecognized.map((field) => `  ${field}`).join("\n")}\n` +
-      `Strip the ones consumers do not read, and acknowledge the ones they do:\n` +
-      `  "publish-clean": { "devFields": [${unrecognized.map((f) => `"${f}"`).join(", ")}] }\n` +
-      `  "publish-clean": { "keepFields": [${unrecognized.map((f) => `"${f}"`).join(", ")}] }`,
+    `${unrecognized.map((field) => `  ${field}`).join("\n")}\n` +
+    `Strip the ones consumers do not read, and acknowledge the ones they do:\n` +
+    `  "publish-clean": { "devFields": [${unrecognized.map((f) => `"${f}"`).join(", ")}] }\n` +
+    `  "publish-clean": { "keepFields": [${unrecognized.map((f) => `"${f}"`).join(", ")}] }`
   );
 }
 
@@ -301,13 +307,27 @@ export function isAtLeast(
   return true;
 }
 
-export function wantsTrustedPublish(pkg: JsonObject, publishArgs: readonly string[]): boolean {
+/**
+ * The exact variables the publish decisions read, named so the dependency is visible in each
+ * signature instead of reaching into the ambient process from a module that promises not to.
+ * `process.env` satisfies this structurally, so the caller passes it and nothing else changes.
+ */
+export interface TrustedPublishEnv {
+  ACTIONS_ID_TOKEN_REQUEST_URL?: string | undefined;
+  GITHUB_ACTIONS?: string | undefined;
+  GITHUB_REPOSITORY?: string | undefined;
+}
+
+export function wantsTrustedPublish(
+  pkg: JsonObject,
+  publishArgs: readonly string[],
+  env: TrustedPublishEnv,
+): boolean {
   if (publishArgs.includes("--provenance")) return true;
   if (isObject(pkg.publishConfig) && pkg.publishConfig.provenance === true) return true;
-  return (
-    process.env.GITHUB_ACTIONS === "true" &&
-    typeof process.env.ACTIONS_ID_TOKEN_REQUEST_URL === "string"
-  );
+  // Actions defines the token URL only when the job requests `id-token: write`, which is
+  // precisely the permission that makes an unflagged publish produce provenance.
+  return env.GITHUB_ACTIONS === "true" && typeof env.ACTIONS_ID_TOKEN_REQUEST_URL === "string";
 }
 
 export function assertPublicPackage(pkg: JsonObject): void {
@@ -340,19 +360,19 @@ export function githubRepositorySlug(url: string): null | string {
 export function assertRepositoryForTrustedPublish(
   pkg: JsonObject,
   publishArgs: readonly string[],
+  env: TrustedPublishEnv,
 ): void {
-  if (!wantsTrustedPublish(pkg, publishArgs)) return;
-  if (process.env.GITHUB_ACTIONS !== "true" || typeof process.env.GITHUB_REPOSITORY !== "string")
-    return;
+  if (!wantsTrustedPublish(pkg, publishArgs, env)) return;
+  if (env.GITHUB_ACTIONS !== "true" || typeof env.GITHUB_REPOSITORY !== "string") return;
   const repoUrl = repositoryUrl(pkg);
   if (!repoUrl)
     throw new PublishCleanError(
       "GitHub trusted publishing requires package.json repository.url to match GITHUB_REPOSITORY.",
     );
   const slug = githubRepositorySlug(repoUrl);
-  if (slug !== process.env.GITHUB_REPOSITORY)
+  if (slug !== env.GITHUB_REPOSITORY)
     throw new PublishCleanError(
-      `package.json repository.url must match GITHUB_REPOSITORY (${process.env.GITHUB_REPOSITORY}); found ${repoUrl}.`,
+      `package.json repository.url must match GITHUB_REPOSITORY (${env.GITHUB_REPOSITORY}); found ${repoUrl}.`,
     );
 }
 
