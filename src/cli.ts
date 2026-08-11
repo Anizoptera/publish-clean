@@ -1,25 +1,26 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { readFileSync, statSync } from "node:fs";
-import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import {
+  MIN_TRUSTED_NODE_VERSION,
   MIN_TRUSTED_NPM_VERSION,
   PUBLISH_ADVISORY,
   PublishCleanError,
+  assertDeclaredFiles,
   assertFilesField,
   assertNoLostConsumerFields,
   assertNoMonorepoProtocols,
   assertPublicPackage,
   assertRepositoryForTrustedPublish,
-  collectDeclaredPaths,
+  assertSameEntries,
   customDevFields,
   isAtLeast,
   isObject,
   keptFields,
-  normalizeDeclaredPath,
   packageConfig,
   stableJson,
   stringifyJson,
@@ -142,9 +143,9 @@ function assertTrustedPublishingRuntime(pkg: JsonObject, publishArgs: readonly s
     );
   const node = process.versions.node.split(".").map(Number);
   const nodeVersion = [node[0] ?? 0, node[1] ?? 0, node[2] ?? 0] as const;
-  if (isAtLeast(nodeVersion, [22, 14, 0])) return;
+  if (isAtLeast(nodeVersion, MIN_TRUSTED_NODE_VERSION)) return;
   throw new PublishCleanError(
-    `Trusted npm publishing requires Node.js 22.14.0 or newer; found ${process.versions.node}.`,
+    `Trusted npm publishing requires Node.js ${MIN_TRUSTED_NODE_VERSION.join(".")} or newer; found ${process.versions.node}.`,
   );
 }
 
@@ -167,19 +168,16 @@ function assertCleanGit(packageDir: string, skip: boolean): void {
   }
 }
 
-async function walkFiles(dir: string, root: string, files: string[]): Promise<void> {
-  const entries = await readdir(dir, { withFileTypes: true });
-  for (const entry of entries) {
-    const absolute = path.join(dir, entry.name);
-    const relative = path.relative(root, absolute).replaceAll(path.sep, "/");
-    if (entry.isDirectory()) {
-      await walkFiles(absolute, root, files);
-      continue;
-    }
-    if (entry.isFile()) files.push(relative);
-  }
-}
-
+/**
+ * The file list every content guard judges, read out of the archive by `tar` rather than from
+ * an extracted copy: this is the same enumeration a consumer's installer sees, and it needs no
+ * filesystem to exist.
+ *
+ * `tar tzf` prints one name per line, so a filename containing a newline would arrive as two
+ * entries. That is safe in the only direction that matters, because every guard here fails
+ * closed: splitting a name can only add entries to a leak scan that refuses on any match, and a
+ * declared path whose name was split is then absent and refused as missing.
+ */
 function listTarballFiles(tarball: string, cwd: string): string[] {
   return run("tar", ["tzf", tarball], cwd)
     .trim()
@@ -196,77 +194,36 @@ function readTarballJson(tarball: string, file: string, cwd: string): JsonObject
   try {
     parsed = JSON.parse(run("tar", ["xOzf", tarball, `package/${file}`], cwd)) as unknown;
   } catch (cause) {
-    throw new PublishCleanError(`Unable to read JSON from final npm tarball: ${file}`, { cause });
+    throw new PublishCleanError(`Unable to read JSON from ${path.basename(tarball)}: ${file}`, {
+      cause,
+    });
   }
   if (!isObject(parsed))
-    throw new PublishCleanError(`Final npm tarball ${file} must contain a JSON object.`);
+    throw new PublishCleanError(`${file} in ${path.basename(tarball)} must contain a JSON object.`);
   return parsed;
 }
 
 /**
- * Locates the tarball a packer just produced by reading its destination directory.
+ * Locates the tarball `pnpm pack` just produced by reading its destination directory.
  *
- * Every pack here targets a directory this process created and owns exclusively, so
- * the result is discoverable without interpreting the packer's output at all. That
- * matters because `pack` runs the package's `prepare`/`prepack` lifecycle scripts and
- * forwards their stdout: any build tool that logs — most of them — lands ahead of the
- * `--json` payload and breaks a parse of that stream. Reading the directory is immune
- * to whatever a foreign package's scripts choose to print.
+ * The pack targets a directory this process created and owns exclusively, so the result is
+ * discoverable without interpreting the packer's output at all. That matters because `pack`
+ * runs the package's `prepare`/`prepack` lifecycle scripts and forwards their stdout: any
+ * build tool that logs — most of them — lands ahead of a `--json` payload and breaks a parse
+ * of that stream. Reading the directory is immune to whatever a foreign package's scripts
+ * choose to print.
  *
  * Exactly one tarball is the invariant, not a convenience: more than one means the
  * destination was not exclusive and the wrong artifact could be published.
  */
-async function soleTarball(packRoot: string, packer: string): Promise<string> {
+async function soleTarball(packRoot: string): Promise<string> {
   const tarballs = (await readdir(packRoot)).filter((entry) => entry.endsWith(".tgz"));
   const [tarball] = tarballs;
   if (tarballs.length !== 1 || !tarball)
     throw new PublishCleanError(
-      `${packer} left ${tarballs.length} tarballs in ${packRoot}; expected exactly one.`,
+      `pnpm pack left ${tarballs.length} tarballs in ${packRoot}; expected exactly one.`,
     );
   return path.join(packRoot, tarball);
-}
-
-function assertDeclaredFiles(pkg: JsonObject, packageDir: string): void {
-  const paths: string[] = [];
-  for (const field of ["main", "module", "types", "typings", "bin"]) {
-    collectDeclaredPaths(pkg[field], paths, "every-string");
-  }
-  // `browser` is two fields sharing a name: a string is the replacement entry point, an
-  // object is a map whose values may be `false` or another package's name.
-  if (typeof pkg.browser === "string") collectDeclaredPaths(pkg.browser, paths, "every-string");
-  else collectDeclaredPaths(pkg.browser, paths, "relative-only");
-  for (const field of ["exports", "imports", "sideEffects"]) {
-    collectDeclaredPaths(pkg[field], paths, "relative-only");
-  }
-  collectDeclaredPaths(pkg.typesVersions, paths, "every-string");
-  const normalized = paths.map((declared) => ({
-    declared,
-    normalized: normalizeDeclaredPath(declared),
-  }));
-  const invalid = normalized.filter((item) => item.normalized === null);
-  if (invalid.length > 0)
-    throw new PublishCleanError(
-      `Manifest declares invalid package paths:\n${invalid.map((item) => item.declared).join("\n")}`,
-    );
-  const missing = normalized.filter(
-    (declared) =>
-      !declared.declared.includes("*") &&
-      !exists(path.join(packageDir, String(declared.normalized))),
-  );
-  if (missing.length > 0)
-    throw new PublishCleanError(
-      `Manifest declares files missing from packed artifact:\n${missing.map((item) => item.declared).join("\n")}`,
-    );
-}
-
-function exists(file: string): boolean {
-  try {
-    const fileStat = statSync(file);
-    if (!fileStat.isFile()) return false;
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 async function packAndClean(
@@ -310,35 +267,18 @@ async function packAndClean(
   let keepRoot = false;
   try {
     run("pnpm", ["pack", "--pack-destination", root], packageDir);
-    const tarball = await soleTarball(root, "pnpm pack");
-    run("tar", ["xzf", tarball, "-C", root], packageDir);
+    const tarball = await soleTarball(root);
 
-    const extracted = path.join(root, "package");
-    const extractedStat = await stat(extracted);
-    if (!extractedStat.isDirectory())
-      throw new PublishCleanError("Extracted tarball did not contain package/ directory.");
-
-    const files: string[] = [];
-    await walkFiles(extracted, extracted, files);
-    validatePackedFiles(files, skipFileCheck);
-
-    const packedPkgPath = path.join(extracted, "package.json");
+    // Cleaned straight out of the packed tarball and written back into a copy of that same
+    // tarball: no intermediate directory to clean, and no second packer that could re-decide
+    // the file set from the `files` field this strips.
     const cleanedPkg = withRegistry(
-      stripManifest(readJson(packedPkgPath), extraDevFields),
+      stripManifest(readTarballJson(tarball, "package.json", root), extraDevFields),
       registry,
     );
-    assertNoMonorepoProtocols(cleanedPkg);
     const unrecognized = unrecognizedFieldsReport(cleanedPkg, keepFields);
     if (unrecognized) console.warn(unrecognized);
-    assertDeclaredFiles(cleanedPkg, extracted);
-    // Not read by anything downstream: the tarball below is rewritten from pnpm's, not packed
-    // from this directory. It is written so the directory a dry-run points the operator at
-    // shows the manifest that will actually ship rather than the pre-cleaning one.
-    await writeFile(packedPkgPath, stringifyJson(cleanedPkg));
 
-    // The published artifact is pnpm's tarball with one member replaced, so its file set is
-    // pnpm's by construction and no second packer can re-decide it. Everything below verifies
-    // the bytes that will be uploaded, which is the only artifact whose contents still matter.
     const publishRoot = path.join(root, "publish");
     await mkdir(publishRoot);
     const finalTarball = path.join(publishRoot, path.basename(tarball));
@@ -347,18 +287,27 @@ async function packAndClean(
       replaceTarballManifest(await readFile(tarball), stringifyJson(cleanedPkg)),
     );
 
+    // Every guard reads the artifact that gets uploaded, and nothing else. Validating an
+    // extracted copy instead would prove things about a directory nobody receives.
     const finalFiles = listTarballFiles(finalTarball, root);
+    assertSameEntries(listTarballFiles(tarball, root), finalFiles);
     validatePackedFiles(finalFiles, skipFileCheck);
-    const finalPkg = readTarballJson(finalTarball, "package.json", root);
-    assertNoMonorepoProtocols(finalPkg);
+    assertDeclaredFiles(cleanedPkg, finalFiles);
+
+    // Extracted last, and from the final tarball: `tar` decoding every entry is an independent
+    // reader agreeing the rewritten archive is sound, and it leaves the operator — and this
+    // repository's own publint gate — a directory holding exactly what ships.
+    run("tar", ["xzf", finalTarball, "-C", root], packageDir);
+    const extracted = path.join(root, "package");
+    const shippedPkg = readJson(path.join(extracted, "package.json"));
+    assertNoMonorepoProtocols(shippedPkg);
     // A tripwire for this tool's own bugs: every field it would catch is either kept by design
     // or removed on request, and a removal on request is excluded from the comparison. Its
     // decision is exercised directly in the rules suite.
-    assertNoLostConsumerFields(sourcePkg, finalPkg, extraDevFields);
-    // Reads back what the rewrite actually wrote. The manifest is the one member this tool
-    // authors rather than copies, so this is the check that the rewrite produced the bytes the
-    // guards above approved, and not merely bytes that happen to parse.
-    if (stableJson(finalPkg) !== stableJson(cleanedPkg))
+    assertNoLostConsumerFields(sourcePkg, shippedPkg, extraDevFields);
+    // The manifest is the one member this tool authors rather than copies, so this is the check
+    // that the rewrite produced the bytes the guards approved, not merely bytes that parse.
+    if (stableJson(shippedPkg) !== stableJson(cleanedPkg))
       throw new PublishCleanError("Rewritten tarball manifest differs from the cleaned manifest.");
 
     // Copied before publishing, and in every mode, so the retained bytes are exactly
@@ -370,19 +319,24 @@ async function packAndClean(
       console.log(`Final tarball kept at: ${kept}`);
     }
 
-    if (opts.guardOnly || opts.dryRun) {
-      if (!opts.dryRun) return;
+    if (opts.dryRun) {
       keepRoot = true;
       console.log(`[dry-run] Extracted package at: ${extracted}`);
       console.log(`[dry-run] Final tarball at: ${finalTarball}`);
       return;
     }
+    if (opts.guardOnly) return;
 
     assertRepositoryForTrustedPublish(cleanedPkg, opts.publishArgs, publishEnv());
     const publishArgs = registry
       ? ["publish", finalTarball, "--registry", registry, ...opts.publishArgs]
       : ["publish", finalTarball, ...opts.publishArgs];
-    runAttached("npm", publishArgs, extracted);
+    // Run from the source package, never the temp tree. npm resolves its project `.npmrc` from
+    // the nearest ancestor of the working directory holding a `package.json`, so publishing
+    // from a temp directory silently discards the registry and credentials the author
+    // configured for this project. Measured on npm 11: `npm config get registry` returns the
+    // project value only when cwd sits under that manifest.
+    runAttached("npm", publishArgs, packageDir);
   } finally {
     if (!keepRoot) await rm(root, { recursive: true, force: true });
   }

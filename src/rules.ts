@@ -191,6 +191,31 @@ export function assertNoLostConsumerFields(
 }
 
 /**
+ * Refuses a rewritten tarball whose file set is not the packed one, entry for entry.
+ *
+ * Replacing a member is supposed to change one member, and the rewriter copies every other
+ * entry as opaque bytes — so this can only fail through a defect in that code, which is exactly
+ * why it is worth asserting on the step that cannot be taken back. Nothing else would notice a
+ * dropped file: the leak checks only ask what is present, and a package missing a file installs
+ * fine and then fails at import, on a version the registry keeps forever.
+ *
+ * Both lists are read out of the archives by `tar`, an instrument that cannot share a mistake
+ * with the walk being checked.
+ */
+export function assertSameEntries(packed: readonly string[], published: readonly string[]): void {
+  const before = new Set(packed);
+  const after = new Set(published);
+  const changed = [
+    ...packed.filter((file) => !after.has(file)).map((file) => `- ${file}`),
+    ...published.filter((file) => !before.has(file)).map((file) => `+ ${file}`),
+  ];
+  if (changed.length > 0)
+    throw new PublishCleanError(
+      `Rewriting the tarball manifest changed its file set:\n${changed.join("\n")}`,
+    );
+}
+
+/**
  * Names the fields that survived cleaning without anyone recognising them.
  *
  * The strip list can only ever describe tools that existed when it was written, so every new
@@ -266,7 +291,13 @@ export const SUSPICIOUS_PATTERNS = [
 export const PUBLISH_ADVISORY =
   "publish-clean packs with pnpm: it resolves workspace: and catalog: specs from the packing package's own node_modules, so a Bun workspace works as-is and a Yarn one needs a pnpm-workspace.yaml plus one pnpm install. npm packs those specs unresolved.";
 
+/**
+ * The floors npm's trusted publishing puts on the toolchain. Declared once each and formatted
+ * into their own error messages, so the number a reader is told to install is the number the
+ * comparison actually made.
+ */
 export const MIN_TRUSTED_NPM_VERSION = [11, 5, 1] as const;
+export const MIN_TRUSTED_NODE_VERSION = [22, 14, 0] as const;
 
 export class PublishCleanError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -417,10 +448,9 @@ export function withRegistry(pkg: JsonObject, registry: null | string): JsonObje
  * with one, the package is uninstallable for everyone, and the version cannot be taken
  * back.
  *
- * Both call sites pass an already-stripped manifest, so the dev-only members of
- * DEP_FIELDS are absent by construction. They are still checked, because a guard whose
- * correctness depends on the order it happens to be called in fails silently the day
- * someone reorders it.
+ * The caller passes an already-stripped manifest, so the dev-only members of DEP_FIELDS are
+ * absent by construction. They are still checked, because a guard whose correctness depends on
+ * the order it happens to be called in fails silently the day someone reorders it.
  */
 export function assertNoMonorepoProtocols(pkg: JsonObject): void {
   const failures: string[] = [];
@@ -522,6 +552,46 @@ export function collectDeclaredPaths(
   }
   if (!isObject(value)) return;
   for (const item of Object.values(value)) collectDeclaredPaths(item, out, mode);
+}
+
+/**
+ * Refuses a manifest whose declared entry points are not in the tarball.
+ *
+ * Checked against the published file list rather than a directory on disk, because that list is
+ * what a consumer's installer unpacks — and because a rule that reads the filesystem cannot be
+ * exercised without building one.
+ *
+ * A path containing `*` is skipped: `exports` subpath patterns and `typesVersions` globs stand
+ * for a set of files, and resolving them here would mean reimplementing npm's own matcher to
+ * answer a question npm answers at install time.
+ */
+export function assertDeclaredFiles(pkg: JsonObject, published: readonly string[]): void {
+  const declared: string[] = [];
+  for (const field of ["main", "module", "types", "typings", "bin"])
+    collectDeclaredPaths(pkg[field], declared, "every-string");
+  // `browser` is two fields sharing a name: a string is the replacement entry point, an
+  // object is a map whose values may be `false` or another package's name.
+  if (typeof pkg.browser === "string") collectDeclaredPaths(pkg.browser, declared, "every-string");
+  else collectDeclaredPaths(pkg.browser, declared, "relative-only");
+  for (const field of ["exports", "imports", "sideEffects"])
+    collectDeclaredPaths(pkg[field], declared, "relative-only");
+  collectDeclaredPaths(pkg.typesVersions, declared, "every-string");
+
+  const resolved = declared.map((path) => ({ path, normalized: normalizeDeclaredPath(path) }));
+  const invalid = resolved.filter((item) => item.normalized === null);
+  if (invalid.length > 0)
+    throw new PublishCleanError(
+      `Manifest declares invalid package paths:\n${invalid.map((item) => item.path).join("\n")}`,
+    );
+
+  const shipped = new Set(published);
+  const missing = resolved.filter(
+    (item) => !item.path.includes("*") && !shipped.has(String(item.normalized)),
+  );
+  if (missing.length > 0)
+    throw new PublishCleanError(
+      `Manifest declares files missing from packed artifact:\n${missing.map((item) => item.path).join("\n")}`,
+    );
 }
 
 export function normalizeDeclaredPath(declared: string): null | string {

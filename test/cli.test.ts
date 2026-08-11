@@ -1,5 +1,14 @@
 import { spawn, spawnSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -269,28 +278,30 @@ describe.concurrent("publish-clean", () => {
     }
   });
 
-  it("publishes the final npm tarball with npm, not the cleaned directory with pnpm", async () => {
+  // npm is the only command this tool hands the artifact to, so the whole invocation is
+  // captured: the arguments, and the directory it runs in. The directory is not incidental.
+  // npm resolves a project `.npmrc` from the nearest ancestor of its working directory that
+  // holds a `package.json`, so publishing from the temp tree would silently discard the
+  // registry and credentials the author configured for this project — a package aimed at an
+  // internal registry would go to npmjs.com instead, and nothing would say so.
+  it("publishes the tarball from the source package directory", async () => {
     const fx = await fixture(
       { name: "fixture-npm-publish", version: "1.0.0", files: ["index.js"] },
       { "index.js": "module.exports = 1;\n" },
     );
     const bin = path.join(fx.root, "bin");
     const log = path.join(fx.root, "commands.log");
-    const realNpm = spawnSync("which", ["npm"], {
-      encoding: "utf8",
-    }).stdout.trim();
     try {
       await mkdir(bin);
+      // Never execs the real npm: `which npm` usually resolves to a version manager's shim,
+      // which re-resolves the tool BY NAME, finds this fake first and execs it again — an
+      // unbounded fork/exec loop that presents as a hang.
       await writeShim(
         path.join(bin, "npm"),
         `#!/bin/sh
 if [ "$1" = "--version" ]; then echo "11.5.1"; exit 0; fi
-if [ "$1" = "pack" ]; then
-  shift
-  PATH="$REAL_PATH" exec "$REAL_NPM" pack "$@"
-fi
 if [ "$1" = "publish" ]; then
-  printf '%s\\n' "$*" > "${log}"
+  printf '%s\\n%s\\n' "$*" "$(pwd -P)" > "${log}"
   exit 0
 fi
 echo "unexpected npm $*" >&2
@@ -300,22 +311,14 @@ exit 1
       const result = await runCli(
         ["--no-git-checks", fx.dir, "--", "--access", "public", "--tag", "latest"],
         process.cwd(),
-        // REAL_PATH is this PATH without `bin`. `which npm` usually resolves to a version
-        // manager's shim (asdf, mise, volta), and a shim does not run the tool: it
-        // re-resolves it BY NAME. Handed a PATH whose first entry is this fake, it finds
-        // the fake, which execs the shim again — an unbounded fork/exec loop that presents
-        // as a hang and gets misread as slowness.
-        {
-          PATH: `${bin}:${process.env.PATH ?? ""}`,
-          REAL_NPM: realNpm,
-          REAL_PATH: process.env.PATH ?? "",
-        },
+        { PATH: `${bin}:${process.env.PATH ?? ""}` },
       );
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      const published = await readFile(log, "utf8");
-      expect(published).toContain("publish ");
-      expect(published).toContain(".tgz");
-      expect(published).toContain("--tag latest");
+      const [invocation, cwd] = (await readFile(log, "utf8")).trim().split("\n");
+      expect(invocation).toContain("publish ");
+      expect(invocation).toContain(".tgz");
+      expect(invocation).toContain("--tag latest");
+      expect(cwd).toBe(await realpath(fx.dir));
     } finally {
       await cleanup(fx.root);
     }
@@ -414,16 +417,12 @@ exit 1
       { "index.js": "module.exports = 1;\n" },
     );
     const bin = path.join(fx.root, "bin");
-    const realNpm = spawnSync("which", ["npm"], {
-      encoding: "utf8",
-    }).stdout.trim();
     try {
       await mkdir(bin);
       await writeShim(
         path.join(bin, "npm"),
         `#!/bin/sh
 if [ "$1" = "--version" ]; then echo "11.5.1"; exit 0; fi
-if [ "$1" = "pack" ]; then shift; PATH="$REAL_PATH" exec "$REAL_NPM" pack "$@"; fi
 if [ "$1" = "publish" ]; then exit 0; fi
 echo "unexpected npm $*" >&2
 exit 1
@@ -434,8 +433,6 @@ exit 1
         process.cwd(),
         {
           PATH: `${bin}:${process.env.PATH ?? ""}`,
-          REAL_NPM: realNpm,
-          REAL_PATH: process.env.PATH ?? "", // see the shim note above: no path back to the fake
           GITHUB_ACTIONS: "true",
           GITHUB_REPOSITORY: "Anizoptera/publish-clean",
         },
@@ -570,32 +567,6 @@ exit 1
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("unresolved monorepo-only dependency specs");
       expect(result.stderr).toContain("packs with pnpm");
-    } finally {
-      await cleanup(fx.root);
-    }
-  });
-
-  // Only a real pack answers this: `main` and `bin` are validated against the file set pnpm
-  // actually emitted, and the shapes here are the ones a naive check misses — a bare path
-  // with no `./`, a value nested in a map, and one nested two maps deep.
-  it("validates non-dot-slash main, bin, and typesVersions paths", async () => {
-    const fx = await fixture(
-      {
-        name: "fixture-declared-paths",
-        version: "1.0.0",
-        files: ["index.js"],
-        main: "missing.js",
-        bin: { fixture: "bin/missing.js" },
-        typesVersions: { "*": { "*": ["missing.d.ts"] } },
-      },
-      { "index.js": "module.exports = 1;\n" },
-    );
-    try {
-      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
-      expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain("missing.js");
-      expect(result.stderr).toContain("bin/missing.js");
-      expect(result.stderr).toContain("missing.d.ts");
     } finally {
       await cleanup(fx.root);
     }

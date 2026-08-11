@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   PublishCleanError,
+  assertDeclaredFiles,
   assertFilesField,
   assertNoLostConsumerFields,
   assertNoMonorepoProtocols,
@@ -235,6 +236,40 @@ describe.concurrent("declared manifest paths", () => {
       expect(normalizeDeclaredPath(escape)).toBeNull();
     });
   }
+});
+
+describe.concurrent("declared entry points", () => {
+  const shipped = ["index.js", "index.d.ts", "dist/index.js"];
+
+  // The two families of path-bearing fields disagree about what a bare string means, and
+  // reading one by the other's rules breaks in both directions. In `exports` and `imports` a
+  // string may be another package's name or a condition target, and treating those as paths
+  // would refuse to publish any package whose conditions point at a dependency.
+  it("does not mistake package names, globs or booleans for paths", () => {
+    expect(() =>
+      assertDeclaredFiles(
+        {
+          exports: { ".": { types: "./index.d.ts", node: "./index.js", default: "some-polyfill" } },
+          imports: { "#dep": "external-package" },
+          sideEffects: false,
+          typesVersions: { "*": { "*": ["dist/*.d.ts"] } },
+        },
+        shipped,
+      ),
+    ).not.toThrow();
+  });
+
+  it("names every declared file the tarball does not carry", () => {
+    expect(() =>
+      assertDeclaredFiles({ main: "missing.js", bin: { x: "bin/missing.js" } }, shipped),
+    ).toThrow(/missing\.js[\s\S]*bin\/missing\.js/);
+  });
+
+  it("refuses a path that escapes the package", () => {
+    expect(() => assertDeclaredFiles({ main: "../outside.js" }, shipped)).toThrow(
+      "invalid package paths",
+    );
+  });
 });
 
 describe.concurrent("npm version floor", () => {
