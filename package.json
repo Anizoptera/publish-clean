@@ -60,7 +60,7 @@
     "preversion": "bun run check",
     "release": "pnpm version",
     "test": "bun run build && bun run test:built",
-    "test:built": "vitest run && bun test test/*.bun.test.ts",
+    "test:built": "vitest run",
     "tracked-artifacts:check": "test -z \"$(git ls-files dist)\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "version": "grep -qF \"## [$npm_package_version]\" CHANGELOG.md || { echo \"CHANGELOG.md has no ## [$npm_package_version] section. Run: bun run changelog v$npm_package_version, edit it, then COMMIT it -- the bump refuses a dirty tree.\" >&2; exit 1; }"

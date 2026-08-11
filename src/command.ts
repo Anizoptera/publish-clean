@@ -32,14 +32,14 @@ const TOOL_PROBE_TIMEOUT_MS = 10_000;
  * layer to get wrong. The one residual is cmd's `%VAR%` expansion inside an argument, which no
  * argument this tool generates contains; a caller writing one after `--` gets it expanded.
  */
-function spawn(command: string, args: readonly string[]): [string, string[]] {
+function spawnArgs(command: string, args: readonly string[]): [string, string[]] {
   return process.platform === "win32"
     ? ["cmd.exe", ["/d", "/c", command, ...args]]
     : [command, [...args]];
 }
 
 export function run(command: string, args: readonly string[], cwd: string): string {
-  return execFileSync(...spawn(command, args), {
+  return execFileSync(...spawnArgs(command, args), {
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
@@ -57,7 +57,7 @@ export function run(command: string, args: readonly string[], cwd: string): stri
  * that says nothing about the one action that cannot be undone.
  */
 export function runAttached(command: string, args: readonly string[], cwd: string): void {
-  execFileSync(...spawn(command, args), { cwd, stdio: ["ignore", "inherit", "inherit"] });
+  execFileSync(...spawnArgs(command, args), { cwd, stdio: ["ignore", "inherit", "inherit"] });
 }
 
 /** Child output survives only on the thrown error, and is lost unless read off it here. */
@@ -84,12 +84,16 @@ function toolFailureReason(cause: unknown): string {
       return `did not answer --version within ${TOOL_PROBE_TIMEOUT_MS}ms`;
   }
   const stderr = outputFromError(cause, "stderr");
-  return `is present but failed to run${stderr ? `: ${stderr}` : ""}`;
+  // Not "is present but failed": on Windows the spawn goes through cmd.exe, which always
+  // exists, so a genuinely missing tool arrives here as an exit code and cmd's own
+  // "is not recognized as an internal or external command" — a message that would then be
+  // introduced by a claim contradicting it. The forwarded stderr carries the diagnosis either way.
+  return `failed to run${stderr ? `: ${stderr}` : ""}`;
 }
 
 export function requireTool(name: string): void {
   try {
-    execFileSync(...spawn(name, ["--version"]), {
+    execFileSync(...spawnArgs(name, ["--version"]), {
       stdio: ["ignore", "ignore", "pipe"],
       timeout: TOOL_PROBE_TIMEOUT_MS,
     });

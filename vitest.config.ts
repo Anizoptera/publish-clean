@@ -4,7 +4,6 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
-    exclude: ["test/**/*.bun.test.ts"],
     // Derived, never a literal: a value tuned on a sixteen-thread machine is a six-fold
     // oversubscription of a four-core runner, and its only symptom is every case blowing its
     // wall-clock timeout while total CPU stays healthy — which is how this was found.
