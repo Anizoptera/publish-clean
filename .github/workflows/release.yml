@@ -47,9 +47,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-        with:
-          version: latest
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
@@ -88,6 +85,13 @@ jobs:
       # attestation subject.
       - name: Pack, and publish unless this version is already on the registry
         run: |
+          # pnpm is a devDependency, so the lockfile is the single place its version is
+          # declared and the same resolution runs here, in Check, and on a developer's
+          # machine. That matters beyond tidiness: pnpm decides which files enter the
+          # tarball this job signs, and provenance attests who built an artifact, never
+          # that the toolchain was sound. Sourcing it from PATH would instead take
+          # whatever the runner happened to have.
+          export PATH="$PWD/node_modules/.bin:$PATH"
           mode=""
           spec="$(node -p '`${require("./package.json").name}@${require("./package.json").version}`')"
           if npm view "$spec" version >/dev/null 2>&1; then
