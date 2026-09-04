@@ -1,4 +1,9 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  // Prose is never wrapped to a column: the line breaks in a Markdown file are the author's.
+  // Stated rather than inherited — this is oxfmt's current default, and a default is not a promise.
+  // `printWidth` still governs code, and it OVERRIDES `.editorconfig.max_line_length` rather than
+  // reading it, so a width set there would not reach prose even if this were dropped.
+  "proseWrap": "preserve",
   "ignorePatterns": ["CHANGELOG.md"]
 }
