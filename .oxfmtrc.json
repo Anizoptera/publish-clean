@@ -15,9 +15,14 @@
   // above a single table suppresses it. Turning Markdown off also drops list markers, `__bold__`
   // to `**bold**`, blockquote and heading spacing, and hard breaks. Nothing else checks Markdown.
   //
-  // Every extension oxfmt reads as Markdown is listed, not just `.md`, so a new `.mdx` cannot get
-  // formatted by accident. Bare `README` is one of them. `.txt`, `.rst`, `.adoc` and `.org` need
-  // no entry: oxfmt does not claim them. `CHANGELOG.md` needed its own entry before this and no
-  // longer does.
-  "ignorePatterns": ["**/*.{md,markdown,mdown,mdwn,mkd,mkdn,mdx}", "**/README"]
+  // The list is not guessed: `prettier --support-info` reports the Markdown and MDX languages, and
+  // oxfmt was probed with one file per candidate extension. Both claim the same 14 names, identical
+  // across oxfmt 0.28 through 0.66. Two are bare FILENAMES, which an extension list misses. `.mdc`
+  // is claimed by neither. `.txt`, `.log`, `.rst`, `.adoc`, `.org` and `.tex` need no entry: oxfmt
+  // has no parser for them. `CHANGELOG.md` needed its own entry before this and no longer does.
+  "ignorePatterns": [
+    "**/*.{md,livemd,markdown,mdown,mdwn,mdx,mkd,mkdn,mkdown,ronn,scd,workbook}",
+    "**/README",
+    "**/contents.lr"
+  ]
 }
