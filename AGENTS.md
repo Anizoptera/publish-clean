@@ -53,7 +53,9 @@
   and no other file's contents are ever altered. Unrecognised fields ship and are reported, never dropped
   silently: dropping a key some consumer resolves breaks a stranger's build with no signal here.
 - Do not add package-manager-specific behavior unless tests prove the published tarball invariant.
-- Split CLI args at `--` before parsing; everything after it belongs to `npm publish`.
+- Split CLI args at `--` before parsing; accept only the publication options in `src/options.ts`
+  afterward. Reject extra operands, workspace selectors and flag-shaped values: npm reparses
+  even `--tag=--workspace` as a workspace option, so equals-form alone does not bind a value.
 - Keep npm publication in `.github/workflows/release.yml`; npm trusted publishing is keyed by workflow filename.
 - Release is two jobs, and the split is what makes both true at once: `verify` runs `bun run check` on the tagged commit holding NO permissions, and `publish` declares `needs: verify` and does only what the credential is for — build, publish, attest, attach. Never merge them into one job. The suite puts fake executables on `PATH` and runs fixture lifecycle scripts, which must not happen beside a live token, and `id-token: write` defines `ACTIONS_ID_TOKEN_REQUEST_URL`, which the CLI reads as a trusted-publish context and behaves differently under. `preversion` still runs the lane locally, but as fast feedback, never as the gate: a hand-made tag or any local bypass would otherwise reach the registry, and an npm version is permanent.
 - Every release step must survive a re-run, because a run that publishes and then fails is otherwise unrepairable. Only the npm publish refuses; skip it when the version is already on the registry and let the remaining steps run.

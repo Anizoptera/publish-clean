@@ -354,8 +354,10 @@ choices like dist-tags on the command line and stable project policy in the mani
 | `-h`, `--help`       | -                 | Print usage, every flag, and the config keys.                                              |
 | `-v`, `--version`    | -                 | Print the installed version.                                                               |
 
-Arguments after `--` go to `npm publish`. Pass the dist-tag explicitly: `--tag latest` for
-a normal public release.
+Arguments after `--` accept publication options only; `--help` lists them. Extra package
+operands, workspace selectors, unknown options and values starting with `-` are rejected
+so npm cannot substitute an unchecked package. For a filename starting with `-`, use `./`.
+Pass the dist-tag explicitly: `--tag latest` for a normal public release.
 
 A few of these deserve a sentence more.
 

@@ -52,7 +52,12 @@ it("uploads the checked bytes to the explicit registry despite a conflicting sco
     await mkdir(pkg);
     await writeFile(
       path.join(pkg, "package.json"),
-      JSON.stringify({ name: "@audit/registry-fixture", version: "1.0.0", files: ["index.js"] }),
+      JSON.stringify({
+        name: "@audit/registry-fixture",
+        version: "1.0.0",
+        files: ["index.js"],
+        publishConfig: { provenance: true },
+      }),
     );
     await writeFile(path.join(pkg, "index.js"), "module.exports = 42;\n");
     await writeFile(
@@ -66,34 +71,62 @@ it("uploads the checked bytes to the explicit registry despite a conflicting sco
     };
     delete env.ACTIONS_ID_TOKEN_REQUEST_URL;
     delete env.GITHUB_ACTIONS;
-    const result = await new Promise<{ code: number | null; output: string }>((resolve, reject) => {
-      const child = spawn(
-        "node",
-        [
-          path.resolve("dist/cli.js"),
-          "--no-git-checks",
-          "--registry",
-          `${origin}/chosen/`,
-          "--tarball-out",
-          out,
-          pkg,
-          "--",
-          "--access",
-          "public",
-          "--ignore-scripts",
-        ],
-        { env, timeout: 10_000, killSignal: "SIGKILL" },
-      );
-      let output = "";
-      child.stdout.on("data", (chunk: Buffer) => {
-        output += chunk.toString();
+    const invoke = (forwarded: string[]) =>
+      new Promise<{ code: number | null; output: string }>((resolve, reject) => {
+        const child = spawn(
+          "node",
+          [
+            path.resolve("dist/cli.js"),
+            "--no-git-checks",
+            "--registry",
+            `${origin}/chosen/`,
+            "--tarball-out",
+            out,
+            pkg,
+            "--",
+            ...forwarded,
+          ],
+          { env, timeout: 10_000, killSignal: "SIGKILL" },
+        );
+        let output = "";
+        child.stdout.on("data", (chunk: Buffer) => {
+          output += chunk.toString();
+        });
+        child.stderr.on("data", (chunk: Buffer) => {
+          output += chunk.toString();
+        });
+        child.on("error", reject);
+        child.on("close", (code) => resolve({ code, output }));
       });
-      child.stderr.on("data", (chunk: Buffer) => {
-        output += chunk.toString();
-      });
-      child.on("error", reject);
-      child.on("close", (code) => resolve({ code, output }));
-    });
+    const rejected = await Promise.all(
+      [
+        ["--workspaces", "."],
+        ["--tag=--workspace", "."],
+        ["elsewhere.tgz"],
+        ["--registry=https://fixture-secret@example.test"],
+      ].map(invoke),
+    );
+    for (const result of rejected) {
+      expect(result.code).not.toBe(0);
+      expect(result.output).not.toContain("fixture-secret");
+    }
+    expect(uploads).toHaveLength(0);
+    const manifestPath = path.join(pkg, "package.json");
+    const original = await readFile(manifestPath, "utf8");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        ...JSON.parse(original),
+        publishConfig: { "@other:registry": "https://fixture-secret@example.test" },
+      }),
+    );
+    const credentialFailure = await invoke(["--dry-run"]);
+    expect(credentialFailure.code).not.toBe(0);
+    expect(credentialFailure.output).toContain("Registry URLs must not contain credentials");
+    expect(credentialFailure.output).not.toContain("fixture-secret");
+    expect(uploads).toHaveLength(0);
+    await writeFile(manifestPath, original);
+    const result = await invoke(["--access", "public", "--ignore-scripts", "--no-provenance"]);
     expect(result.code, result.output).toBe(0);
     expect(failures).toEqual([]);
     expect(uploads).toHaveLength(1);

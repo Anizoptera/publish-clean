@@ -45,11 +45,26 @@ export function wantsTrustedPublish(
   publishArgs: readonly string[],
   env: TrustedPublishEnv,
 ): boolean {
-  if (publishArgs.includes("--provenance")) return true;
-  if (isObject(pkg.publishConfig) && pkg.publishConfig.provenance === true) return true;
-  // Actions defines the token URL only when the job requests `id-token: write`, which is
-  // precisely the permission that makes an unflagged publish produce provenance.
-  return env.GITHUB_ACTIONS === "true" && typeof env.ACTIONS_ID_TOKEN_REQUEST_URL === "string";
+  // OIDC authentication requires the trusted runtime even when attestation is disabled.
+  return (
+    provenanceIntent(pkg, publishArgs) === true ||
+    (env.GITHUB_ACTIONS === "true" && typeof env.ACTIONS_ID_TOKEN_REQUEST_URL === "string")
+  );
+}
+
+/** CLI overrides the manifest; undefined delegates to npm's own configuration resolver. */
+export function provenanceIntent(
+  pkg: JsonObject,
+  publishArgs: readonly string[],
+): boolean | undefined {
+  for (let index = publishArgs.length - 1; index >= 0; index--) {
+    if (publishArgs[index] === "--provenance=true" || publishArgs[index] === "--provenance")
+      return true;
+    if (publishArgs[index] === "--provenance=false") return false;
+  }
+  if (isObject(pkg.publishConfig) && pkg.publishConfig.provenance !== undefined)
+    return Boolean(pkg.publishConfig.provenance);
+  return undefined;
 }
 
 export function repositoryUrl(pkg: JsonObject): null | string {

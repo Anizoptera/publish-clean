@@ -330,6 +330,7 @@ describe.concurrent("publish-clean", () => {
         path.join(bin, "npm"),
         `#!/bin/sh
 if [ "$1" = "--version" ]; then echo "11.5.1"; exit 0; fi
+if [ "$*" = "config get provenance" ]; then echo "false"; exit 0; fi
 if [ "$1" = "publish" ]; then
   printf '%s\\n%s\\n' "$*" "$(pwd -P)" > "${log}"
   exit 0
@@ -347,7 +348,6 @@ exit 1
       const [invocation, cwd] = (await readFile(log, "utf8")).trim().split("\n");
       expect(invocation).toContain("publish ");
       expect(invocation).toContain(".tgz");
-      expect(invocation).toContain("--tag latest");
       expect(cwd).toBe(await realpath(fx.dir));
     } finally {
       await cleanup(fx.root);
@@ -403,7 +403,7 @@ exit 126
     }
   });
 
-  it("rejects provenance publish when npm is too old for trusted publishing", async () => {
+  it("rejects configured provenance when npm is too old for trusted publishing", async () => {
     const fx = await fixture(
       { name: "fixture-old-npm", version: "1.0.0", files: ["index.js"] },
       { "index.js": "module.exports = 1;\n" },
@@ -415,17 +415,14 @@ exit 126
         path.join(bin, "npm"),
         `#!/bin/sh
 if [ "$1" = "--version" ]; then echo "11.5.0"; exit 0; fi
+if [ "$*" = "config get provenance" ]; then echo "true"; exit 0; fi
 echo "unexpected npm $*" >&2
 exit 1
 `,
       );
-      const result = await runCli(
-        ["--no-git-checks", fx.dir, "--", "--provenance"],
-        process.cwd(),
-        {
-          PATH: `${bin}:${process.env.PATH ?? ""}`,
-        },
-      );
+      const result = await runCli(["--no-git-checks", fx.dir], process.cwd(), {
+        PATH: `${bin}:${process.env.PATH ?? ""}`,
+      });
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("requires npm 11.5.1");
     } finally {

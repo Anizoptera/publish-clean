@@ -42,6 +42,7 @@ import {
   MIN_TRUSTED_NPM_VERSION,
   assertRepositoryForTrustedPublish,
   isAtLeast,
+  provenanceIntent,
   wantsTrustedPublish,
 } from "./trusted-publish";
 import type { TrustedPublishEnv } from "./trusted-publish";
@@ -288,14 +289,21 @@ async function packAndClean(
     }
     if (opts.guardOnly) return;
 
-    await assertTrustedPublishingRuntime(
-      shippedPkg,
-      opts.publishArgs,
-      packageDir,
-      npmVersion,
-      signal,
-    );
-    assertRepositoryForTrustedPublish(shippedPkg, opts.publishArgs, publishEnv());
+    const preflightArgs = [...opts.publishArgs];
+    if (
+      provenanceIntent(shippedPkg, preflightArgs) === undefined &&
+      !wantsTrustedPublish(shippedPkg, preflightArgs, publishEnv())
+    ) {
+      // npm owns npmrc/environment precedence; query only the non-secret setting needed here.
+      const value = (
+        await run("npm", ["config", "get", "provenance"], packageDir, { signal, timeout: 10_000 })
+      ).trim();
+      if (value !== "true" && value !== "false")
+        throw new PublishCleanError("npm config get provenance must return true or false.");
+      preflightArgs.push(`--provenance=${value}`);
+    }
+    await assertTrustedPublishingRuntime(shippedPkg, preflightArgs, packageDir, npmVersion, signal);
+    assertRepositoryForTrustedPublish(shippedPkg, preflightArgs, publishEnv());
     const scope = packageScope(shippedPkg);
     const publishArgs = ["publish", finalTarball, ...opts.publishArgs];
     if (registry) {

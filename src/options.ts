@@ -1,5 +1,56 @@
-// Parse this CLI before the separator and leave the remaining arguments to npm.
+// Keep npm's publication options separate from arguments that select an unchecked artifact.
 import { parseArgs } from "node:util";
+import { PublishCleanError } from "./error";
+import { assertRegistry } from "./manifest";
+
+const PUBLISH_OPTIONS = new Map<string, "string" | "boolean">([
+  ["access", "string"],
+  ["tag", "string"],
+  ["otp", "string"],
+  ["registry", "string"],
+  ["provenance-file", "string"],
+  ["provenance", "boolean"],
+  ["dry-run", "boolean"],
+  ["ignore-scripts", "boolean"],
+  ["json", "boolean"],
+  ["loglevel", "string"],
+]);
+
+/** npm reparses even equals-form values as flags; reject flag-shaped values before forwarding. */
+function publicationArgs(args: readonly string[]): string[] {
+  const result: string[] = [];
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index] ?? "";
+    const equal = arg.indexOf("=");
+    const flag = equal < 0 ? arg : arg.slice(0, equal);
+    const negative = flag.startsWith("--no-");
+    const name = flag.slice(negative ? 5 : 2);
+    const type = flag.startsWith("--") ? PUBLISH_OPTIONS.get(name) : undefined;
+    if (!type || (negative && type !== "boolean"))
+      throw new PublishCleanError(
+        `After --, use publication options only: ${[...PUBLISH_OPTIONS.keys()].join(", ")}. Package operands and workspace selectors are forbidden.`,
+      );
+    let value = equal < 0 ? undefined : arg.slice(equal + 1);
+    if (
+      value === undefined &&
+      (type === "string" || args[index + 1] === "true" || args[index + 1] === "false")
+    )
+      value = args[++index];
+    if (type === "boolean") {
+      value ??= "true";
+      if (value !== "true" && value !== "false")
+        throw new PublishCleanError(`--${name} requires true or false.`);
+      if (negative) value = value === "true" ? "false" : "true";
+    } else if (!value || value.startsWith("-")) {
+      throw new PublishCleanError(
+        `--${name} requires a value that does not start with -. Use ./ for a filename starting with -.`,
+      );
+    }
+    if (name === "registry") assertRegistry(value);
+    result.push(`--${name}=${value}`);
+  }
+  return result;
+}
 
 /**
  * The whole interface in one screen, because this is where an out-of-context reader lands:
@@ -12,7 +63,9 @@ export const HELP = `publish-clean [options] [package-dir] [-- npm publish args]
 
 Packs with pnpm, strips developer-only fields from the packed manifest, validates the
 artifact, and publishes that exact tarball with npm. Arguments after \`--\` go to
-\`npm publish\` untouched (e.g. --access public --tag next --provenance).
+\`npm publish\` as publication options (e.g. --access public --tag next --provenance).
+Allowed: ${[...PUBLISH_OPTIONS.keys()].map((name) => `--${name}`).join(", ")}.
+Additional package operands and workspace selectors are rejected.
 
 Options:
   --dry-run              Pack, clean and validate; print the file list and manifest, publish nothing.
@@ -40,7 +93,7 @@ npm 11.5.1+, and only a cloud CI runner can produce it.`;
 export function parseOptions(rawArgs: readonly string[]) {
   const separator = rawArgs.indexOf("--");
   const cliArgs = separator === -1 ? rawArgs : rawArgs.slice(0, separator);
-  const publishArgs = separator === -1 ? [] : rawArgs.slice(separator + 1);
+  const publishArgs = publicationArgs(separator === -1 ? [] : rawArgs.slice(separator + 1));
   const parsed = parseArgs({
     args: cliArgs,
     allowPositionals: true,
