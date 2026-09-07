@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { watch } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -45,7 +45,8 @@ describe("spawn arguments", () => {
 });
 
 it("settles a cancelled real child before returning on this platform", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "publish-clean-process-"));
+  // Windows temp paths may use 8.3 aliases, which libuv cannot safely watch (libuv#5010).
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), "publish-clean-process-")));
   const controller = new AbortController();
   const reason = new Error("test cancellation");
   const watcher = watch(root, (_event, name) => {
