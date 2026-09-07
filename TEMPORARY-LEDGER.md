@@ -16,6 +16,8 @@ Art's latest verification ruling supersedes the local full-check-before-each-com
 
 ## Derived work, ordered by harm and dependency
 
+Independent repairs are committed and the current lane passes. Remaining implementation depends on R1/R2/R4; the plan is not complete.
+
 - [x] Simplified implementation: removed the help-parser subprocess matrix, order-insensitive comparator, obsolete error adapter and second temporary archive directory. Configuration/options moved intact into focused modules; isolated CLI cases run concurrently. Typecheck/build and the latest CLI/archive/actual-upload lane passed 55 tests in 2.37s. The owned tarball is rewritten directly and validated from disk; its original archive remains in memory for preservation checks.
 
 - [x] Archive interpretation and preservation — effective USTAR/PAX paths and byte-counted records; size overrides; malformed tails and alias/duplicate rejection; final-readback raw entry/order/metadata guard. Verified: typecheck and build; `bunx vitest run test/tarball.test.ts test/cli.test.ts` passed 50 tests in 2.11s, including real pnpm safe/secret long paths and independent tar readback. Synthetic framing test corrected from a valid nine-byte record to a malformed eight-byte one; this was a test expectation error, not a parser fix.
@@ -35,14 +37,14 @@ Art's latest verification ruling supersedes the local full-check-before-each-com
 - [ ] Documentation and final integration — basis: published promises must match observable behavior.
   - [x] Corrected provenance exclusivity, Bun SQLite, lifecycle, publishConfig, preview, bundling and runtime claims using current primary documentation and installed implementations. Restored the explicit pnpm-only ruling weakened by compression; updated temporary-tarball wording and narrowed lifecycle guarantees. Kept reasons beside the owning code and removed repeated unsupported claims.
   - [x] R3 proposal withdrawn: no demonstrated need for a new JSON-report interface. Art's minimal-sufficiency instruction supports keeping the existing CLI surface; no approved capability is removed.
-  - [ ] Audit every final changed line against the baseline and pair every promise with an appropriate observable check.
-  - [ ] Run the full routine lane, record its scope and duration, inspect final git diff/status and commit remaining verified work.
+  - [x] Audited the current total diff against the baseline. Archive semantics are checked against real pnpm plus independent tar; publication bytes against actual npm loopback PUT; path semantics against Node; process settlement against real children; release integrity against a known SHA-512 vector and loopback HTTP failures. This pass found and repaired the export resolver mismatches and weakened packer instruction. R1/R2/R4 remain known failures, so this is not publication readiness or whole-plan completion. Re-audit their eventual changes.
+  - [x] Current full local lane passed in 3.720s: formatting, repository invariants, typecheck, build, 203 tests across nine files (2.34s), and built-CLI self-application with publint/attw. Total-diff whitespace check and working-tree inspection passed. No Windows execution, live OIDC, universal latency bound or 10x speedup is claimed.
 
 ## Evidence and process corrections
 
 Initial audit: `bun run check` passed with six test files and 121 tests; this does not cover the reproduced long-path scan bypass, workspace substitution, scoped registry override, packed private flag, deleted lifecycle helper, verbose-output failure or cancellation leak. These are regression targets, not completion evidence.
 
-The first resumed read exceeded the outer tool output budget despite bounded inner calls. The tool explicitly reported truncation; omitted content is not treated as read. Keep each response within its total output budget and reread required omitted ranges. This affects evidence acquisition, not repository behavior; no global guidance change is authorized. The existing guard is insufficient at the outer aggregation boundary: a candidate harness fix is per-result output budgeting with retained full results (Aponte tool-output owner), not more project prose. No change in another repository is authorized. No claim about the psychological cause is needed for this repair.
+Tool reads repeatedly exceeded inner or aggregate output budgets (captured examples: combined chunks aaafa5/e1f63c and chunk 5f2ae7). Truncation was explicit; required source/diff sections were reacquired, never treated as read from the omitted bytes. Cause of repeated selection of insufficient budgets remains unresolved and does not affect the product repair. Existing Aponte guidance already owns bounded readback in docs/standards/agent-gotchas.md, “Bind search POPULATION and readback BUDGET separately before execution.” Candidate prevention is retained full output plus per-result aggregate budgeting at the tool boundary, rather than another project rule. No Aponte or global guidance edit is authorized; this is a product implication only.
 
 ## Beyond this scope
 
