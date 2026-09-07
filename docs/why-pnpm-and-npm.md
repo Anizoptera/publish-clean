@@ -1,12 +1,12 @@
 # Why pnpm packs and npm publishes
 
-Use pnpm to pack and npm to upload. Replacing either requires Art's ruling and evidence
-that the replacement preserves workspace resolution, manifest overrides and the checked tarball's bytes.
+pnpm resolves workspace dependencies and publishing overrides; npm uploads the checked
+tarball without repacking it or running package scripts.
 
 The packer comparisons below were measured against pnpm 11.21, npm 11.19 and Bun 1.3.14;
 they are regression cases to rerun when evaluating another version, not universal claims.
 
-## The packer is not chosen for file selection
+## File selection
 
 The compared packers selected the same files in the measured fixtures. File selection did
 not distinguish them there. `publish-clean` preserves pnpm's selection and scans it;
@@ -32,9 +32,8 @@ npm error code EUNSUPPORTEDPROTOCOL
 npm error Unsupported URL Type "workspace:": workspace:*
 ```
 
-And `npm pack` on that same package exits 0 with `workspace:*` written straight into the
-tarball. It neither resolves it nor refuses it. Silently publishing something nobody can
-install is the one behaviour a release tool cannot be built on, so npm is out as a packer.
+In the comparison, `npm pack` exited 0 with `workspace:*` still in the tarball.
+That leaves an unresolvable dependency in the published package.
 
 pnpm and Bun both resolve it, and both stop loudly when they cannot. Their output matches
 down to `workspace:^` and `workspace:~` in `peerDependencies` and `optionalDependencies`,
@@ -54,15 +53,14 @@ error: Failed to resolve workspace version for "@acme/utils" in `dependencies`.
 Run `bun install` and try again.
 ```
 
-Accurate, and useless in a pnpm repo, where `bun install` is not something you want to be
-told to run. A tool that executes in other people's repositories has to cope with the
-repository it finds, so it uses pnpm's installed-workspace resolution.
+pnpm's resolution also works with dependencies installed by Bun, without requiring a
+different installer or lockfile. Bun's resolution required a Bun install.
 
 Yarn is the exception either way: it hoists workspace dependencies to the root, where
 pnpm does not look, and Yarn PnP writes no `node_modules` at all. Both need a
 `pnpm-workspace.yaml` and one `pnpm install` before packing works.
 
-## pnpm rather than Bun: the silent one
+## Workspace aliases
 
 An aliased workspace dependency, `"utils": "workspace:@acme/utils@*"`, has to come out the
 other side as an npm alias. pnpm writes `"npm:@acme/utils@1.2.3"`. Bun 1.3.14 writes
@@ -74,9 +72,7 @@ npm error code EINVALIDTAGNAME
 npm error Invalid tag name "is-odd@3.0.1" of package "aliased@is-odd@3.0.1"
 ```
 
-`bun pm pack` exits 0 either way, so nothing tells you until someone tries to install the
-release. One silent way to publish a broken manifest is one too many for the step you
-cannot take back.
+`bun pm pack` exited 0 for this case despite producing an invalid dependency spec.
 
 ## pnpm alone applies publishConfig overrides
 
@@ -100,9 +96,8 @@ A hoisted layout permits bundling in pnpm, but `publish-clean` still refuses the
 `node_modules` entries. That is this tool's artifact policy, not a packer limitation that
 switching linkers solves.
 
-For the record, npm and Bun bundle correctly for a standalone package, and neither bundles
-anything for a package inside a workspace, because the dependency hoists to the workspace
-root where the package cannot see it.
+In the tested layouts, npm and Bun bundled dependencies in standalone packages but not
+workspace packages whose dependencies were hoisted to the workspace root.
 
 ## Why npm publishes
 
@@ -114,7 +109,7 @@ and [libnpmpack](https://github.com/npm/cli/blob/latest/workspaces/libnpmpack/li
 The loopback registry test also compares npm's attachment with the retained artifact.
 
 Provenance is not exclusive to npm: [pnpm documents native publishing and --provenance](https://pnpm.io/cli/publish).
-Do not infer missing capabilities from an omitted help flag. Replacing npm requires evidence
-for artifact preservation, lifecycle behavior, registry selection and trusted publication;
+Replacing npm requires evidence for artifact preservation, lifecycle behavior,
+registry selection and trusted publication;
 support for an attestation option alone does not establish those properties. npm remains the
-chosen uploader, not the only possible one.
+chosen uploader.

@@ -71,25 +71,18 @@ notes: the section for a version is published verbatim when its tag is pushed.
 
 ### Added
 
-- **`dist/cli.js` declares its own licence and version**, in two line comments under the
-  shebang: `// SPDX-License-Identifier: Apache-2.0`, then the package name, version and
-  homepage. A licence scanner that sees this file and nothing around it can now identify what
-  it may do with it, and a reader who opens it in `node_modules` knows which version they are
-  looking at without resolving the manifest beside it. Both values are read from `package.json`
-  at build time, so the artifact cannot claim a licence or version the package does not.
+- `dist/cli.js` includes an SPDX licence comment, package name, version and homepage,
+  read from `package.json` at build time. Readers and licence scanners can identify the
+  installed file without its manifest.
 
 ## [0.7.2] - 2026-08-11
 
 ### Changed
 
-- **The published `dist/cli.js` is no longer compressed, so you can audit the file you install.**
-  It now reads statement for statement as the repository source does, types erased and nothing
-  else, and a diff against `src/` is a real check. Previously `mangle: false` kept the names and
-  comments while the compressor still rewrote the code underneath them — `const` to `let`, `===`
-  to `==`, `if (a) b()` to `a && b()`, an early return into a nested branch — leaving comments
-  describing control flow that no longer matched. This tool runs on your publish path and handles
-  registry credentials, which is a poor place to ask for trust in bytes nobody can read. The file
-  grows 1,157 gzipped bytes, downloaded once per developer.
+- Disabled code compression in `dist/cli.js` to make the installed CLI easier to audit.
+  Keeping names and comments alone still allowed the compressor to rewrite control flow
+  that comments described. Normal bundling and TypeScript removal still apply.
+  The change added 1,157 gzipped bytes to this release.
 
 ## [0.7.1] - 2026-08-11
 
@@ -101,7 +94,7 @@ notes: the section for a version is published verbatim when its tag is pushed.
   path or a forwarded argument containing `& | < > ^ %` therefore reached `cmd` unquoted:
   publishing from `C:\R&D\pkg` would have packed a truncated path and run the remainder as a
   separate command. Only 0.7.0 is affected, and only on Windows. Such an argument now stops the
-  run and is named; escaping them correctly is worth doing when a real path needs it.
+  run and is named in the error.
 - **Tar header checksums are verified.** The rewriter computes one for the block it authors and
   nothing checked it, so that computation vouched for itself — and an archive whose headers some
   extractors reject could have shipped with every guard green.
@@ -125,7 +118,7 @@ notes: the section for a version is published verbatim when its tag is pushed.
   directly, so every run failed claiming the package manager was "not available in PATH" —
   about a package manager that was installed and working. Both are now run through `cmd.exe`,
   and a Windows job in CI publishes this package in dry-run mode on every push, so the
-  platform is verified rather than assumed.
+  basic pack-and-check path is exercised on Windows.
 
 ### Fixed
 
@@ -136,7 +129,7 @@ notes: the section for a version is published verbatim when its tag is pushed.
 
 ### Changed
 
-- **A release now publishes only after the full check lane passes in CI**, on the tagged
+- **A release now publishes only after the Linux check lane passes in CI**, on the tagged
   commit, in a job that holds no credentials. A hand-made tag, or any local bypass, could
   previously reach the registry — and an npm version is permanent.
 

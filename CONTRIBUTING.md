@@ -1,7 +1,6 @@
 # Contributing
 
-`publish-clean` has one job: publish from a package artifact that has been checked.
-Keep changes close to that.
+Keep changes focused on cleaning and checking the tarball that npm uploads.
 
 ## Local checks
 
@@ -22,12 +21,11 @@ can run in parallel because they do not write that build.
 
 ## Design rules
 
-These are not preferences. A change that breaks one of them will be rejected however
-good it looks otherwise. `AGENTS.md` carries the reasoning and the measurements behind
-each, which is the place to start if you want to argue with one.
+Follow these rules to preserve the checked artifact through publication.
+See [AGENTS.md](AGENTS.md) for the reasoning and measurements.
 
 - Runtime dependencies stay at zero.
-- `pnpm pack` decides what is in the package. Do not add file-selection rules of our own.
+- `pnpm pack` selects files. Do not add another file-selection mechanism.
 - `npm publish` uploads the checked tarball verbatim; see `docs/why-pnpm-and-npm.md` before changing the uploader.
 - Validate the tarball that gets published, and nothing else. Checking an extracted copy or
   the repository tree proves things about something no user receives.
@@ -37,13 +35,12 @@ each, which is the place to start if you want to argue with one.
 - This is not a release manager. Versions, changelogs, tags, GitHub Releases and dist-tag
   policy belong to other tools.
 - No rewriting of source content, including doc or comment stripping.
-- Leak checks do not get weaker. Ever.
+- Preserve the checks for credentials, Git internals, `node_modules` and broken entry points.
 - `dist/` is never tracked.
 
 ## Commits
 
-Focused Conventional Commits, with enough body that the next maintainer understands why
-the change exists.
+Use focused Conventional Commits. Explain why the change is needed in the body.
 
 Pick the type by what a user can observe, not by how the edit looks: `feat` and `fix` for
 anything a consumer can see, `test:`, `chore:`, `ci:` or `docs:` for anything they cannot.

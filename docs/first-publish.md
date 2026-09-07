@@ -1,25 +1,17 @@
 # Publishing a package name for the first time
 
-You cannot configure trusted publishing for a package that does not exist yet. It works
-by attaching a publisher to a package record, and a name nobody has published has no
-record to attach to. `npm trust` and staged publishing hit the same wall for the same
-reason: all three are ways of authorising a publisher, and all three need something to
-authorise against. PyPI solves this with pending publishers. npm has nothing equivalent.
+Publish the first version from CI with a short-lived token, then configure trusted
+publishing for later releases. npm attaches trusted publishers to an existing package.
 
-So every package name gets exactly one release that authenticates with a token. Once,
-and never again.
-
-Do that release from CI, not from your laptop. npm only generates provenance on a
-supported cloud runner, so a hand-published first version stays unsigned for as long as
-it exists, and the only way to fix it is to publish another version.
+Use a supported cloud runner so the first version has provenance. Provenance cannot be
+added to an already published version; that requires a new release.
 
 ## Steps
 
 1. Create a granular access token scoped to your package or scope, with read and write
    permission and the shortest expiry npm offers. Tick the option to bypass 2FA for
-   package publishing. Without it the publish gets all the way to the registry, mints its
-   provenance, and is then rejected with `EOTP`, asking for a one-time password that no
-   unattended build can produce.
+   package publishing. Without it, an unattended publish fails with `EOTP` because it
+   cannot supply a one-time password.
 2. Store it as an Actions secret and pass it to the publish step as `NODE_AUTH_TOKEN`.
    Keep `id-token: write` on the job: npm mints provenance from the OIDC identity even
    when the token is what authenticates.
@@ -28,19 +20,17 @@ it exists, and the only way to fix it is to publish another version.
    document, not the package-level one. If you looked the package up while it did not
    exist yet, the CDN may still be serving you your own cached 404.
 4. Configure the trusted publisher on npmjs.com, naming the repository and the workflow
-   filename. npm keys the trust on that filename, so renaming or moving the workflow later
-   breaks publishing, and the error will not mention the rename. This step needs
-   interactive 2FA. Tokens that bypass 2FA have been barred from package management since
-   August 2026.
+   filename, and permit direct `npm publish`. New connections default to staged publishing.
+   Keep the configured filename when editing the workflow, or update the trusted publisher.
+   Managing the connection requires interactive 2FA; a token that bypasses 2FA cannot do it.
 5. Delete the Actions secret and revoke the token. Later releases authenticate with the
    OIDC identity alone.
 
-Delete the secret rather than leaving it in place. While it exists, a misconfigured
-trusted publisher is silently papered over by the token, and you find out only on the day
-you remove it.
+Remove the token so it cannot hide a broken OIDC configuration by authenticating instead.
+See [npm's trusted publishing setup](https://docs.npmjs.com/trusted-publishers/).
 
-## Known expiry
+## Token publishing is being phased out
 
-npm is removing direct publishing from 2FA-bypassing tokens in January 2027. The
-documented replacement, staged publishing, needs an existing package too, so what the
-first publish looks like after that date is genuinely unclear.
+npm [plans to remove direct publishing from 2FA-bypassing tokens around January 2027](https://github.blog/changelog/2026-07-31-restricting-npm-bypass-2fa-granular-access-tokens/).
+Check the current npm setup before using this token-based first-release procedure after
+that change. The announcement does not specify a replacement for this first-release flow.

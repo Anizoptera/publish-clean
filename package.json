@@ -1,7 +1,7 @@
 {
   "name": "@anizoptera/publish-clean",
   "version": "0.8.0",
-  "description": "Pre-publish npm package cleaner that strips common useless noise and crap from package.json; prevents accidental publication of unwanted things and unresolved dependencies. No deps, one JS file.",
+  "description": "Clean the published package.json and check for unwanted files, unresolved workspace dependencies and missing entry points before publishing to npm. No runtime dependencies.",
   "keywords": [
     "bun",
     "cleanup",
