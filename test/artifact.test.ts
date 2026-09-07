@@ -8,6 +8,15 @@ import { describe, expect, it } from "vitest";
 import { assertDeclaredFiles, normalizeDeclaredPath, validatePackedFiles } from "../src/artifact";
 import { PublishCleanError } from "../src/error";
 
+it("keeps side-effect globs as selectors rather than mandatory files", () => {
+  expect(() =>
+    assertDeclaredFiles({ sideEffects: ["./**/*.css", "./{a,b}.js", "./[a-z].js"] }, ["index.js"]),
+  ).not.toThrow();
+  expect(() => assertDeclaredFiles({ sideEffects: ["./missing.js"] }, ["index.js"])).toThrow(
+    /missing/,
+  );
+});
+
 describe.concurrent("critical file patterns", () => {
   // The package's headline promise is that a private key cannot reach the registry, so the
   // ways a key file evades a pattern are the failures that matter most. An SSH key carries no

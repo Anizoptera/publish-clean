@@ -145,7 +145,7 @@ function matchesTarget(file: string, pattern: string): boolean {
 
 interface DeclaredFile {
   name: string;
-  kind: "file" | "main" | "types" | "target";
+  kind: "file" | "main" | "types" | "target" | "glob";
   pattern: boolean;
 }
 
@@ -265,12 +265,15 @@ export function assertDeclaredFiles(pkg: JsonObject, published: readonly string[
   collect(pkg.typesVersions, "types", "every-string", true);
   for (const field of ["module", "bin"]) collect(pkg[field], "file");
   collect(pkg.browser, "file", typeof pkg.browser === "string" ? "every-string" : "relative-only");
-  collect(pkg.sideEffects, "file", "relative-only", true);
+  collect(pkg.sideEffects, "glob", "relative-only");
   collectMap(pkg.exports, false, declared);
   collectMap(pkg.imports, true, declared);
   const files = new Set(published);
   const missing: string[] = [];
   for (const item of declared) {
+    // Bundler globs select any matching modules; they need not select a shipped file.
+    // https://webpack.js.org/guides/tree-shaking/#mark-the-file-as-side-effect-free
+    if (item.kind === "glob" && /[*?[\]{}]/.test(item.name)) continue;
     const name =
       item.kind === "main" && ["", ".", "./"].includes(item.name)
         ? ""
