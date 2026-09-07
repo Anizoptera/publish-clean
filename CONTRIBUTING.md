@@ -15,6 +15,11 @@ Vitest suite against that build, rejects a tracked `dist/`, and runs the
 freshly built CLI on this package itself — asserting the cleaned artifact has no runtime
 dependencies and passing it to `publint` and `@arethetypeswrong/cli`.
 
+Run self-application after the CLI tests: packing this repository runs its `prepare`
+script and rebuilds `dist`. Running both together races the tests against deletion and
+replacement of the executable they are testing. Formatting, types and repository checks
+can run in parallel because they do not write that build.
+
 ## Design rules
 
 These are not preferences. A change that breaks one of them will be rejected however

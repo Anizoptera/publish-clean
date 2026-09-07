@@ -38,6 +38,8 @@ jobs:
           node-version-file: .tool-versions
           package-manager-cache: false
       - run: bun run check
+      # Keep network-dependent advisory lookup out of the ordinary local feedback loop.
+      - run: bun audit
 
   # Windows is the one platform where this tool's spawning differs, because `pnpm` and `npm`
   # there are `.cmd` shims that `execFile` cannot launch at all (see src/command.ts). That
