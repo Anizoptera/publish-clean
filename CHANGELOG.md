@@ -3,6 +3,63 @@
 Notable changes per release, newest first. This file is the source of the GitHub Release
 notes: the section for a version is published verbatim when its tag is pushed.
 
+## [Unreleased]
+
+### Changed
+
+- **Publication arguments are restricted.** Arguments after `--` must be publication
+  options listed by `--help`. Additional package operands, workspace selectors, unknown
+  flags and values starting with `-` are rejected so npm cannot select an unchecked
+  package. Use `./` for a filename beginning with `-`.
+- **Consumer lifecycle helpers survive cleaning.** If `preinstall`, `install`,
+  `postinstall`, `prepare` or `uninstall` exists, the complete scripts block is retained;
+  a hook such as `postinstall: "npm run setup"` no longer loses `setup`. Packages without
+  these hooks still have their development scripts removed.
+- **Registry URLs cannot contain credentials.** Explicit and configured destinations,
+  including scoped registries in the packed manifest, reject usernames and passwords.
+  Put authentication in npm configuration instead; rejected URL credentials are not
+  included in the error message or cause.
+- **Malformed configuration fails locally.** The `publish-clean` block must be an object,
+  boolean settings must be booleans, registry settings must be absolute HTTP(S) URLs, and
+  `files` entries must be non-empty strings. `devFields` also refuses consumer-resolved
+  ecosystem fields such as `svelte`, `react-native`, `style` and `unpkg`.
+- **Preview checks stop before publication preflight.** `--dry-run` and `--guard-only`
+  validate the artifact without checking provenance toolchain requirements or GitHub
+  publisher identity. A preview does not establish that a subsequent upload can succeed.
+
+### Fixed
+
+- **Long archive paths cannot bypass file guards.** Scanning resolves USTAR prefixes and
+  PAX paths and sizes. Ambiguous aliases, duplicate paths and malformed archive metadata
+  are refused; rewriting verifies entry order, metadata and non-manifest bytes as well
+  as the file set.
+- **The selected registry wins for scoped packages.** `--registry` and the configured
+  default pin both general and package-scope destinations, overriding a conflicting
+  scoped npm setting.
+- **Provenance preflight follows effective configuration.** Explicit boolean values and
+  repeated flags follow npm precedence, including `--no-provenance` overriding manifest
+  provenance. When neither selects it, npm resolves the environment and npmrc setting.
+  GitHub OIDC authentication still requires the trusted-publishing runtime.
+- **Pack hooks cannot bypass `private: true`.** The packed manifest is checked before the
+  cleaner removes the field, including when a lifecycle script changed it during packing.
+- **Declared paths follow their consumer semantics.** Checks handle CommonJS extension
+  and index lookup, declaration-file suffixes, export/import condition order, array
+  fallbacks, URL targets and subpath patterns. Literal stars are not treated as globs in
+  ordinary entry paths, and `sideEffects` globs may legitimately match no shipped file.
+- **Local dependencies must travel with the artifact.** Shipped vendor packages remain
+  supported; missing or outside local targets and unresolved monorepo protocols are
+  refused. Ordinary remote URLs containing protocol-like text are no longer misclassified.
+- **Verbose packing and cancellation no longer strand the pipeline.** Lifecycle output
+  streams without the metadata capture limit. Interrupts terminate packing process trees
+  and wait before removing temporary files; npm retains terminal access for OTP prompts.
+- **Diagnostics distinguish retained content from successful publication.** Unknown fields
+  are reported as retained, including during previews. File and field names are quoted so
+  embedded newlines cannot forge additional report entries.
+- **Release repairs require artifact identity.** Tag identity and release notes are checked
+  before upload. Reruns verify registry integrity before attesting or replacing assets,
+  distinguish registry failures from an unpublished version, and refresh an existing
+  GitHub release description from the tagged changelog section.
+
 ## [0.7.3] - 2026-08-11
 
 ### Added

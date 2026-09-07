@@ -67,8 +67,12 @@
 - Use `--provenance` for public npmjs.com releases; trusted publishing requires Node.js 22.14.0+ and npm 11.5.1+.
 - The primary pre-publish self-application check is the freshly built `dist/cli.js` against its cleaned artifact.
 - After npm publication, registry-install smoke checks may update this repo to the published package and regenerate the lockfile, but they do not replace the built-current CLI gate.
+- Record externally important behavior changes in `CHANGELOG.md` under `Unreleased` as they land,
+  including compatibility restrictions and migration instructions. This is the notes source;
+  GitHub release creation and reruns must use the matching version section, never a separate draft.
 - Releasing is four commands and no bot: `bun run changelog v<next>` drafts the section from the
-  commits since the last tag, you EDIT it, you COMMIT it, then `bun run release <next>` and
+  commits since the last tag, you EDIT it (merge the curated `Unreleased` notes into that version
+  and remove the consumed section), you COMMIT it, then `bun run release <next>` and
   `git push --follow-tags`. The commit is not optional bookkeeping: the bump aborts on a
   dirty tree (`ERR_PNPM_UNCLEAN_WORKING_TREE`), so the drafted section must already be committed.
   The `version` script refuses to commit or tag when `CHANGELOG.md` has no section for the new

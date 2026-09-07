@@ -95,8 +95,11 @@ jobs:
       # Notes were extracted and checked before npm publication, from the tagged changelog.
       - name: Publish the GitHub Release and attach the tarball
         run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 ||
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file release-artifacts/notes.md
+          else
             gh release create "$GITHUB_REF_NAME" --verify-tag --notes-file release-artifacts/notes.md
+          fi
           gh release upload "$GITHUB_REF_NAME" release-artifacts/*.tgz --clobber
         env:
           GH_TOKEN: ${{ github.token }}
