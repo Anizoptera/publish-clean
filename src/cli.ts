@@ -42,7 +42,6 @@ import {
   MIN_TRUSTED_NPM_VERSION,
   assertRepositoryForTrustedPublish,
   isAtLeast,
-  provenanceIntent,
   wantsTrustedPublish,
 } from "./trusted-publish";
 import type { TrustedPublishEnv } from "./trusted-publish";
@@ -102,13 +101,10 @@ function publishEnv(): TrustedPublishEnv {
 }
 
 async function assertTrustedPublishingRuntime(
-  pkg: JsonObject,
-  publishArgs: readonly string[],
   cwd: string,
   npmVersion: string,
   signal: AbortSignal,
 ): Promise<void> {
-  if (!wantsTrustedPublish(pkg, publishArgs, publishEnv())) return;
   const npm = toolVersion("npm", npmVersion);
   if (!isAtLeast(npm, MIN_TRUSTED_NPM_VERSION))
     throw new PublishCleanError(
@@ -289,21 +285,21 @@ async function packAndClean(
     }
     if (opts.guardOnly) return;
 
-    const preflightArgs = [...opts.publishArgs];
-    if (
-      provenanceIntent(shippedPkg, preflightArgs) === undefined &&
-      !wantsTrustedPublish(shippedPkg, preflightArgs, publishEnv())
-    ) {
+    const env = publishEnv();
+    let trusted = wantsTrustedPublish(shippedPkg, opts.publishArgs, env);
+    if (trusted === undefined) {
       // npm owns npmrc/environment precedence; query only the non-secret setting needed here.
       const value = (
         await run("npm", ["config", "get", "provenance"], packageDir, { signal, timeout: 10_000 })
       ).trim();
       if (value !== "true" && value !== "false")
         throw new PublishCleanError("npm config get provenance must return true or false.");
-      preflightArgs.push(`--provenance=${value}`);
+      trusted = value === "true";
     }
-    await assertTrustedPublishingRuntime(shippedPkg, preflightArgs, packageDir, npmVersion, signal);
-    assertRepositoryForTrustedPublish(shippedPkg, preflightArgs, publishEnv());
+    if (trusted) {
+      await assertTrustedPublishingRuntime(packageDir, npmVersion, signal);
+      assertRepositoryForTrustedPublish(shippedPkg, env);
+    }
     const scope = packageScope(shippedPkg);
     const publishArgs = ["publish", finalTarball, ...opts.publishArgs];
     if (registry) {

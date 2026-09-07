@@ -44,19 +44,11 @@ export function wantsTrustedPublish(
   pkg: JsonObject,
   publishArgs: readonly string[],
   env: TrustedPublishEnv,
-): boolean {
-  // OIDC authentication requires the trusted runtime even when attestation is disabled.
-  return (
-    provenanceIntent(pkg, publishArgs) === true ||
-    (env.GITHUB_ACTIONS === "true" && typeof env.ACTIONS_ID_TOKEN_REQUEST_URL === "string")
-  );
-}
-
-/** CLI overrides the manifest; undefined delegates to npm's own configuration resolver. */
-export function provenanceIntent(
-  pkg: JsonObject,
-  publishArgs: readonly string[],
 ): boolean | undefined {
+  // OIDC authentication requires the trusted runtime even when attestation is disabled.
+  if (env.GITHUB_ACTIONS === "true" && typeof env.ACTIONS_ID_TOKEN_REQUEST_URL === "string")
+    return true;
+  // CLI overrides the manifest; undefined delegates to npm's configuration resolver.
   for (let index = publishArgs.length - 1; index >= 0; index--) {
     if (publishArgs[index] === "--provenance=true" || publishArgs[index] === "--provenance")
       return true;
@@ -89,12 +81,7 @@ export function githubRepositorySlug(url: string): null | string {
   }
 }
 
-export function assertRepositoryForTrustedPublish(
-  pkg: JsonObject,
-  publishArgs: readonly string[],
-  env: TrustedPublishEnv,
-): void {
-  if (!wantsTrustedPublish(pkg, publishArgs, env)) return;
+export function assertRepositoryForTrustedPublish(pkg: JsonObject, env: TrustedPublishEnv): void {
   if (env.GITHUB_ACTIONS !== "true" || typeof env.GITHUB_REPOSITORY !== "string") return;
   const repoUrl = repositoryUrl(pkg);
   if (!repoUrl)

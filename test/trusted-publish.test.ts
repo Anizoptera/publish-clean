@@ -79,29 +79,27 @@ describe.concurrent("trusted publishing intent", () => {
 
   it("is inferred from a workflow that can mint an OIDC token", () => {
     expect(wantsTrustedPublish({}, [], CI)).toBe(true);
+    expect(wantsTrustedPublish({}, ["--provenance=false"], CI)).toBe(true);
   });
 
   // Actions without that permission cannot produce provenance, so inferring the intent there
   // would fail the publish on a runtime requirement the author never asked for.
   it("is not assumed from an ordinary publish, in Actions or out of it", () => {
     expect(wantsTrustedPublish({ publishConfig: { provenance: false } }, [], LOCAL)).toBe(false);
-    expect(wantsTrustedPublish({}, [], { GITHUB_ACTIONS: "true" })).toBe(false);
+    expect(wantsTrustedPublish({}, [], { GITHUB_ACTIONS: "true" })).toBeUndefined();
   });
 
   it("refuses to publish under an identity the repository does not claim", () => {
     expect(() =>
       assertRepositoryForTrustedPublish(
         { repository: { type: "git", url: "git+https://github.com/Other/repo.git" } },
-        ["--provenance"],
         CI,
       ),
     ).toThrow("repository.url must match");
   });
 
   it("refuses a trusted publish that declares no repository at all", () => {
-    expect(() => assertRepositoryForTrustedPublish({}, ["--provenance"], CI)).toThrow(
-      "repository.url to match",
-    );
+    expect(() => assertRepositoryForTrustedPublish({}, CI)).toThrow("repository.url to match");
   });
 
   it("accepts the repository it is actually running in", () => {
@@ -110,7 +108,6 @@ describe.concurrent("trusted publishing intent", () => {
         {
           repository: { type: "git", url: "git+https://github.com/Anizoptera/publish-clean.git" },
         },
-        ["--provenance"],
         CI,
       ),
     ).not.toThrow();
@@ -122,7 +119,6 @@ describe.concurrent("trusted publishing intent", () => {
     expect(() =>
       assertRepositoryForTrustedPublish(
         { repository: { type: "git", url: "git+https://github.com/Other/repo.git" } },
-        ["--provenance"],
         LOCAL,
       ),
     ).not.toThrow();
