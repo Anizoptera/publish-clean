@@ -3,7 +3,7 @@
 Notable changes per release, newest first. This file is the source of the GitHub Release
 notes: the section for a version is published verbatim when its tag is pushed.
 
-## [Unreleased]
+## [0.8.0] - 2026-09-08
 
 ### Changed
 
