@@ -618,3 +618,34 @@ exit 1
     }
   });
 });
+
+it("scans and preserves the effective names pnpm emits for long USTAR and PAX paths", async () => {
+  const prefix = `dist/${("d".repeat(70) + "/").repeat(4)}`;
+  const names = [`dist/${"d".repeat(70)}/safe.js`, `${prefix}safe.js`];
+  const fx = await fixture(
+    { name: "long-paths", version: "1.0.0", files: ["dist"] },
+    Object.fromEntries(names.map((name) => [name, "fixture"])),
+  );
+  try {
+    const out = path.join(fx.root, "out");
+    const good = await runCli(
+      ["--dry-run", "--no-git-checks", "--tarball-out", out, fx.dir],
+      process.cwd(),
+    );
+    expect(good.status, good.stderr).toBe(0);
+    const tarball = await soleTarball(out);
+    expect(listTarball(tarball).sort()).toEqual([...names, "package.json"].sort());
+    for (const name of names) {
+      expect(good.stdout).toContain(name);
+      expect(readTarballFile(tarball, name)).toBe("fixture");
+    }
+    const secret = `${prefix}secret.pem`;
+    await writeFile(path.join(fx.dir, secret), "fixture");
+    const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(secret);
+    expect(result.stderr).toContain("Critical files");
+  } finally {
+    await cleanup(fx.root);
+  }
+});

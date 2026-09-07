@@ -1,25 +1,4 @@
-/**
- * Reads and rewrites a packed npm tarball. The only place this tool decodes or authors
- * archive bytes, and the only reader every guard consults.
- *
- * The pipeline packs once, with pnpm, because that packer decides the file set. Cleaning the
- * manifest by unpacking and packing again hands that decision to a second packer, which
- * re-derives it from the very field being cleaned and silently disagrees; rewriting the one
- * member that changed keeps the first packer's selection, and its normalisation (uid/gid 0,
- * a fixed mtime, mode 644) that a naive `tar` invocation leaks the build machine's identity
- * into.
- *
- * Every entry other than the manifest is copied as opaque bytes and never decoded, so entry
- * shapes this code does not model — pax extended headers, ustar prefix splitting — survive
- * untouched. Only walking is universal: an entry's length is always its header block plus its
- * size rounded up to a block, whatever the type.
- *
- * Reading here rather than through the `tar` binary is what makes the whole tool depend on
- * nothing but Node: one archive is decompressed once and answers every question about it
- * (file list, manifest bytes, rewrite), instead of one spawn and one decompression per
- * question. It is also the stricter reader — `tar tzf` prints one name per line, so a path
- * containing a newline arrives as two entries there and as itself here.
- */
+/** Read effective archive paths and rewrite only the manifest, preserving every other raw entry. */
 import { gunzipSync, gzipSync } from "node:zlib";
 
 import { PublishCleanError } from "./error";
@@ -30,33 +9,13 @@ const SIZE_OFFSET = 124;
 const CHECKSUM_OFFSET = 148;
 const TYPE_OFFSET = 156;
 
-/**
- * The manifest is always at this exact path, and at 20 characters it can never be the entry
- * that needs a pax header or a prefix split — so the one entry this code must identify is
- * also the one whose name is guaranteed to be readable straight from the header block.
- */
 const MANIFEST_PATH = "package/package.json";
-
-/** Extended (`x`) and global (`g`) pax headers carry key/value overrides for other entries. */
 const PAX_TYPES = new Set(["x", "g"]);
-
-/** Tar's flag for a directory entry. Directories are not files a consumer imports. */
 const DIRECTORY_TYPE = "5";
-
-/**
- * GNU's long-name entry, whose payload is the real path of the entry that follows it while
- * that entry's own header reads `././@LongLink`.
- *
- * Refused for the same reason a pax `path=` override is: it renames the following entry, so it
- * can point at `package/package.json` and the archive then extracts a manifest no guard here
- * ever saw. pnpm emits pax and never this, so refusing costs nothing and closes the second way
- * to rename an entry onto the one path this tool authors. `K` (long *link* name) is left alone:
- * it renames a symlink target, which cannot collide with an entry path.
- */
-const GNU_LONG_NAME = "L";
+const UTF8 = new TextDecoder("utf-8", { fatal: true });
 
 export interface TarEntry {
-  /** Archive path as written, e.g. `package/dist/cli.js`. */
+  /** Effective archive path after USTAR/PAX interpretation, e.g. `package/dist/cli.js`. */
   readonly name: string;
   /** Tar type flag: `0` or empty for a regular file, `5` directory, `2` symlink, `x`/`g` pax. */
   readonly type: string;
@@ -75,21 +34,44 @@ export interface TarArchive {
 }
 
 function field(block: Buffer, offset: number, length: number): string {
-  return block.toString("utf8", offset, offset + length).replace(/\0.*/s, "");
+  const bytes = block.subarray(offset, offset + length);
+  const nul = bytes.indexOf(0);
+  return UTF8.decode(nul < 0 ? bytes : bytes.subarray(0, nul));
 }
 
 function entrySize(block: Buffer): number {
-  // A high bit in the first byte marks base-256 encoding, used only for sizes octal cannot
-  // express (8GB+). Nothing publishable reaches that, and misreading it would desynchronise
-  // the walk and corrupt every following entry, so refuse rather than guess.
-  if ((block[SIZE_OFFSET] ?? 0) & 0x80)
-    throw new PublishCleanError(
-      "Tarball uses base-256 entry sizes, which this tool cannot rewrite.",
-    );
-  const size = Number.parseInt(field(block, SIZE_OFFSET, 12).trim(), 8);
-  if (!Number.isFinite(size) || size < 0)
+  const value = field(block, SIZE_OFFSET, 12).trim();
+  if (!/^[0-7]+$/.test(value))
     throw new PublishCleanError("Tarball entry has an unreadable size field.");
-  return size;
+  return Number.parseInt(value, 8);
+}
+
+/** PAX lengths count bytes, including their own digits; values may contain newlines. */
+function paxFields(payload: Buffer): Map<string, string> {
+  const fields = new Map<string, string>();
+  for (let offset = 0; offset < payload.length;) {
+    const space = payload.indexOf(0x20, offset);
+    const digits = payload.toString("ascii", offset, space < 0 ? offset : space);
+    const length = Number(digits);
+    const end = offset + length;
+    const equals = payload.indexOf(0x3d, space + 1);
+    if (
+      !/^[1-9][0-9]*$/.test(digits) ||
+      !Number.isSafeInteger(length) ||
+      end > payload.length ||
+      equals <= space + 1 ||
+      equals >= end - 1 ||
+      payload[end - 1] !== 0x0a
+    )
+      throw new PublishCleanError("Tarball has a malformed PAX record.");
+    const key = UTF8.decode(payload.subarray(space + 1, equals));
+    const value = UTF8.decode(payload.subarray(equals + 1, end - 1));
+    if (key.includes("sparse") || key === "hdrcharset")
+      throw new PublishCleanError(`Tarball uses unsupported PAX ${key}.`);
+    fields.set(key, value);
+    offset = end;
+  }
+  return fields;
 }
 
 /**
@@ -120,23 +102,6 @@ function assertChecksum(header: Buffer, name: string): void {
     throw new PublishCleanError(`Tarball entry ${name} has a corrupt header checksum.`);
 }
 
-/**
- * Rejects a pax header that renames another entry onto the manifest path.
- *
- * Without this the archive could extract a `package.json` that no check ever saw: the guards
- * validate the entry rewritten here, while an extractor honours the pax override and writes
- * a different one over it. The header's own name field is `PaxHeader`, so nothing about the
- * substitution is visible from the walk alone.
- */
-function assertNoManifestOverride(payload: Buffer): void {
-  // pax records are `<len> <key>=<value>\n`, where len counts the whole record.
-  for (const record of payload.toString("utf8").split("\n"))
-    if (/^\d+ path=/.test(record) && record.slice(record.indexOf("=") + 1) === MANIFEST_PATH)
-      throw new PublishCleanError(
-        `Tarball contains a pax header renaming an entry to ${MANIFEST_PATH}.`,
-      );
-}
-
 /** Rebuilds a header for a changed payload size, keeping every other field of the original. */
 function reheader(original: Buffer, size: number): Buffer {
   const header = Buffer.from(original);
@@ -162,48 +127,105 @@ function reheader(original: Buffer, size: number): Buffer {
 export function readArchive(gzipped: Buffer): TarArchive {
   const tar = gunzipSync(gzipped);
   const entries: TarEntry[] = [];
+  const names = new Set<string>();
+  let local: Map<string, string> | null = null;
   let tail: Buffer | null = null;
 
   for (let offset = 0; offset < tar.length;) {
     const header = tar.subarray(offset, offset + BLOCK);
     if (header.length < BLOCK)
       throw new PublishCleanError("Tarball ends mid-header; the archive is truncated.");
-    const name = field(header, 0, NAME_LEN);
-    if (name === "") {
-      // Zero block: the end-of-archive marker and its padding, kept byte for byte.
+    if (header.every((byte) => byte === 0)) {
       tail = tar.subarray(offset);
+      if (tail.length < BLOCK * 2 || tail.length % BLOCK || tail.some((byte) => byte !== 0))
+        throw new PublishCleanError("Tarball has an invalid end-of-archive marker.");
       break;
     }
-
-    assertChecksum(header, name);
-    const size = entrySize(header);
-    const end = offset + BLOCK + BLOCK * Math.ceil(size / BLOCK);
-    if (end > tar.length)
-      throw new PublishCleanError(`Tarball entry ${name} runs past the end of the archive.`);
     const type = field(header, TYPE_OFFSET, 1);
-    const body = tar.subarray(offset + BLOCK, offset + BLOCK + size);
-
-    if (type === GNU_LONG_NAME)
-      throw new PublishCleanError("Tarball uses GNU long-name entries, which this tool refuses.");
-    if (PAX_TYPES.has(type)) assertNoManifestOverride(body);
-    if (name === MANIFEST_PATH) {
-      if (type !== "0" && type !== "")
-        throw new PublishCleanError(`${MANIFEST_PATH} is not a regular file in the tarball.`);
-      if (entries.some((entry) => entry.name === MANIFEST_PATH))
-        throw new PublishCleanError(`Tarball contains ${MANIFEST_PATH} more than once.`);
+    const prefix = field(header, 257, 6) === "ustar" ? field(header, 345, 155) : "";
+    const rawName = [prefix, field(header, 0, NAME_LEN)].filter(Boolean).join("/");
+    assertChecksum(header, rawName);
+    const extended = PAX_TYPES.has(type);
+    const name = extended ? rawName : local?.get("path") || rawName;
+    let size = entrySize(header);
+    const sizeOverride = !extended && local?.get("size");
+    if (sizeOverride) {
+      if (!/^[0-9]+$/.test(sizeOverride) || !Number.isSafeInteger(Number(sizeOverride)))
+        throw new PublishCleanError("Tarball has an invalid PAX size.");
+      size = Number(sizeOverride);
     }
-
+    const end = offset + BLOCK + BLOCK * Math.ceil(size / BLOCK);
+    if (!Number.isSafeInteger(end) || end > tar.length)
+      throw new PublishCleanError(
+        `Tarball entry ${JSON.stringify(name)} runs past the end of the archive.`,
+      );
+    const body = tar.subarray(offset + BLOCK, offset + BLOCK + size);
+    if (type === "L")
+      throw new PublishCleanError("Tarball uses GNU long-name entries, which this tool refuses.");
+    if (extended) {
+      const fields = paxFields(body);
+      if (fields.get("path") === MANIFEST_PATH)
+        throw new PublishCleanError(
+          `Tarball contains a pax header renaming an entry to ${MANIFEST_PATH}.`,
+        );
+      if (type === "g") {
+        // Global path/size overrides make extraction and manifest rewriting ambiguous.
+        if (["path", "size", "linkpath"].some((key) => fields.has(key)))
+          throw new PublishCleanError("Tarball has a global PAX path, linkpath or size override.");
+      } else {
+        if (local) throw new PublishCleanError("Tarball has consecutive PAX extended headers.");
+        local = fields;
+      }
+    } else {
+      if (name === MANIFEST_PATH) {
+        if (type !== "0" && type !== "")
+          throw new PublishCleanError(`${MANIFEST_PATH} is not a regular file in the tarball.`);
+        if (sizeOverride)
+          throw new PublishCleanError(
+            "Tarball manifest has a PAX size override that cannot survive rewriting.",
+          );
+      }
+      // Aliased paths can overwrite another entry or escape the package during extraction.
+      const parts = name.replace(/\/$/, "").split("/");
+      if (
+        parts[0] !== "package" ||
+        parts.some((part) => !part || part === "." || part === "..") ||
+        name.includes("\\") ||
+        name.includes("\0")
+      )
+        throw new PublishCleanError(`Tarball has an unsafe entry path: ${JSON.stringify(name)}.`);
+      if (names.has(name))
+        throw new PublishCleanError(`Tarball contains ${JSON.stringify(name)} more than once.`);
+      names.add(name);
+      local = null;
+    }
     entries.push({ name, type, header, body, raw: tar.subarray(offset, end) });
     offset = end;
   }
-
-  // An archive ending on an entry boundary with no zero blocks is truncated too, and this is
-  // the truncation the walk cannot feel: every entry read cleanly. Refusing it here is also
-  // what keeps the rewrite honest, since the output is assembled from these entries plus this
-  // tail — with none, it would emit an archive with no end-of-archive marker at all.
   if (tail === null)
     throw new PublishCleanError("Tarball has no end-of-archive marker; the archive is truncated.");
+  if (local) throw new PublishCleanError("Tarball ends with an unused PAX extended header.");
   return { entries, tail };
+}
+
+/** Check the final readback against the packed bytes, including entry order and metadata. */
+export function assertPreservedArchive(before: TarArchive, after: TarArchive): void {
+  if (before.entries.length !== after.entries.length || !before.tail.equals(after.tail))
+    throw new PublishCleanError("Rewriting the manifest changed the archive structure.");
+  for (const [index, original] of before.entries.entries()) {
+    const result = after.entries[index];
+    if (
+      !result ||
+      original.name !== result.name ||
+      original.type !== result.type ||
+      (original.name === MANIFEST_PATH
+        ? !reheader(original.header, result.body.length).equals(result.header)
+        : !original.raw.equals(result.raw))
+    )
+      throw new PublishCleanError(
+        `Rewriting the manifest changed archive entry ${JSON.stringify(original.name)}.`,
+      );
+  }
 }
 
 /**
@@ -244,21 +266,6 @@ export function replaceManifest(archive: TarArchive, manifest: string): Buffer {
       : entry.raw,
   );
   parts.push(archive.tail);
-  // Every consumer of this package downloads these bytes forever, and this rewrite decides
-  // their compression — not the packer's. `level: 9` is gzip's maximum and the strongest
-  // setting the format allows without leaving zlib: measured on this package, it produces
-  // 26,440 bytes against 26,699 at the default level 6 and 26,500 as pnpm packed it, for
-  // about 1ms. `memLevel: 9` was measured too and rejected: no gain here and 384 bytes
-  // WORSE on a 2.5MB corpus. Node writes no mtime into the gzip header, so the output stays
-  // byte-identical across runs, which is what lets a re-run repair a release truthfully.
-  //
-  // That reproducibility is per-RUNTIME: the encoder belongs to whatever executes this file.
-  // Measured 2026-08-11 on three corpora — Node 24.15.0 and 26.7.0 agree byte for byte despite
-  // shipping different zlib builds (1.3.1 vs Chromium's 1.3.2.1-motley), because those forks
-  // optimise speed rather than match selection. Bun 1.3.14 carries libdeflate and encodes the
-  // same input differently: 0.17-0.19% SMALLER on tar-shaped data (this package: 27,430 against
-  // 27,476 bytes) and 0.06% larger on prose. Every output is valid gzip whose plaintext is
-  // identical, so the runtime is free to differ per publisher — but a single release must not
-  // change runtime midway, because a repair re-run has to reproduce the published bytes exactly.
+  // Compression belongs to the executing runtime; release repair must compare the actual digest.
   return gzipSync(Buffer.concat(parts), { level: 9 });
 }

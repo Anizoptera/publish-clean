@@ -8,7 +8,7 @@
 import { gunzipSync, gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 
-import { packageFiles, readArchive, replaceManifest } from "../src/tarball";
+import { assertPreservedArchive, packageFiles, readArchive, replaceManifest } from "../src/tarball";
 
 const BLOCK = 512;
 
@@ -16,19 +16,22 @@ interface Entry {
   name: string;
   body: string;
   type?: string;
+  prefix?: string;
+  size?: number;
 }
 
 /** Builds a minimal ustar archive, computing the header checksum the way readers verify it. */
 function archive(entries: readonly Entry[]): Buffer {
   const blocks: Buffer[] = [];
-  for (const { name, body, type = "0" } of entries) {
+  for (const { name, body, type = "0", prefix = "", size = Buffer.byteLength(body) } of entries) {
     const header = Buffer.alloc(BLOCK);
     header.write(name, 0, 100, "utf8");
     header.write("0000644\0", 100, 8, "ascii");
-    header.write(Buffer.byteLength(body).toString(8).padStart(11, "0") + "\0", 124, 12, "ascii");
+    header.write(size.toString(8).padStart(11, "0") + "\0", 124, 12, "ascii");
     header.write(" ".repeat(8), 148, 8, "ascii");
     header.write(type, 156, 1, "ascii");
     header.write("ustar\0" + "00", 257, 8, "ascii");
+    header.write(prefix, 345, 155, "utf8");
     let sum = 0;
     for (const byte of header) sum += byte;
     header.write(sum.toString(8).padStart(6, "0") + "\0 ", 148, 8, "ascii");
@@ -55,6 +58,14 @@ function entries(tgz: Buffer): Record<string, string> {
     offset += BLOCK + BLOCK * Math.ceil(size / BLOCK);
   }
   return found;
+}
+
+function pax(key: string, value: string): string {
+  const record = ` ${key}=${value}\n`;
+  let length = Buffer.byteLength(record) + 1;
+  while (String(length).length + Buffer.byteLength(record) !== length)
+    length = String(length).length + Buffer.byteLength(record);
+  return `${length}${record}`;
 }
 
 const MANIFEST = "package/package.json";
@@ -87,12 +98,9 @@ describe("manifest rewriting", () => {
     expect(result["package/lib/a.js"]).toBe("a\n");
   });
 
-  it("carries through entry shapes it does not model", () => {
-    // A pax header and its renamed entry: the real path lives in the pax payload, so the
-    // walk must copy both without interpreting either. pnpm emits exactly this for any path
-    // longer than 255 characters.
+  it("preserves PAX paths and payloads while rewriting the manifest", () => {
     const source = archive([
-      { name: "PaxHeader", body: `285 path=package/lib/${"d".repeat(260)}.js\n`, type: "x" },
+      { name: "PaxHeader", body: pax("path", `package/lib/${"d".repeat(260)}.js`), type: "x" },
       { name: "PaxHeader", body: "deep\n" },
       { name: MANIFEST, body: "{}" },
     ]);
@@ -105,7 +113,7 @@ describe("manifest rewriting", () => {
     // Otherwise the archive extracts a manifest no guard ever saw: the checks read the entry
     // rewritten here while an extractor honours the override and writes a different one.
     const source = archive([
-      { name: "PaxHeader", body: `29 path=${MANIFEST}\n`, type: "x" },
+      { name: "PaxHeader", body: pax("path", MANIFEST), type: "x" },
       { name: "package/decoy", body: `{"name":"evil"}` },
       { name: MANIFEST, body: "{}" },
     ]);
@@ -196,9 +204,105 @@ describe("archive reading", () => {
   it("lists only files: no directories, no pax headers", () => {
     const source = archive([
       { name: "package/dir/", body: "", type: "5" },
-      { name: "PaxHeader/package/a.js", body: "30 mtime=1700000000.0\n", type: "x" },
+      { name: "PaxHeader/package/a.js", body: pax("mtime", "1700000000.0"), type: "x" },
       { name: "package/a.js", body: "a" },
     ]);
     expect(packageFiles(readArchive(source))).toEqual(["a.js"]);
+  });
+});
+
+describe("effective archive entries", () => {
+  it("reads USTAR prefixes and byte-counted PAX paths containing Unicode and newlines", () => {
+    const deep = `package/${"deep/".repeat(60)}é\nsecret.pem`;
+    const input = archive([
+      { name: "secret.key", prefix: "package/dist", body: "key" },
+      { name: "PaxHeader", type: "x", body: pax("path", deep) + pax("mtime", "0") },
+      { name: "PaxHeader", body: "secret" },
+    ]);
+    expect(packageFiles(readArchive(input))).toEqual([deep.slice(8), "dist/secret.key"]);
+  });
+
+  it("uses PAX size when walking an entry and resets it before the next entry", () => {
+    const input = archive([
+      { name: "PaxHeader", type: "x", body: pax("size", "600") },
+      { name: "package/large", body: "a".repeat(600), size: 0 },
+      { name: MANIFEST, body: "{}" },
+    ]);
+    const parsed = readArchive(input);
+    expect(parsed.entries[1]?.body.length).toBe(600);
+    const result = readArchive(replaceManifest(parsed, '{"name":"x"}'));
+    expect(() => assertPreservedArchive(parsed, result)).not.toThrow();
+    expect(packageFiles(result)).toEqual(["large", "package.json"]);
+  });
+
+  it.each(["0 path=x\n", "8 path=x\n", "999 path=x\n", "x path=x\n", "12 path=x\nJUNK"])(
+    "rejects malformed PAX framing %j",
+    (body) => {
+      expect(() =>
+        readArchive(
+          archive([
+            { name: "PaxHeader", type: "x", body },
+            { name: MANIFEST, body: "{}" },
+          ]),
+        ),
+      ).toThrow(/malformed PAX/);
+    },
+  );
+
+  it("rejects a stale PAX manifest size and forbidden global path overrides", () => {
+    for (const entry of [
+      { name: "PaxHeader", type: "x", body: pax("size", "2") },
+      { name: "PaxHeader", type: "g", body: pax("path", "package/hidden.pem") },
+    ])
+      expect(() => readArchive(archive([entry, { name: MANIFEST, body: "{}" }]))).toThrow(/PAX/);
+  });
+
+  it.each([
+    "package/../secret",
+    "package/./package.json",
+    "package//package.json",
+    "/package/a",
+    "package/a\\b",
+  ])("rejects extraction aliases %j", (name) => {
+    expect(() => readArchive(archive([{ name, body: "x" }]))).toThrow(/unsafe entry path/);
+  });
+
+  it("rejects duplicate effective paths even when their raw names differ", () => {
+    expect(() =>
+      readArchive(
+        archive([
+          { name: "package/a", body: "a" },
+          { name: "PaxHeader", type: "x", body: pax("path", "package/a") },
+          { name: "placeholder", body: "b" },
+        ]),
+      ),
+    ).toThrow(/more than once/);
+  });
+
+  it("rejects hidden bytes after the end marker and a single zero block", () => {
+    const bytes = gunzipSync(archive([{ name: MANIFEST, body: "{}" }]));
+    expect(() => readArchive(gzipSync(bytes.subarray(0, bytes.length - BLOCK)))).toThrow(
+      /end-of-archive/,
+    );
+    bytes[bytes.length - 1] = 1;
+    expect(() => readArchive(gzipSync(bytes))).toThrow(/end-of-archive/);
+  });
+
+  it("detects payload changes, entry reordering, duplication and header changes", () => {
+    const base = [
+      { name: MANIFEST, body: "{}" },
+      { name: "package/a", body: "a" },
+      { name: "package/b", body: "b" },
+    ] as const;
+    const original = readArchive(archive(base));
+    for (const changed of [
+      [base[0], { name: "package/a", body: "changed" }, base[2]],
+      [base[0], base[2], base[1]],
+      [base[0], base[1]],
+      [base[0], { name: "a", prefix: "package", body: "a" }, base[2]],
+    ])
+      expect(() => assertPreservedArchive(original, readArchive(archive(changed)))).toThrow(
+        /changed/,
+      );
   });
 });

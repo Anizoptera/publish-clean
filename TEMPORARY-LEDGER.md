@@ -1,0 +1,67 @@
+Repair the audited publication pipeline without changing which files pnpm selects or publishing anything remotely.
+
+## Authority and scope
+
+Art: “Go on, do all the improvements”; “Consider this temporary ledger file as your plan slash SOP.” This file owns the current tasks and unresolved rulings. The baseline is `792beb0cce1d8a8a57a3ac9f04abfb8a873299df`; the initial working tree was clean. Audit findings are hypotheses until their owning source and regression are checked during implementation.
+
+Art's existing project rulings: runtime dependency-free; pnpm packs once; only manifest content changes; final on-disk bytes drive guards; npm uploads that tarball; unknown manifest fields survive; critical artifact checks cannot be waived; release verification has no publication credentials. No release, remote upload, or global guidance edit is authorized.
+
+Art's latest verification ruling supersedes the local full-check-before-each-commit cadence: use targeted checks on complete changes, commit each verified part, run the complete routine lane at final integration. Tests must distinguish material failures, use readiness signals, and finish within the requested feedback budgets. Full routine lane must remain below five minutes; target thirty seconds. Keep one implementation phase active. Retain every unfinished task; compress finished phases into evidence summaries.
+
+## Needs ruling
+
+- [ ] R1 — Restrict forwarded npm options to documented publication options, rejecting artifact/workspace selectors. Requested because `--workspaces .` demonstrably uploads an unchecked workspace. Existing arbitrary forwarding is a public promise; proposed restriction is pending Art's answer.
+- [ ] R2 — Preserve the complete scripts block when consumer lifecycle hooks exist; otherwise strip development scripts. Fixes helper-script deletion while retaining more manifest content. Pending Art's answer.
+- [ ] R3 — Decide whether to add a public `--json` artifact report. Recommended scope is defect repairs and existing output polish; no new CLI contract without Art's ruling.
+
+## Derived work, ordered by harm and dependency
+
+- [x] Archive interpretation and preservation — effective USTAR/PAX paths and byte-counted records; size overrides; malformed tails and alias/duplicate rejection; final-readback raw entry/order/metadata guard. Verified: typecheck and build; `bunx vitest run test/tarball.test.ts test/cli.test.ts` passed 50 tests in 2.11s, including real pnpm safe/secret long paths and independent tar readback. Synthetic framing test corrected from a valid nine-byte record to a malformed eight-byte one; this was a test expectation error, not a parser fix.
+- [ ] Publication identity and destination — ACTIVE. Basis: npm must upload the checked artifact to the requested registry.
+  - [ ] Implement R1 after ruling; test supported values and hostile selectors through actual npm and a loopback registry.
+  - [ ] Make explicit registry selection defeat scoped registry configuration; reconcile CLI and manifest precedence.
+  - [ ] Refuse a packed private manifest before stripping, including lifecycle mutation.
+  - [ ] Bind tool/version probes to the package cwd, bound them, and reuse their results.
+  - [ ] Parse effective provenance intent and distinguish artifact preview from publication preflight.
+  - [ ] Verify the completed publication surface, update its consumer documentation and commit.
+- [ ] Manifest and consumer behavior — basis: cleaning must preserve useful consumer behavior and reject broken package references.
+  - [ ] Implement R2 after ruling; exercise a real lifecycle calling a retained helper.
+  - [ ] Reject malformed configuration values instead of silently ignoring them.
+  - [ ] Protect consumer-resolved fields and make explicit script removal consistent with lifecycle policy.
+  - [ ] Reject nonportable dependency references without substring false positives; determine in-artifact local-reference semantics from actual consumers.
+  - [ ] Validate main/bin/browser/types versus exports/imports with their distinct semantics; cover extensionless and directory entry points, invalid targets and missing wildcard targets.
+  - [ ] Drive all manifest guards from the final readback and preserve condition ordering.
+  - [ ] Verify the completed manifest surface, update inline rationale and consumer docs, and commit.
+- [ ] Process lifetime and diagnostics — basis: ordinary verbose builds and cancellation must not break or leak temporary artifacts.
+  - [ ] Stream pack output without the synchronous capture buffer limit; retain useful failure context without unbounded accumulation.
+  - [ ] Own cancellation, child settlement and temporary-directory cleanup; test readiness using lifecycle markers.
+  - [ ] Preserve Windows argument safety and its actual platform CI lane.
+  - [ ] Report expected errors clearly and unexpected failures with useful causes/stacks; escape untrusted display strings and correct premature “published” wording.
+  - [ ] Verify the completed process surface and commit.
+- [ ] Release correctness — basis: no irreversible publication before all preconditions, and repair must preserve published identity.
+  - [ ] Require a tag reference, matching package version and nonempty release notes before publication.
+  - [ ] On rerun, compare candidate integrity with registry integrity before attestation or release-asset replacement; distinguish missing versions from registry failures.
+  - [ ] Preserve the unprivileged verification job and trusted-publishing workflow filename.
+  - [ ] Test release decision boundaries locally without credentials or remote mutations; verify workflow wiring and commit.
+- [ ] Dependency and routine-check health — basis: fix audited development dependency advisories without inflating runtime dependencies.
+  - [ ] Refresh compatible vulnerable transitive dependencies; inspect lockfile and manifest deltas and run the actual audit scanner.
+  - [ ] Measure ordinary targeted and full lane durations; parallelize independent checks without repeating builds or reducing coverage.
+  - [ ] Evaluate whether a security check adds timely evidence without making ordinary local checks network-dependent.
+  - [ ] Verify dependency/check changes and commit.
+- [ ] Documentation and final integration — basis: published promises must match observable behavior.
+  - [ ] Correct pnpm/npm provenance exclusivity claims using current primary sources; retain npm uploader unless Art changes that ruling.
+  - [ ] Correct lifecycle source-mutation, publishConfig, external-publisher guard, bundled-dependency and runtime-version claims.
+  - [ ] Keep reasons beside the owning code; remove duplicated historical detail from guidance without losing operative requirements.
+  - [ ] Resolve R3; if approved, implement and test the report from the same validated artifact record used for retention/publication.
+  - [ ] Audit every final changed line against the baseline and pair every promise with an appropriate observable check.
+  - [ ] Run the full routine lane, record its scope and duration, inspect final git diff/status and commit remaining verified work.
+
+## Evidence and process corrections
+
+Initial audit: `bun run check` passed with six test files and 121 tests; this does not cover the reproduced long-path scan bypass, workspace substitution, scoped registry override, packed private flag, deleted lifecycle helper, verbose-output failure or cancellation leak. These are regression targets, not completion evidence.
+
+The first resumed read exceeded the outer tool output budget despite bounded inner calls. The tool explicitly reported truncation; omitted content is not treated as read. Keep each response within its total output budget and reread required omitted ranges. This affects evidence acquisition, not repository behavior; no global guidance change is authorized. The existing guard is insufficient at the outer aggregation boundary: a candidate harness fix is per-result output budgeting with retained full results (Aponte tool-output owner), not more project prose. No change in another repository is authorized. No claim about the psychological cause is needed for this repair.
+
+## Beyond this scope
+
+No additional work is approved here. Evaluate a pnpm-only uploader only as an alternative in the existing rationale; source support for provenance does not prove equivalent publication, lifecycle, registry or live OIDC behavior. Adoption needs Art's ruling.

@@ -29,7 +29,13 @@ import {
   unrecognizedFieldsReport,
   withRegistry,
 } from "./manifest";
-import { manifestText, packageFiles, readArchive, replaceManifest } from "./tarball";
+import {
+  assertPreservedArchive,
+  manifestText,
+  packageFiles,
+  readArchive,
+  replaceManifest,
+} from "./tarball";
 import type { TarArchive } from "./tarball";
 import {
   MIN_TRUSTED_NODE_VERSION,
@@ -284,6 +290,7 @@ async function packAndClean(
     const published = await readTarball(finalTarball);
     const finalFiles = packageFiles(published);
     assertSameEntries(packageFiles(packed), finalFiles);
+    assertPreservedArchive(packed, published);
     validatePackedFiles(finalFiles, allowSuspicious);
     assertDeclaredFiles(cleanedPkg, finalFiles);
 
