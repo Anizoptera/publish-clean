@@ -304,3 +304,18 @@ it.each([
     }
   }
 });
+
+it.each([null, [], [""], ["   "], ["node", 42], ["node", "a\0b"], "node check.js"])(
+  "rejects invalid artifact validator argv: %j",
+  (validateArtifact) => {
+    expect(() => packageConfig({ "publish-clean": { validateArtifact } })).toThrow(
+      "validateArtifact",
+    );
+  },
+);
+it("preserves literal validator arguments including empty optional arguments", () => {
+  const argv = ["node", "check.mjs", "", "a; b", "$(touch nope)"];
+  expect(packageConfig({ "publish-clean": { validateArtifact: argv } }).validateArtifact).toEqual(
+    argv,
+  );
+});

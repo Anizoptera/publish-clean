@@ -5,6 +5,10 @@ notes: the section for a version is published verbatim when its tag is pushed.
 
 ## [Unreleased]
 
+### Added
+
+- Set `publish-clean.validateArtifact` to an executable and arguments to validate the exact cleaned tarball before retention or upload, including preview modes. Failure or changed archive bytes prevents publication. Commands run without shell interpretation.
+
 ### Fixed
 
 - Releases now wait for Linux checks, the dependency audit and Windows checks on the

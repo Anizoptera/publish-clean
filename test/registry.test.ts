@@ -1,4 +1,5 @@
 /** Compare npm's loopback upload with the validated bytes without contacting an external registry. */
+import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
@@ -56,9 +57,32 @@ it("uploads the checked bytes to the explicit registry despite a conflicting sco
         name: "@audit/registry-fixture",
         version: "1.0.0",
         files: ["index.js"],
+        "publish-clean": {
+          validateArtifact: [process.execPath, "validate.cjs", "a; b", "$(touch nope)", ""],
+        },
         publishConfig: { provenance: true },
       }),
     );
+    await writeFile(
+      path.join(pkg, "validate.cjs"),
+      `
+const fs = require('node:fs');
+const assert = require('node:assert/strict');
+const path = require('node:path');
+assert.deepEqual(process.argv.slice(2, -1), ['a; b', '$(touch nope)', '']);
+const artifact = process.argv.at(-1);
+assert.ok(path.isAbsolute(artifact));
+assert.ok(fs.existsSync('package.json'));
+assert.equal(fs.existsSync('../out'), false);
+const bytes = fs.readFileSync(artifact);
+fs.writeFileSync('../checked.json', JSON.stringify({artifact, hash: require('node:crypto').createHash('sha512').update(bytes).digest('hex')}));
+console.log('validator-success-output');
+const behavior = fs.readFileSync('behavior', 'utf8');
+if (behavior === 'fail') { console.log('specific validator failure'); process.exit(19); }
+if (behavior === 'mutate') fs.appendFileSync(artifact, 'changed');
+`,
+    );
+    await writeFile(path.join(pkg, "behavior"), "success");
     await writeFile(path.join(pkg, "index.js"), "module.exports = 42;\n");
     await writeFile(
       path.join(pkg, ".npmrc"),
@@ -126,8 +150,42 @@ it("uploads the checked bytes to the explicit registry despite a conflicting sco
     expect(credentialFailure.output).not.toContain("fixture-secret");
     expect(uploads).toHaveLength(0);
     await writeFile(manifestPath, original);
+    for (const behavior of ["fail", "mutate", "missing"]) {
+      await writeFile(path.join(pkg, "behavior"), behavior);
+      if (behavior === "missing")
+        await writeFile(
+          manifestPath,
+          JSON.stringify({
+            ...JSON.parse(original),
+            "publish-clean": { validateArtifact: ["missing-artifact-validator-executable"] },
+          }),
+        );
+      const refused = await invoke(["--access", "public", "--no-provenance"]);
+      expect(refused.code, refused.output).not.toBe(0);
+      expect(refused.output).toContain(
+        behavior === "fail"
+          ? "specific validator failure"
+          : behavior === "mutate"
+            ? "changed the tarball"
+            : "not available in PATH",
+      );
+      expect(uploads).toHaveLength(0);
+      await expect(readdir(out)).rejects.toThrow();
+      const checked = JSON.parse(await readFile(path.join(root, "checked.json"), "utf8")) as {
+        artifact: string;
+      };
+      await expect(readFile(checked.artifact)).rejects.toThrow();
+    }
+    await writeFile(manifestPath, original);
+    await writeFile(path.join(pkg, "behavior"), "success");
     const result = await invoke(["--access", "public", "--ignore-scripts", "--no-provenance"]);
     expect(result.code, result.output).toBe(0);
+    expect(result.output).not.toContain("validator-success-output");
+    const checked = JSON.parse(await readFile(path.join(root, "checked.json"), "utf8")) as {
+      artifact: string;
+      hash: string;
+    };
+    await expect(readFile(checked.artifact)).rejects.toThrow();
     expect(failures).toEqual([]);
     expect(uploads).toHaveLength(1);
     const uploaded = uploads[0];
@@ -135,6 +193,11 @@ it("uploads the checked bytes to the explicit registry despite a conflicting sco
     expect(uploaded?.name).toBe("@audit/registry-fixture");
     const files = await readdir(out);
     expect(files).toHaveLength(1);
+    expect(
+      createHash("sha512")
+        .update(uploaded?.bytes ?? Buffer.alloc(0))
+        .digest("hex"),
+    ).toBe(checked.hash);
     expect(uploaded?.bytes).toEqual(await readFile(path.join(out, files[0] ?? "missing")));
   } finally {
     server.closeAllConnections();

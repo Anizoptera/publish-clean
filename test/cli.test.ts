@@ -748,3 +748,30 @@ exit 97
     await cleanup(fx.root);
   }
 });
+
+it.concurrent.each(["--dry-run", "--guard-only"])(
+  "runs the final artifact validator in %s",
+  async (mode) => {
+    const fx = await fixture(
+      {
+        name: "validator-preview",
+        version: "1.0.0",
+        files: ["index.js"],
+        "publish-clean": { validateArtifact: [process.execPath, "validate.cjs"] },
+      },
+      {
+        "index.js": "module.exports = 1;",
+        "validate.cjs": "require('node:fs').writeFileSync('checked', process.argv.at(-1));",
+      },
+    );
+    try {
+      const result = await runCli([mode, "--no-git-checks"], fx.dir);
+      expect(result.status, result.stderr).toBe(0);
+      const artifact = await readFile(path.join(fx.dir, "checked"), "utf8");
+      expect(path.isAbsolute(artifact)).toBe(true);
+      await expect(readFile(artifact)).rejects.toThrow();
+    } finally {
+      await cleanup(fx.root);
+    }
+  },
+);

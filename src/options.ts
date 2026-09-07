@@ -79,6 +79,7 @@ Options:
   -v, --version          Show the publish-clean version.
 
 Manifest configuration, under a "publish-clean" key in package.json:
+  validateArtifact string[] Executable and arguments; appends the final tarball path in every mode.
   devFields    string[]  Extra fields to strip. Refused for fields consumers resolve.
   keepFields   string[]  Fields to acknowledge, so they stop being reported as unrecognised.
   registry     string    Default for --registry.

@@ -246,7 +246,8 @@ async function packAndClean(
     // from the file just written, never from the buffer that produced it. Validating the
     // in-memory value instead would let a bad write, or a defect in the rewriter, pass every
     // check and still ship.
-    const published = await readTarball(finalTarball);
+    const finalBytes = await readFile(finalTarball);
+    const published = readArchive(finalBytes);
     const finalFiles = packageFiles(published);
     assertSameEntries(packageFiles(packed), finalFiles);
     assertPreservedArchive(packed, published);
@@ -264,6 +265,26 @@ async function packAndClean(
     // that the rewrite produced the bytes the guards approved, not merely bytes that parse.
     if (manifestText(published) !== cleanedText)
       throw new PublishCleanError("Rewritten tarball manifest differs from the cleaned manifest.");
+
+    // Configuration was validated before packing. Append the owned artifact, never a shell string.
+    const validator = config.validateArtifact as readonly [string, ...string[]] | undefined;
+    if (validator) {
+      try {
+        await run(validator[0], [...validator.slice(1), finalTarball], packageDir, {
+          signal,
+          output: "validator",
+        });
+        if (!finalBytes.equals(await readFile(finalTarball)))
+          throw new PublishCleanError(
+            "The validator changed the tarball. Validators must be read-only.",
+          );
+      } catch (cause) {
+        throw new PublishCleanError(
+          "publish-clean.validateArtifact failed; no tarball was retained or published.",
+          { cause },
+        );
+      }
+    }
 
     // Copied before publishing, and in every mode, so the retained bytes are exactly
     // the validated artifact regardless of whether the publish itself succeeds.

@@ -383,3 +383,24 @@ reporting, not public issues: see [SECURITY.md](SECURITY.md).
 ## License
 
 Apache-2.0. Copyright 2026 Anizoptera and Art Shendrik.
+
+
+## Validate the final artifact
+
+Set `publish-clean.validateArtifact` to an executable and its arguments to check the exact cleaned tarball before retention or upload:
+
+```json
+{
+  "publish-clean": {
+    "validateArtifact": ["node", "scripts/check-artifact.mjs"]
+  }
+}
+```
+
+The command runs once in the source package directory, with the absolute tarball path appended as its last argument. It runs in normal, `--dry-run` and `--guard-only` modes, after built-in artifact checks and before `--tarball-out` copies anything. The configuration is stripped from the published manifest.
+
+Use an executable, not a shell command or a Windows `.cmd` shim. Arguments remain literal; pipes, redirection and environment assignments are not interpreted. Relative script paths resolve from the package directory. The executable must be available in PATH or named by a path.
+
+The validator must finish successfully and leave the tarball bytes unchanged. A launch failure, nonzero exit, changed or missing artifact stops retention and publication. Successful output is quiet; failure output is reported, with captured output bounded to prevent runaway memory use. Cancellation stops the child process tree before temporary files are removed. The validator is trusted project code, not a sandbox: it must not leave background writers or modify other project files.
+
+Inspect the supplied archive directly. Do not invoke `publish-clean` or pack the package again inside the validator; that would recurse or validate different bytes.

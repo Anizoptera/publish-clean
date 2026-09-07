@@ -50,7 +50,7 @@ export function spawnArgs(
 
 interface RunOptions {
   signal?: AbortSignal | undefined;
-  output?: "capture" | "pack" | "publish";
+  output?: "capture" | "pack" | "publish" | "validator";
   timeout?: number;
 }
 
@@ -67,11 +67,16 @@ export function run(
   // Packing has no terminal input and owns a separate group for lifecycle cancellation.
   const detached = process.platform !== "win32" && output !== "publish";
   return new Promise((resolve, reject) => {
-    const child = spawn(...spawnArgs(command, args, process.platform), {
+    // User validators are executables, never Windows command-shell shims.
+    const invocation =
+      output === "validator"
+        ? ([command, [...args]] as const)
+        : spawnArgs(command, args, process.platform);
+    const child = spawn(invocation[0], invocation[1], {
       cwd,
       detached,
       stdio:
-        output === "capture"
+        output === "capture" || output === "validator"
           ? ["ignore", "pipe", "pipe"]
           : output === "pack"
             ? ["ignore", process.stderr, process.stderr]
@@ -134,9 +139,7 @@ export function run(
       if (stream === "stdout") stdout += chunk.toString();
       else stderr += chunk.toString();
       if (stdout.length + stderr.length > 1024 * 1024) {
-        failure = new PublishCleanError(
-          `${command} exceeded the output limit for a metadata query.`,
-        );
+        failure = new PublishCleanError(`${command} exceeded the captured output limit.`);
         stdout = stdout.slice(-4096);
         stderr = stderr.slice(-4096);
         stop();
@@ -165,7 +168,7 @@ export function run(
             : (failure?.message ?? `exited with ${signal ?? status}`);
         reject(
           new PublishCleanError(
-            `${command} ${reason}${stderr.trim() ? `: ${stderr.trim()}` : ""}`,
+            `${command} ${reason}${stderr.trim() ? `: ${stderr.trim()}` : ""}${output === "validator" && stdout.trim() ? `\n${stdout.trim()}` : ""}`,
             { cause: failure },
           ),
         );

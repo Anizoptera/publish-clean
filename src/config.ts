@@ -16,6 +16,7 @@ const CONFIG_KEYS = new Set([
   "noGitChecks",
   "registry",
   "skipFileCheck",
+  "validateArtifact",
 ]);
 
 export function packageConfig(pkg: JsonObject): JsonObject {
@@ -34,6 +35,13 @@ export function packageConfig(pkg: JsonObject): JsonObject {
   if (config.registry !== undefined) assertRegistry(config.registry);
   stringList(config, "devFields");
   stringList(config, "keepFields");
+  if (config.validateArtifact !== undefined) {
+    const argv = stringList(config, "validateArtifact");
+    if (!argv[0]?.trim() || argv.some((argument) => argument.includes("\0")))
+      throw new PublishCleanError(
+        "publish-clean.validateArtifact must contain an executable followed by optional arguments, without NUL bytes.",
+      );
+  }
   return config;
 }
 
