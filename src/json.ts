@@ -1,5 +1,5 @@
 /**
- * The manifest's shape, and the two serialisations this tool needs for two different jobs.
+ * Preserve manifest values and property order when writing the published artifact.
  */
 
 /** A parsed JSON object. Deliberately not a manifest interface: this tool must carry fields it has never heard of. */
@@ -16,22 +16,4 @@ export function isObject(value: unknown): value is JsonObject {
  */
 export function stringifyJson(value: JsonObject): string {
   return `${JSON.stringify(value, null, 2)}\n`;
-}
-
-/**
- * The form used only to compare two manifests for equality. Key order carries no meaning to a
- * consumer, so comparing the written form would report a difference where none exists.
- */
-export function stableJson(value: JsonObject): string {
-  return JSON.stringify(stableValue(value));
-}
-
-function stableValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stableValue);
-  if (!isObject(value)) return value;
-  return Object.fromEntries(
-    Object.entries(value)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, child]) => [key, stableValue(child)]),
-  );
 }

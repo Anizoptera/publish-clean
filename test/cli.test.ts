@@ -180,6 +180,7 @@ describe.concurrent("publish-clean", () => {
     // byte-identical as well — a reordered or partly dropped map still installs and still
     // imports, just from the wrong file, on one runtime only.
     const consumerFacing = {
+      main: "./index",
       description: "fixture",
       repository: { type: "git", url: "git+https://example.test/x.git" },
       funding: "https://example.test/fund",
@@ -209,6 +210,8 @@ describe.concurrent("publish-clean", () => {
         contributes: { commands: [] },
         "publish-clean": { keepFields: ["contributes"] },
         ...consumerFacing,
+        main: "./src/index",
+        publishConfig: { main: consumerFacing.main },
       },
       {
         "index.js": "export const ok = true;\n",

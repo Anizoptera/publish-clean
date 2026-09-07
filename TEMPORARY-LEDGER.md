@@ -30,8 +30,8 @@ Art's latest verification ruling supersedes the local full-check-before-each-com
   - [ ] Implement R2 after ruling; exercise a real lifecycle calling a retained helper.
   - [x] Reject malformed configuration objects, boolean/list values and registry URLs; validate files entries. Manifest regression lane passed 51 tests.
   - [ ] Complete script removal under R2. Consumer-resolved ecosystem fields are now protected; their regression cases pass.
-  - [ ] Reject nonportable dependency references without substring false positives; determine in-artifact local-reference semantics from actual consumers.
-  - [ ] Validate main/bin/browser/types versus exports/imports with their distinct semantics; cover extensionless and directory entry points, invalid targets and missing wildcard targets.
+  - [x] Local dependency experiment: npm installed a tarball carrying file:./vendor and Node required its consumer as 42. Therefore keep shipped vendor directories/tarballs; reject absent/outside local targets and avoid protocol substrings in ordinary URLs. Regression cases preserve these distinctions.
+  - [x] Declared-path validation is wired to the final manifest. Node probes cover extensionless/directory main, URL targets, invalid exports and array fallbacks; wildcard checks require matching shipped targets. Node falsified the proposed nested-package main reader, so that reader and callback were removed; its rejection case remains. Typecheck/build and the artifact/manifest/resolution/built-CLI lane passed 125 tests in 4.86s. The existing complete-artifact fixture now also exercises pnpm consuming publishConfig.main and an extensionless published main. Loss detection compares pnpm's resolved manifest, and one serialized manifest string is reused for writing, comparison and display.
   - [x] Drive all manifest guards from the final readback and preserve condition ordering.
   - [ ] Verify the completed manifest surface, update inline rationale and consumer docs, and commit.
 - [ ] Process lifetime and diagnostics — ACTIVE. Basis: ordinary verbose builds and cancellation must not break or leak temporary artifacts.

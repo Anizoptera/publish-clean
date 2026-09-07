@@ -115,17 +115,16 @@ describe.concurrent("declared manifest paths", () => {
 });
 
 describe.concurrent("declared entry points", () => {
-  const shipped = ["index.js", "index.d.ts", "dist/index.js"];
+  const shipped = ["index.js", "index.d.ts", "dist/index.js", "dist/index.d.ts"];
 
   // The two families of path-bearing fields disagree about what a bare string means, and
-  // reading one by the other's rules breaks in both directions. In `exports` and `imports` a
-  // string may be another package's name or a condition target, and treating those as paths
-  // would refuse to publish any package whose conditions point at a dependency.
+  // reading one by the other's rules breaks in both directions. Only `imports` may name
+  // an external package; export targets must name files inside this package.
   it("does not mistake package names, globs or booleans for paths", () => {
     expect(() =>
       assertDeclaredFiles(
         {
-          exports: { ".": { types: "./index.d.ts", node: "./index.js", default: "some-polyfill" } },
+          exports: { ".": { types: "./index.d.ts", node: "./index.js", default: "./index.js" } },
           imports: { "#dep": "external-package" },
           sideEffects: false,
           typesVersions: { "*": { "*": ["dist/*.d.ts"] } },

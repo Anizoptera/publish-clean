@@ -93,13 +93,13 @@ export function assertSameEntries(packed: readonly string[], published: readonly
  *
  * - `"every-string"` for `main`, `module`, `types`, `typings`, `bin` and `typesVersions`,
  *   where every string is a path into this package.
- * - `"relative-only"` for `exports`, `imports`, `sideEffects` and the object form of
+ * - `"relative-only"` for `sideEffects` and the object form of
  *   `browser`, where a string may just as well be an external package name, a condition
  *   target or a glob. Only a `./` or `../` prefix marks it as a path here. Collecting the
  *   rest would report a missing file for something that was never a file.
  *
  * Booleans are skipped rather than ignored by accident: `sideEffects: false` and
- * `exports` condition values legitimately hold them.
+ * `browser` replacements legitimately hold them. Export/import targets use their own walker.
  */
 export function collectDeclaredPaths(
   value: unknown,
@@ -128,41 +128,160 @@ export function normalizeDeclaredPath(declared: string): null | string {
   return normalized;
 }
 
-/**
- * Refuses a manifest whose declared entry points are not in the tarball.
- *
- * A path containing `*` is skipped: `exports` subpath patterns and `typesVersions` globs stand
- * for a set of files, and resolving them here would mean reimplementing npm's own matcher to
- * answer a question npm answers at install time.
- */
-export function assertDeclaredFiles(pkg: JsonObject, published: readonly string[]): void {
-  const declared: string[] = [];
-  for (const field of ["main", "module", "types", "typings", "bin"])
-    collectDeclaredPaths(pkg[field], declared, "every-string");
-  // `browser` is two fields sharing a name: a string is the replacement entry point, an
-  // object is a map whose values may be `false` or another package's name.
-  if (typeof pkg.browser === "string") collectDeclaredPaths(pkg.browser, declared, "every-string");
-  else collectDeclaredPaths(pkg.browser, declared, "relative-only");
-  for (const field of ["exports", "imports", "sideEffects"])
-    collectDeclaredPaths(pkg[field], declared, "relative-only");
-  collectDeclaredPaths(pkg.typesVersions, declared, "every-string");
+/** Node replaces every target star with the same subpath, including slashes. */
+function matchesTarget(file: string, pattern: string): boolean {
+  const parts = pattern.split("*");
+  const count = parts.length - 1;
+  if (count === 0) return file === pattern;
+  const size = (file.length - parts.reduce((sum, part) => sum + part.length, 0)) / count;
+  if (!Number.isInteger(size) || size < 0) return false;
+  const start = parts[0]?.length ?? 0;
+  return parts.join(file.slice(start, start + size)) === file;
+}
 
-  const resolved = declared.map((declaredPath) => ({
-    path: declaredPath,
-    normalized: normalizeDeclaredPath(declaredPath),
-  }));
-  const invalid = resolved.filter((item) => item.normalized === null);
-  if (invalid.length > 0)
+interface DeclaredFile {
+  name: string;
+  kind: "file" | "main" | "types" | "target";
+  pattern: boolean;
+}
+
+/** Export targets are URLs, unlike legacy main/bin paths; normalization must not hide invalid segments. */
+function targetPath(target: string): string {
+  if (!target.startsWith("./") || /%2f|%5c/i.test(target))
     throw new PublishCleanError(
-      `Manifest declares invalid package paths:\n${invalid.map((item) => item.path).join("\n")}`,
+      `Manifest declares invalid package paths: ${JSON.stringify(target)}`,
     );
-
-  const shipped = new Set(published);
-  const missing = resolved.filter(
-    (item) => !item.path.includes("*") && !shipped.has(String(item.normalized)),
-  );
-  if (missing.length > 0)
+  try {
+    const decoded = decodeURIComponent(target.split(/[?#]/, 1)[0] ?? "");
+    if (
+      decoded
+        .slice(2)
+        .split(/[\\/]/)
+        .some((segment) => [".", "..", "node_modules"].includes(segment.toLowerCase()))
+    )
+      throw new Error("Invalid target segment");
+    return decodeURIComponent(new URL(target, "file:///package/").pathname).slice(
+      "/package/".length,
+    );
+  } catch (cause) {
     throw new PublishCleanError(
-      `Manifest declares files missing from packed artifact:\n${missing.map((item) => item.path).join("\n")}`,
+      `Manifest declares invalid package paths: ${JSON.stringify(target)}`,
+      { cause },
+    );
+  }
+}
+
+/** Collect reachable targets without treating array fallbacks or external imports as file promises. */
+function collectTargets(
+  value: unknown,
+  imports: boolean,
+  pattern: boolean,
+  out: DeclaredFile[],
+): boolean {
+  if (value === null) return true;
+  if (typeof value === "string") {
+    if (imports && !value.startsWith(".") && !value.startsWith("/")) return true;
+    out.push({ name: targetPath(value), kind: "target", pattern });
+    return true;
+  }
+  if (Array.isArray(value)) {
+    let invalid: unknown;
+    for (const item of value) {
+      try {
+        if (collectTargets(item, imports, pattern, out)) return true;
+      } catch (error) {
+        invalid = error;
+      }
+    }
+    if (invalid) throw invalid;
+    return false;
+  }
+  if (!isObject(value))
+    throw new PublishCleanError(
+      "Invalid exports/imports target; expected a path, condition object, array or null.",
+    );
+  for (const [condition, item] of Object.entries(value)) {
+    if (
+      condition.startsWith(".") ||
+      (String(Number(condition)) === condition && Number.isInteger(Number(condition)))
+    )
+      throw new PublishCleanError(`Invalid export condition: ${JSON.stringify(condition)}.`);
+    const definite = collectTargets(item, imports, pattern, out);
+    if (condition === "default" && definite) return true;
+  }
+  return false;
+}
+
+function collectMap(value: unknown, imports: boolean, out: DeclaredFile[]): void {
+  if (value === undefined || value === null) return;
+  if (imports && !isObject(value)) throw new PublishCleanError("imports must be a subpath map.");
+  const subpaths =
+    isObject(value) && (imports || Object.keys(value).some((key) => key.startsWith(".")));
+  if (!subpaths) {
+    collectTargets(value, imports, false, out);
+    return;
+  }
+  for (const [key, target] of Object.entries(value)) {
+    if (
+      imports
+        ? !key.startsWith("#") || key === "#" || key.startsWith("#/")
+        : key !== "." && !key.startsWith("./")
+    )
+      throw new PublishCleanError(`Invalid exports/imports key: ${JSON.stringify(key)}.`);
+    collectTargets(target, imports, key.includes("*"), out);
+  }
+}
+
+/** A CommonJS main tries file extensions and index files, not a nested package's main. */
+function mainExists(name: string, files: ReadonlySet<string>): boolean {
+  const file = (target: string) =>
+    ["", ".js", ".json", ".node"].some((ext) => files.has(target + ext));
+  if (file(name)) return true;
+  const prefix = name ? `${name}/` : "";
+  return [".js", ".json", ".node"].some((extension) => files.has(`${prefix}index${extension}`));
+}
+
+/** Validate declared files using each field's consumer semantics, without extracting the archive. */
+export function assertDeclaredFiles(pkg: JsonObject, published: readonly string[]): void {
+  const declared: DeclaredFile[] = [];
+  const collect = (
+    value: unknown,
+    kind: DeclaredFile["kind"],
+    mode: "every-string" | "relative-only" = "every-string",
+  ) => {
+    const names: string[] = [];
+    collectDeclaredPaths(value, names, mode);
+    declared.push(...names.map((name) => ({ name, kind, pattern: name.includes("*") })));
+  };
+  collect(pkg.main, "main");
+  for (const field of ["types", "typings", "typesVersions"]) collect(pkg[field], "types");
+  for (const field of ["module", "bin"]) collect(pkg[field], "file");
+  collect(pkg.browser, "file", typeof pkg.browser === "string" ? "every-string" : "relative-only");
+  collect(pkg.sideEffects, "file", "relative-only");
+  collectMap(pkg.exports, false, declared);
+  collectMap(pkg.imports, true, declared);
+  const files = new Set(published);
+  const missing: string[] = [];
+  for (const item of declared) {
+    const name =
+      item.kind === "main" && ["", ".", "./"].includes(item.name)
+        ? ""
+        : normalizeDeclaredPath(item.name);
+    if (name === null)
+      throw new PublishCleanError(
+        `Manifest declares invalid package paths: ${JSON.stringify(item.name)}`,
+      );
+    let found = files.has(name);
+    if (!found && item.pattern) found = published.some((file) => matchesTarget(file, name));
+    else if (!found && item.kind === "main") found = mainExists(name.replace(/\/$/, ""), files);
+    else if (!found && item.kind === "types")
+      found = [".d.ts", ".d.mts", ".d.cts", "/index.d.ts"].some((suffix) =>
+        files.has(name + suffix),
+      );
+    if (!found) missing.push(item.name);
+  }
+  if (missing.length)
+    throw new PublishCleanError(
+      `Manifest declares files missing from packed artifact:\n${missing.map((name) => JSON.stringify(name)).join("\n")}`,
     );
 }

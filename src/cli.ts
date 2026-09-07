@@ -289,13 +289,14 @@ async function packAndClean(
     const packedPkg = manifestOf(packed, "the packed tarball");
     assertPublicPackage(packedPkg);
     const cleanedPkg = withRegistry(stripManifest(packedPkg, extraDevFields), registry);
+    const cleanedText = stringifyJson(cleanedPkg);
     const unrecognized = unrecognizedFieldsReport(cleanedPkg, keepFields);
     if (unrecognized) console.warn(unrecognized);
 
     const publishRoot = path.join(root, "publish");
     await mkdir(publishRoot);
     const finalTarball = path.join(publishRoot, path.basename(tarball));
-    await writeFile(finalTarball, replaceManifest(packed, stringifyJson(cleanedPkg)));
+    await writeFile(finalTarball, replaceManifest(packed, cleanedText));
 
     // Every guard reads the artifact that gets uploaded, and nothing else — decoded again
     // from the file just written, never from the buffer that produced it. Validating the
@@ -308,14 +309,15 @@ async function packAndClean(
     validatePackedFiles(finalFiles, allowSuspicious);
     const shippedPkg = manifestOf(published, "the published tarball");
     assertDeclaredFiles(shippedPkg, finalFiles);
-    assertNoMonorepoProtocols(shippedPkg);
+    assertNoMonorepoProtocols(shippedPkg, finalFiles);
     // A tripwire for this tool's own bugs: every field it would catch is either kept by design
     // or removed on request, and a removal on request is excluded from the comparison. Its
     // decision is exercised directly in the rules suite.
-    assertNoLostConsumerFields(sourcePkg, shippedPkg, extraDevFields);
+    // pnpm may consume publishConfig overrides; preserve its resolved consumer manifest.
+    assertNoLostConsumerFields(packedPkg, shippedPkg, extraDevFields);
     // The manifest is the one member this tool authors rather than copies, so this is the check
     // that the rewrite produced the bytes the guards approved, not merely bytes that parse.
-    if (manifestText(published) !== stringifyJson(cleanedPkg))
+    if (manifestText(published) !== cleanedText)
       throw new PublishCleanError("Rewritten tarball manifest differs from the cleaned manifest.");
 
     // Copied before publishing, and in every mode, so the retained bytes are exactly
@@ -333,7 +335,7 @@ async function packAndClean(
     if (opts.dryRun) {
       console.log(`[dry-run] ${finalFiles.length} files:`);
       for (const file of finalFiles) console.log(`  ${file}`);
-      console.log(`[dry-run] cleaned package.json:\n${stringifyJson(cleanedPkg)}`);
+      console.log(`[dry-run] cleaned package.json:\n${cleanedText}`);
       return;
     }
     if (opts.guardOnly) return;

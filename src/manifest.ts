@@ -6,6 +6,7 @@
  * argv here — so every rule is one input to one output. `cli.ts` owns the effects.
  */
 import { PublishCleanError } from "./error";
+import { normalizeDeclaredPath } from "./artifact";
 import { isObject } from "./json";
 import type { JsonObject } from "./json";
 
@@ -270,12 +271,14 @@ export function unrecognizedFieldsReport(pkg: JsonObject, kept: readonly string[
       !acknowledged.has(field),
   );
   if (unrecognized.length === 0) return null;
+  const quoted = unrecognized.map((field) => JSON.stringify(field));
+  const list = quoted.join(", ");
   return (
     `publish-clean: these manifest fields are not recognised and are retained as-is:\n` +
-    `${unrecognized.map((field) => `  ${JSON.stringify(field)}`).join("\n")}\n` +
+    `  ${quoted.join("\n  ")}\n` +
     `Strip the ones consumers do not read, and acknowledge the ones they do:\n` +
-    `  "publish-clean": { "devFields": [${unrecognized.map((f) => JSON.stringify(f)).join(", ")}] }\n` +
-    `  "publish-clean": { "keepFields": [${unrecognized.map((f) => JSON.stringify(f)).join(", ")}] }`
+    `  "publish-clean": { "devFields": [${list}] }\n` +
+    `  "publish-clean": { "keepFields": [${list}] }`
   );
 }
 
@@ -288,15 +291,38 @@ export function unrecognizedFieldsReport(pkg: JsonObject, kept: readonly string[
  * absent by construction. They are still checked, because a guard whose correctness depends on
  * the order it happens to be called in fails silently the day someone reorders it.
  */
-export function assertNoMonorepoProtocols(pkg: JsonObject): void {
+export function assertNoMonorepoProtocols(pkg: JsonObject, files: readonly string[] = []): void {
   const failures: string[] = [];
+  const shipped = new Set(files);
   for (const field of DEP_FIELDS) {
     const map = pkg[field];
     if (!isObject(map)) continue;
     for (const [name, spec] of Object.entries(map)) {
       if (typeof spec !== "string") continue;
-      if (MONOREPO_PROTOCOLS.some((prefix) => spec.includes(prefix)))
+      const resolved = spec.startsWith("npm:") ? spec.slice(spec.lastIndexOf("@") + 1) : spec;
+      if (MONOREPO_PROTOCOLS.some((prefix) => resolved.startsWith(prefix)))
         failures.push(`${field}.${name}: ${spec}`);
+      // A file dependency is portable only when its target travels inside this tarball.
+      // npm can install a shipped vendor directory; rejecting every file: spec would break it.
+      if (/^(?:file:|git\+file:|\.{1,2}(?:\/|$)|\/|~\/|[a-z]:[\\/])/i.test(spec)) {
+        let local: string | null = null;
+        try {
+          local = normalizeDeclaredPath(decodeURIComponent(spec.replace(/^file:/i, "")));
+        } catch {
+          /* A malformed URI cannot name a portable packed dependency. */
+        }
+        if (
+          !local ||
+          /[\\]/.test(local) ||
+          spec.startsWith("git+file:") ||
+          spec.startsWith("~/") ||
+          !(
+            (/\.(?:tgz|tar\.gz|tar)$/.test(local) && shipped.has(local)) ||
+            shipped.has(`${local}/package.json`)
+          )
+        )
+          failures.push(`${field}.${name}: ${spec} (local target is not in the artifact)`);
+      }
     }
   }
   if (failures.length > 0) {

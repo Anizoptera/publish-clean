@@ -146,6 +146,32 @@ describe.concurrent("monorepo-only dependency specs", () => {
       assertNoMonorepoProtocols({ dependencies: { a: "^1.0.0", b: "npm:c@2" } }),
     ).not.toThrow();
   });
+
+  it("rejects local references absent from the artifact while permitting shipped vendor packages", () => {
+    for (const spec of [
+      "file:../outside",
+      "./missing",
+      "file:/absolute",
+      "git+file:///repo",
+      "file:%zz",
+    ])
+      expect(() =>
+        assertNoMonorepoProtocols({ dependencies: { local: spec } }, ["index.js"]),
+      ).toThrow(/local target/);
+    expect(() =>
+      assertNoMonorepoProtocols({ dependencies: { local: "file:vendor" } }, [
+        "vendor/package.json",
+      ]),
+    ).not.toThrow();
+    expect(() =>
+      assertNoMonorepoProtocols({ dependencies: { local: "file:vendor.tgz" } }, ["vendor.tgz"]),
+    ).not.toThrow();
+    expect(() =>
+      assertNoMonorepoProtocols({
+        dependencies: { remote: "https://example.test/catalog:fixture.tgz" },
+      }),
+    ).not.toThrow();
+  });
 });
 
 describe.concurrent("lost consumer fields", () => {
