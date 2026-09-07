@@ -230,12 +230,11 @@ async function packAndClean(
   const root = await mkdtemp(path.join(tmpdir(), "publish-clean-"));
   try {
     await run("pnpm", ["pack", "--pack-destination", root], packageDir, { signal, output: "pack" });
-    const tarball = await soleTarball(root);
-    const packed = await readTarball(tarball);
+    const finalTarball = await soleTarball(root);
+    const packed = await readTarball(finalTarball);
 
-    // Cleaned straight out of the packed tarball and written back into a copy of that same
-    // tarball: no intermediate directory to clean, and no second packer that could re-decide
-    // the file set from the `files` field this strips.
+    // Keep the original archive in memory for comparison, then rewrite its owned temporary
+    // file. A second packer could re-decide the file set from the `files` field this strips.
     const packedPkg = manifestOf(packed, "the packed tarball");
     assertPublicPackage(packedPkg);
     const cleanedPkg = withRegistry(stripManifest(packedPkg, extraDevFields), registry);
@@ -243,9 +242,6 @@ async function packAndClean(
     const unrecognized = unrecognizedFieldsReport(cleanedPkg, keepFields);
     if (unrecognized) console.warn(unrecognized);
 
-    const publishRoot = path.join(root, "publish");
-    await mkdir(publishRoot);
-    const finalTarball = path.join(publishRoot, path.basename(tarball));
     await writeFile(finalTarball, replaceManifest(packed, cleanedText));
 
     // Every guard reads the artifact that gets uploaded, and nothing else — decoded again
