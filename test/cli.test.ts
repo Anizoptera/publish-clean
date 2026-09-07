@@ -245,7 +245,9 @@ describe.concurrent("publish-clean", () => {
         lines.findIndex((line) => /^\[dry-run] \d+ files:$/.test(line)) + 1,
         lines.findIndex((line) => line.startsWith("[dry-run] cleaned package.json")),
       );
-      expect(listed.map((line) => line.trim()).sort()).toEqual(listTarball(tarball).sort());
+      expect(listed.map((line) => JSON.parse(line.trim()) as string).sort()).toEqual(
+        listTarball(tarball).sort(),
+      );
     } finally {
       await cleanup(fx.root);
     }
@@ -689,12 +691,13 @@ it.skipIf(process.platform === "win32").concurrent(
       },
       {
         "index.js": "module.exports = 1",
-        "waiting.cjs": `process.on('SIGTERM', () => {}); console.log('PACK_READY:' + process.pid); setInterval(() => {}, 1000);`,
+        "waiting.cjs": `process.on('SIGTERM', () => console.log('PACK_STOPPING')); console.log('PACK_READY:' + process.pid); setInterval(() => {}, 1000);`,
       },
     );
     const temp = path.join(fx.root, "temp");
     await mkdir(temp);
     let lifecyclePid: number | undefined;
+    let repeatedSignal = false;
     const child = spawn("node", [CLI, "--dry-run", "--no-git-checks", fx.dir], {
       env: { ...process.env, TMPDIR: temp },
       timeout: 5000,
@@ -712,12 +715,17 @@ it.skipIf(process.platform === "win32").concurrent(
               lifecyclePid = Number(match[1]);
               child.kill("SIGTERM");
             }
+            if (stderr.includes("PACK_STOPPING") && !repeatedSignal) {
+              repeatedSignal = true;
+              child.kill("SIGTERM");
+            }
           });
           child.on("error", reject);
           child.on("close", (status) => resolve({ status, stderr }));
         },
       );
       expect(lifecyclePid, result.stderr).toBeDefined();
+      expect(repeatedSignal, result.stderr).toBe(true);
       expect(result.status, result.stderr).toBe(143);
       expect((await readdir(temp)).filter((name) => name.startsWith("publish-clean-"))).toEqual([]);
       expect(() => process.kill(lifecyclePid ?? 0, 0)).toThrow();

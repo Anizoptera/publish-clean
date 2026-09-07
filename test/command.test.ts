@@ -4,8 +4,13 @@
  * reach it, and no other platform may pay for the rule.
  */
 import { describe, expect, it } from "vitest";
+import { watch } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
-import { spawnArgs } from "../src/command";
+import { run, spawnArgs } from "../src/command";
 
 describe("spawn arguments", () => {
   it("refuses an argument cmd.exe would split, rather than publishing the pieces", () => {
@@ -16,6 +21,10 @@ describe("spawn arguments", () => {
 
   it("refuses a metacharacter in the command name too, not only in the arguments", () => {
     expect(() => spawnArgs("pn|pm", ["pack"], "win32")).toThrow(/pn\|pm/);
+  });
+
+  it.each(["a\nb", "a\rb"])("refuses command separators hidden in a line break", (argument) => {
+    expect(() => spawnArgs("npm", [argument], "win32")).toThrow(/line breaks/);
   });
 
   it("wraps a safe vector without altering a single argument", () => {
@@ -34,3 +43,62 @@ describe("spawn arguments", () => {
     ]);
   });
 });
+
+it("settles a cancelled real child before returning on this platform", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "publish-clean-process-"));
+  const controller = new AbortController();
+  const reason = new Error("test cancellation");
+  const watcher = watch(root, (_event, name) => {
+    if (name === "ready") controller.abort(reason);
+  });
+  let result: Promise<unknown> | undefined;
+  try {
+    await writeFile(
+      path.join(root, "child.cjs"),
+      `
+const fs = require('node:fs');
+fs.writeFileSync('starting', String(process.pid));
+fs.renameSync('starting', 'ready');
+setInterval(() => {}, 1000);
+`,
+    );
+    result = run(process.execPath, [path.join(root, "child.cjs")], root, {
+      signal: controller.signal,
+      timeout: 3000,
+    }).catch((error: unknown) => error);
+    expect(await result).toBe(reason);
+    const pid = Number(await readFile(path.join(root, "ready"), "utf8"));
+    expect(() => process.kill(pid, 0)).toThrow();
+  } finally {
+    controller.abort(reason);
+    await result;
+    watcher.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it.skipIf(process.platform === "win32")(
+  "keeps interactive publishing in the caller's terminal group",
+  async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "publish-clean-terminal-"));
+    try {
+      await writeFile(
+        path.join(root, "group.cjs"),
+        `
+const group = require('node:child_process').execFileSync('ps', ['-o', 'pgid=', '-p', String(process.pid)]);
+require('node:fs').writeFileSync('group', group);
+`,
+      );
+      await run(process.execPath, [path.join(root, "group.cjs")], root, {
+        output: "publish",
+        timeout: 3000,
+      });
+      const parentGroup = execFileSync("ps", ["-o", "pgid=", "-p", String(process.pid)], {
+        encoding: "utf8",
+      });
+      expect((await readFile(path.join(root, "group"), "utf8")).trim()).toBe(parentGroup.trim());
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);

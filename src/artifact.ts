@@ -46,14 +46,18 @@ export const SUSPICIOUS_PATTERNS = [
 export function validatePackedFiles(files: readonly string[], skipSuspicious: boolean): void {
   const critical = files.filter((file) => CRITICAL_PATTERNS.some((pattern) => pattern.test(file)));
   if (critical.length > 0)
-    throw new PublishCleanError(`Critical files must not be published:\n${critical.join("\n")}`);
+    throw new PublishCleanError(
+      `Critical files must not be published:\n${critical.map((file) => JSON.stringify(file)).join("\n")}`,
+    );
   if (skipSuspicious) return;
 
   const suspicious = files.filter((file) =>
     SUSPICIOUS_PATTERNS.some((pattern) => pattern.test(file)),
   );
   if (suspicious.length > 0)
-    throw new PublishCleanError(`Suspicious files in package artifact:\n${suspicious.join("\n")}`);
+    throw new PublishCleanError(
+      `Suspicious files in package artifact:\n${suspicious.map((file) => JSON.stringify(file)).join("\n")}`,
+    );
 }
 
 /**
@@ -252,7 +256,9 @@ export function assertDeclaredFiles(pkg: JsonObject, published: readonly string[
   ) => {
     const names: string[] = [];
     collectDeclaredPaths(value, names, mode);
-    declared.push(...names.map((name) => ({ name, kind, pattern: patterns && name.includes("*") })));
+    declared.push(
+      ...names.map((name) => ({ name, kind, pattern: patterns && name.includes("*") })),
+    );
   };
   collect(pkg.main, "main");
   for (const field of ["types", "typings"]) collect(pkg[field], "types");

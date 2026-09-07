@@ -39,11 +39,11 @@ export function spawnArgs(
   // correctly means encoding cmd's quoting rules on the one step nobody can take back, where
   // being subtly wrong corrupts a publish silently; refusing can only ever stop one, and says
   // exactly which argument and why. Build the escaper when a real path like this appears.
-  const unsafe = [command, ...args].filter((argument) => /[&|<>^%()]/.test(argument));
+  const unsafe = [command, ...args].filter((argument) => /[&|<>^%()\r\n]/.test(argument));
   if (unsafe.length > 0)
     throw new PublishCleanError(
-      `On Windows these arguments cannot be passed safely, because cmd.exe would interpret them:\n${unsafe.join("\n")}\n` +
-        `Move the package to a path without & | < > ^ % ( ), or publish from Linux or macOS.`,
+      `On Windows these arguments cannot be passed safely, because cmd.exe would interpret them:\n${unsafe.map((argument) => JSON.stringify(argument)).join("\n")}\n` +
+        `Use arguments without & | < > ^ % ( ) or line breaks, or publish from Linux or macOS.`,
     );
   return ["cmd.exe", ["/d", "/c", command, ...args]];
 }
@@ -63,10 +63,13 @@ export function run(
 ): Promise<string> {
   options.signal?.throwIfAborted();
   const output = options.output ?? "capture";
+  // Interactive npm must stay in the terminal's foreground group to read an OTP.
+  // Packing has no terminal input and owns a separate group for lifecycle cancellation.
+  const detached = process.platform !== "win32" && output !== "publish";
   return new Promise((resolve, reject) => {
     const child = spawn(...spawnArgs(command, args, process.platform), {
       cwd,
-      detached: process.platform !== "win32",
+      detached,
       stdio:
         output === "capture"
           ? ["ignore", "pipe", "pipe"]
@@ -82,7 +85,10 @@ export function run(
     let termination: Promise<void> | undefined;
     const killGroup = (signal: NodeJS.Signals) => {
       try {
-        if (child.pid !== undefined) process.kill(-child.pid, signal);
+        if (child.pid !== undefined) {
+          if (detached) process.kill(-child.pid, signal);
+          else child.kill(signal);
+        }
       } catch (error) {
         if (!isObject(error) || error.code !== "ESRCH")
           failure = error instanceof Error ? error : new Error(String(error));
@@ -167,15 +173,6 @@ export function run(
     });
     if (options.signal?.aborted) stop();
   });
-}
-
-/** Child output survives only on the thrown error, and is lost unless read off it here. */
-export function outputFromError(error: unknown, key: "stderr" | "stdout"): string {
-  if (!isObject(error)) return "";
-  const output = error[key];
-  if (typeof output === "string") return output.trim();
-  if (output instanceof Uint8Array) return Buffer.from(output).toString("utf8").trim();
-  return "";
 }
 
 /** Probe in the package directory: version-manager shims resolve their toolchain from cwd. */

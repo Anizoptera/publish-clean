@@ -44,13 +44,12 @@ jobs:
   # branch cannot be proved by any test on Linux or macOS, and an unverified branch claiming
   # a supported platform is worse than declaring the platform unsupported.
   #
-  # The suite itself is not run here: it puts fake executables on PATH through shell shims,
-  # which is a port, not a check. A single dry-run against this package is the whole product
-  # path instead — tool probes, `pnpm pack`, the rewrite, and every guard — and it is exactly
-  # the run that fails today if the cmd.exe wrapper is wrong.
+  # Run the platform-independent command cases, including real process-tree cancellation.
+  # The dry-run additionally exercises npm/pnpm shims and the complete artifact pipeline.
+  # CLI cases using POSIX fixture shims stay in the main job.
   windows:
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -64,6 +63,7 @@ jobs:
           package-manager-cache: false
       - run: bun install --frozen-lockfile
       - run: bun run build
+      - run: bunx vitest run test/command.test.ts
       # pnpm comes from this repo's devDependencies, so the same version resolves here as in
       # every other lane, rather than whatever the runner happens to carry.
       - run: echo "${{ github.workspace }}\node_modules\.bin" >> $env:GITHUB_PATH

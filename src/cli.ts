@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertDeclaredFiles, assertSameEntries, validatePackedFiles } from "./artifact";
-import { outputFromError, requireTool, run } from "./command";
+import { requireTool, run } from "./command";
 import { customDevFields, keptFields, packageConfig } from "./config";
 import { HELP, parseOptions } from "./options";
 import { PublishCleanError } from "./error";
@@ -131,23 +131,10 @@ async function assertCleanGit(
   signal: AbortSignal,
 ): Promise<void> {
   if (skip) return;
-  try {
-    const output = (
-      await run("git", ["status", "--porcelain", "--", "."], packageDir, { signal })
-    ).trim();
-    if (output) throw new PublishCleanError(`Source package has uncommitted changes:\n${output}`);
-  } catch (error) {
-    if (error instanceof PublishCleanError) throw error;
-    // git's own words, not a guess at them: outside a repository it says so exactly, and the
-    // reader's next action ("this is not a git checkout" vs "git is not installed") differs.
-    // The top-level handler only unwraps the error it is given, so the child's output has to
-    // be carried into the message here or it is lost.
-    const stderr = outputFromError(error, "stderr");
-    throw new PublishCleanError(
-      `Unable to verify source git status${stderr ? `: ${stderr}` : ""}.\nPass --no-git-checks to publish without this check.`,
-      { cause: error },
-    );
-  }
+  const output = (
+    await run("git", ["status", "--porcelain", "--", "."], packageDir, { signal })
+  ).trim();
+  if (output) throw new PublishCleanError(`Source package has uncommitted changes:\n${output}`);
 }
 
 /**
@@ -297,7 +284,7 @@ async function packAndClean(
     // Use --tarball-out to keep the bytes, in a directory the caller names.
     if (opts.dryRun) {
       console.log(`[dry-run] ${finalFiles.length} files:`);
-      for (const file of finalFiles) console.log(`  ${file}`);
+      for (const file of finalFiles) console.log(`  ${JSON.stringify(file)}`);
       console.log(`[dry-run] cleaned package.json:\n${cleanedText}`);
       return;
     }
@@ -366,19 +353,14 @@ for (const [signal, code] of [
   ["SIGINT", 130],
   ["SIGTERM", 143],
 ] as const)
-  process.once(signal, () => {
+  process.on(signal, () => {
     interrupted = true;
     process.exitCode = code;
     cancellation.abort(new PublishCleanError(`Cancelled by ${signal}.`));
   });
 
 main(cancellation.signal).catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  const details = [
-    message,
-    outputFromError(error, "stdout"),
-    outputFromError(error, "stderr"),
-  ].filter((detail) => detail.length > 0);
-  console.error(`publish-clean: ${details.join("\n")}`);
+  console.error("publish-clean:", error instanceof PublishCleanError ? error.message : error);
+  if (error instanceof PublishCleanError && error.cause) console.error("Caused by:", error.cause);
   if (!interrupted) process.exitCode = 1;
 });
