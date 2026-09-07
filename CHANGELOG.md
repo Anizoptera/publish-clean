@@ -3,6 +3,13 @@
 Notable changes per release, newest first. This file is the source of the GitHub Release
 notes: the section for a version is published verbatim when its tag is pushed.
 
+## [Unreleased]
+
+### Fixed
+
+- Releases now wait for Linux checks, the dependency audit and Windows checks on the
+  tagged commit before publishing. CI and release verification share the same workflow.
+
 ## [0.8.0] - 2026-09-08
 
 ### Changed

@@ -32,11 +32,9 @@
 - Never spawn with `{ shell: true }`, on any platform, however much simpler the Windows branch in
   `src/command.ts` would look. A shell space-joins the argument vector with NO escaping — Node
   runtime-deprecated it in v24 as injection (DEP0190) — and the arguments a caller writes after `--`
-  go straight into the one irreversible step. The Windows job in `check.yml` is the only instrument
-  that grades that branch; delete it and the platform is unsupported again, verified by nothing. It
-  grades BENIGN input only — it packs this repository, whose paths hold no cmd metacharacter — which
-  is exactly how a command-injection hole shipped in 0.7.0 under a green run. The hostile inputs live
-  in `test/command.test.ts`, where the platform is a parameter and every OS runs them.
+  go straight into the one irreversible step. Keep the Windows job in `check.yml`: it exercises
+  real shims, cancellation and the artifact pipeline. Keep the hostile argument cases in
+  `test/command.test.ts` too; packing a benign repository alone missed the injection hole in 0.7.0.
 - One escape hatch relaxes exactly one policy. `--skip-file-check` and `--allow-suspicious` were a
   single flag until 0.6.0, so a package that legitimately declares no `files` array had to waive the
   artifact scan as well: a manifest convention and a content guard behind one switch, where nobody
@@ -57,7 +55,13 @@
   afterward. Reject extra operands, workspace selectors and flag-shaped values: npm reparses
   even `--tag=--workspace` as a workspace option, so equals-form alone does not bind a value.
 - Keep npm publication in `.github/workflows/release.yml`; npm trusted publishing is keyed by workflow filename.
-- Release is two jobs, and the split is what makes both true at once: `verify` runs `bun run check` on the tagged commit holding NO permissions, and `publish` declares `needs: verify` and does only what the credential is for — build, publish, attest, attach. Never merge them into one job. The suite puts fake executables on `PATH` and runs fixture lifecycle scripts, which must not happen beside a live token, and `id-token: write` defines `ACTIONS_ID_TOKEN_REQUEST_URL`, which the CLI reads as a trusted-publish context and behaves differently under. `preversion` still runs the lane locally, but as fast feedback, never as the gate: a hand-made tag or any local bypass would otherwise reach the registry, and an npm version is permanent.
+- Release must wait for every check on its tagged commit. `verify` calls the local
+  `check.yml` with no token permissions; `publish` requires its success and owns the
+  publishing credentials. Keep Linux checks, dependency audit and Windows checks in that
+  shared workflow, so a standalone green job cannot hide another platform's failure.
+  Tests run fixture scripts and fake executables: never grant them `id-token: write`, which
+  also changes CLI behavior through `ACTIONS_ID_TOKEN_REQUEST_URL`. Local `preversion` is
+  fast feedback, not publication authority. Keep caller and callee concurrency groups distinct.
 - Every release step must survive a re-run, because a run that publishes and then fails is otherwise unrepairable. Only the npm publish refuses; skip it when the version is already on the registry and let the remaining steps run.
 - `CHANGELOG.md` is excluded from the formatter. `git-cliff` writes sections into it, and a formatter that reflows generated output turns every release into a lane failure.
 - The npm dist-tag is derived from the tag, never hardcoded: a version with a prerelease

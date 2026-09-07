@@ -1,15 +1,21 @@
 name: Check
 
 on:
+  workflow_call:
+    inputs:
+      release:
+        description: Validate the tag and changelog before release checks.
+        type: boolean
+        default: false
   pull_request:
   push:
     branches: [main]
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
-  group: check-${{ github.ref }}
+  # Called workflows inherit the caller's name; keep this distinct from Release's group.
+  group: check-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -37,6 +43,8 @@ jobs:
         with:
           node-version-file: .tool-versions
           package-manager-cache: false
+      - if: inputs.release
+        run: bun scripts/release.ts preflight
       - run: bun run check
       # Keep network-dependent advisory lookup out of the ordinary local feedback loop.
       - run: bun audit
