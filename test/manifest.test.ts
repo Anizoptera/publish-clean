@@ -1,3 +1,4 @@
+import { customDevFields, keptFields, packageConfig } from "../src/config";
 /**
  * Exercises each manifest rule directly, one input to one output. The end-to-end suite proves
  * the CLI reaches these; what it cannot afford is breadth, because every case there costs two
@@ -10,9 +11,6 @@ import {
   assertNoLostConsumerFields,
   assertNoMonorepoProtocols,
   assertPublicPackage,
-  customDevFields,
-  keptFields,
-  packageConfig,
   stripManifest,
   unrecognizedFieldsReport,
   withRegistry,

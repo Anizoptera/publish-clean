@@ -1,0 +1,61 @@
+// Parse this CLI before the separator and leave the remaining arguments to npm.
+import { parseArgs } from "node:util";
+
+/**
+ * The whole interface in one screen, because this is where an out-of-context reader lands:
+ * the flags, the manifest config block that sets the same policies durably, and the `--`
+ * convention that decides which arguments this tool reads and which npm does. Anything a
+ * user must know to publish correctly belongs here, not only in the README, which is not
+ * installed next to the binary.
+ */
+export const HELP = `publish-clean [options] [package-dir] [-- npm publish args]
+
+Packs with pnpm, strips developer-only fields from the packed manifest, validates the
+artifact, and publishes that exact tarball with npm. Arguments after \`--\` go to
+\`npm publish\` untouched (e.g. --access public --tag next --provenance).
+
+Options:
+  --dry-run              Pack, clean and validate; print the file list and manifest, publish nothing.
+  --guard-only           Same checks, no output and no publish. For a pre-publish gate.
+  --tarball-out DIR      Also write the validated tarball into DIR, for attestation or release upload.
+  --registry URL         Publish to URL, and record it in the artifact's publishConfig.
+  --no-git-checks        Publish from a working tree with uncommitted changes.
+  --skip-file-check      Allow a manifest with no "files" array.
+  --allow-suspicious     Allow tests, CI config, lockfiles or tsconfig in the published artifact.
+  -h, --help             Show this help.
+  -v, --version          Show the publish-clean version.
+
+Manifest configuration, under a "publish-clean" key in package.json:
+  devFields    string[]  Extra fields to strip. Refused for fields consumers resolve.
+  keepFields   string[]  Fields to acknowledge, so they stop being reported as unrecognised.
+  registry     string    Default for --registry.
+  noGitChecks  boolean   Default for --no-git-checks.
+  skipFileCheck boolean  Default for --skip-file-check.
+  allowSuspicious boolean Default for --allow-suspicious.
+
+Requires pnpm and npm on PATH. npm provenance additionally requires Node.js 22.14+ and
+npm 11.5.1+, and only a cloud CI runner can produce it.`;
+
+export function parseOptions(rawArgs: readonly string[]) {
+  const separator = rawArgs.indexOf("--");
+  const cliArgs = separator === -1 ? rawArgs : rawArgs.slice(0, separator);
+  const publishArgs = separator === -1 ? [] : rawArgs.slice(separator + 1);
+  const parsed = parseArgs({
+    args: cliArgs,
+    allowPositionals: true,
+    options: {
+      "allow-suspicious": { type: "boolean", default: false },
+      "dry-run": { type: "boolean", default: false },
+      "guard-only": { type: "boolean", default: false },
+      help: { type: "boolean", short: "h", default: false },
+      "no-git-checks": { type: "boolean", default: false },
+      registry: { type: "string", default: undefined },
+      "skip-file-check": { type: "boolean", default: false },
+      "tarball-out": { type: "string", default: undefined },
+      version: { type: "boolean", short: "v", default: false },
+    },
+    strict: true,
+  });
+
+  return { ...parsed, publishArgs };
+}

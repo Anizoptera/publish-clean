@@ -111,27 +111,6 @@ function listTarball(tarball: string): string[] {
 // sharing nothing: the only reason they ever ran one at a time was the blocking spawn.
 // The work is real packing, so the ceiling is cores, not this setting.
 describe.concurrent("publish-clean", () => {
-  // Asserting the help *text* would restate it; what can actually rot is the promise it
-  // makes. Every flag the help advertises is fed back to the parser, so help that documents
-  // an option nobody implemented — or that outlives one — fails here instead of in a user's
-  // terminal. A value is supplied for every flag, because the parser rejects a bare string
-  // option and that rejection is not the drift under test.
-  it("advertises no flag its own parser rejects", async () => {
-    const help = await runCli(["--help"], process.cwd());
-    expect(help.status, `${help.stdout}\n${help.stderr}`).toBe(0);
-    const flags = [...help.stdout.matchAll(/^\s+(--[a-z-]+)/gm)].map((match) => match[1]);
-    expect(flags.length).toBeGreaterThan(5);
-    const probes = await Promise.all(
-      flags.map(
-        async (flag) => [flag, await runCli([`${flag}=x`, "--help"], process.cwd())] as const,
-      ),
-    );
-    for (const [flag, result] of probes)
-      expect(result.stderr, `${flag} is documented but the parser refuses it`).not.toContain(
-        "Unknown option",
-      );
-  });
-
   it("reports the version of the package it was installed from", async () => {
     const result = await runCli(["--version"], process.cwd());
     const installed = JSON.parse(await readFile("package.json", "utf8")) as { version: string };
@@ -622,7 +601,7 @@ exit 1
   });
 });
 
-it("scans and preserves the effective names pnpm emits for long USTAR and PAX paths", async () => {
+it.concurrent("scans and preserves the effective names pnpm emits for long USTAR and PAX paths", async () => {
   const prefix = `dist/${("d".repeat(70) + "/").repeat(4)}`;
   const names = [`dist/${"d".repeat(70)}/safe.js`, `${prefix}safe.js`];
   const fx = await fixture(
@@ -653,7 +632,7 @@ it("scans and preserves the effective names pnpm emits for long USTAR and PAX pa
   }
 });
 
-it("rejects a private flag written by prepack before it can be stripped", async () => {
+it.concurrent("rejects a private flag written by prepack before it can be stripped", async () => {
   const fx = await fixture(
     {
       name: "becomes-private",
@@ -675,7 +654,7 @@ it("rejects a private flag written by prepack before it can be stripped", async 
   }
 });
 
-it("streams verbose lifecycle output without a capture-buffer failure", async () => {
+it.concurrent("streams verbose lifecycle output without a capture-buffer failure", async () => {
   const fx = await fixture(
     {
       name: "verbose-pack",
@@ -698,7 +677,7 @@ it("streams verbose lifecycle output without a capture-buffer failure", async ()
   }
 });
 
-it.skipIf(process.platform === "win32")(
+it.skipIf(process.platform === "win32").concurrent(
   "cancels a live lifecycle and removes its temporary archive directory",
   async () => {
     const fx = await fixture(
@@ -754,7 +733,7 @@ it.skipIf(process.platform === "win32")(
   },
 );
 
-it("probes the npm version in the package directory, once", async () => {
+it.concurrent("probes the npm version in the package directory, once", async () => {
   const fx = await fixture(
     { name: "cwd-version", version: "1.0.0", files: ["index.js"] },
     { "index.js": "x" },

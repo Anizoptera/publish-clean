@@ -16,7 +16,7 @@ Art's latest verification ruling supersedes the local full-check-before-each-com
 
 ## Derived work, ordered by harm and dependency
 
-- [ ] Apply Art's simplification review throughout the remaining work: remove repeated help-parser process probes, retire the order-insensitive manifest comparator replaced by exact bytes, and review new process ownership for unnecessary machinery. Do not add a general resolver or an unapproved CLI surface. Each new guard must catch a demonstrated defect or a direct consequence of it.
+- [ ] Review process ownership for unnecessary machinery. The help-parser subprocess matrix and order-insensitive manifest comparator are removed. Isolated CLI cases now run concurrently; the CLI/manifest lane passed in 2.06s. Configuration and option parsing moved intact to their own modules, leaving the publication pipeline and manifest policies separate. Typecheck caught an invalid Vitest modifier order during the move; the installed API and completed lane now agree. Do not add a general resolver or an unapproved CLI surface.
 
 - [x] Archive interpretation and preservation — effective USTAR/PAX paths and byte-counted records; size overrides; malformed tails and alias/duplicate rejection; final-readback raw entry/order/metadata guard. Verified: typecheck and build; `bunx vitest run test/tarball.test.ts test/cli.test.ts` passed 50 tests in 2.11s, including real pnpm safe/secret long paths and independent tar readback. Synthetic framing test corrected from a valid nine-byte record to a malformed eight-byte one; this was a test expectation error, not a parser fix.
 - [ ] Publication identity and destination — Basis: npm must upload the checked artifact to the requested registry.
