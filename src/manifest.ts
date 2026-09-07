@@ -181,13 +181,23 @@ export function packageScope(pkg: JsonObject): string | null {
 
 /** A misspelled registry must fail locally rather than fall back to a public destination. */
 export function assertRegistry(value: unknown): asserts value is string {
-  try {
-    if (typeof value !== "string" || !value.trim()) throw new Error("Expected a URL");
-    const url = new URL(value);
-    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Expected HTTP(S)");
-  } catch (cause) {
-    throw new PublishCleanError("Registry must be an absolute HTTP(S) URL.", { cause });
-  }
+  // URL parser exceptions retain their input, which may contain a password.
+  if (typeof value !== "string" || !URL.canParse(value))
+    throw new PublishCleanError("Registry must be an absolute HTTP(S) URL.");
+  const url = new URL(value);
+  if (url.protocol !== "http:" && url.protocol !== "https:")
+    throw new PublishCleanError("Registry must be an absolute HTTP(S) URL.");
+  if (url.username || url.password)
+    throw new PublishCleanError(
+      "Registry URLs must not contain credentials. Configure npm authentication separately.",
+    );
+}
+
+/** Check every registry destination in the artifact without disclosing its credentials. */
+export function assertRegistryDestinations(pkg: JsonObject): void {
+  if (!isObject(pkg.publishConfig)) return;
+  for (const [key, value] of Object.entries(pkg.publishConfig))
+    if (key === "registry" || key.endsWith(":registry")) assertRegistry(value);
 }
 
 /**

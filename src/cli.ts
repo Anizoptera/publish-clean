@@ -23,6 +23,7 @@ import {
   assertNoLostConsumerFields,
   assertNoMonorepoProtocols,
   assertPublicPackage,
+  assertRegistryDestinations,
   packageScope,
   stripManifest,
   unrecognizedFieldsReport,
@@ -254,6 +255,7 @@ async function packAndClean(
     assertPreservedArchive(packed, published);
     validatePackedFiles(finalFiles, allowSuspicious);
     const shippedPkg = manifestOf(published, "the published tarball");
+    assertRegistryDestinations(shippedPkg);
     assertDeclaredFiles(shippedPkg, finalFiles);
     assertNoMonorepoProtocols(shippedPkg, finalFiles);
     // A tripwire for this tool's own bugs: every field it would catch is either kept by design

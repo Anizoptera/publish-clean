@@ -365,6 +365,8 @@ every mode, before the publish, so you get the validated artifact even if the up
 
 `registry` pins where the package goes, so it cannot end up on whatever registry the
 machine happens to be pointed at.
+Registry URLs must not contain usernames or passwords, including scoped destinations in
+`publishConfig`. Configure npm authentication in npm configuration instead.
 
 `skipFileCheck` and `allowSuspicious` are deliberately two switches. A missing `files`
 array is a manifest convention some packages do not follow; tests or a lockfile in the

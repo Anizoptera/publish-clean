@@ -11,6 +11,8 @@ import {
   assertNoLostConsumerFields,
   assertNoMonorepoProtocols,
   assertPublicPackage,
+  assertRegistry,
+  assertRegistryDestinations,
   stripManifest,
   unrecognizedFieldsReport,
   withRegistry,
@@ -279,4 +281,26 @@ describe("strict manifest configuration", () => {
       "@audit:registry": "https://r.test",
     });
   });
+});
+
+it.each([
+  "https://fixture-secret@registry.example/",
+  "https://user:fixture-secret@registry.example/",
+  "https://:fixture-secret@registry.example/",
+  "https://fixture-secret@[invalid/",
+])("rejects registry credentials without retaining the URL: %s", (registry) => {
+  for (const check of [
+    () => assertRegistry(registry),
+    () => assertRegistryDestinations({ publishConfig: { registry } }),
+    () => assertRegistryDestinations({ publishConfig: { "@scope:registry": registry } }),
+  ]) {
+    try {
+      check();
+      expect.fail("credential-bearing registry accepted");
+    } catch (error) {
+      expect(String(error)).toMatch(/Registry/);
+      expect(String(error)).not.toContain("fixture-secret");
+      expect(error).not.toHaveProperty("cause");
+    }
+  }
 });
