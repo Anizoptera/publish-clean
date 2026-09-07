@@ -27,7 +27,7 @@ jobs:
   # is undefined here.
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     permissions: {}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -41,6 +41,7 @@ jobs:
           node-version-file: .tool-versions
           package-manager-cache: false
       - run: bun install --frozen-lockfile
+      - run: bun scripts/release.ts preflight
       - run: bun run check
 
   publish:
@@ -50,7 +51,7 @@ jobs:
     # concurrency group that never cancels: one wedged run blocks every later release until
     # a human notices. This job also holds a live OIDC identity, which must not stay alive
     # any longer than the upload needs.
-    timeout-minutes: 15
+    timeout-minutes: 5
     permissions:
       contents: write # attach the published tarball to the GitHub Release
       id-token: write # OIDC: npm provenance and build-provenance attestation
@@ -73,78 +74,15 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
-      # The tag names the release; the manifest names what npm publishes. `bun run release`
-      # writes both from one input, so they agree unless a tag was made by hand — in which
-      # case this stops before anything reaches the registry. Without it the mismatch first
-      # appears as an artifact attached to the wrong GitHub Release, after the npm version
-      # is already permanent.
-      - name: Refuse a tag that disagrees with the manifest
-        run: |
-          tagged="${GITHUB_REF_NAME#v}"
-          declared="$(node -p 'require("./package.json").version')"
-          test "$tagged" = "$declared" ||
-            { echo "::error::tag $GITHUB_REF_NAME does not match package.json $declared"; exit 1; }
-
-      # No npm credential is passed to this job. Publishing authenticates with the
-      # OIDC identity against the trusted publisher bound to this repository and this
-      # workflow *filename*, so renaming or moving this file breaks publishing, and the
-      # error will not mention the rename.
-      #
-      # The bootstrap that got the package onto the registry in the first place is a
-      # separate, one-shot procedure that does need a token, because npm cannot attach a
-      # trusted publisher to a name nobody has published yet: docs/first-publish.md.
-      #
-      # A token must not be reintroduced here as a fallback. While one exists, a broken
-      # trusted-publisher configuration is silently papered over, and the failure surfaces
-      # on whatever future day the token expires instead of on the run that broke it.
+      # Every prerequisite is checked before upload. A rerun may skip publication only
+      # when its candidate matches registry dist.integrity; source equality is insufficient.
+      # Authentication uses the OIDC publisher bound to this workflow filename. A token
+      # fallback would hide a broken binding; initial setup belongs in docs/first-publish.md.
       - run: bun run build
-
-      # This job holds the publish credential and the OIDC token, so it does the minimum
-      # that needs them: pack, publish, attest, attach. The lane runs in `verify` above,
-      # which this job waits on and which holds no permissions at all.
-      #
-      # Every step below is repeatable, because a run that publishes and then fails
-      # otherwise leaves the registry, the tag and the Release permanently out of
-      # step with no way back: npm refuses to republish a version, so an existing
-      # version packs in dry-run mode instead. Those bytes equal the published ones,
-      # so they stay a truthful attestation subject: pnpm normalises every tar header
-      # it writes (owner 0:0, a fixed mtime, mode 644), the manifest is rewritten by
-      # deleting keys from the packed one, which leaves the surviving keys in their
-      # original order, and the gzip wrapper embeds no timestamp of its own. Verified
-      # by packing the same input twice and comparing digests.
-      #
-      # Run with `bun`, and never switch a released tag to another runtime: the gzip encoder
-      # belongs to whoever executes the CLI. Bun's (libdeflate) packs this package into 27,430
-      # bytes against Node's 27,476 for byte-identical contents, which is why it is the one
-      # chosen here — but the same fact means a repair re-run under the other runtime would
-      # attest and attach an artifact the registry does not have. `.tool-versions` pins the
-      # exact Bun, and a re-run checks out the tag, so the pin travels with the release.
-      # Measurements and the Node-to-Node comparison: src/tarball.ts.
-      - name: Pack, and publish unless this version is already on the registry
+      - name: Publish or verify the existing release artifact
         run: |
-          # pnpm is a devDependency, so the lockfile is the single place its version is
-          # declared and the same resolution runs here, in Check, and on a developer's
-          # machine. That matters beyond tidiness: pnpm decides which files enter the
-          # tarball this job signs, and provenance attests who built an artifact, never
-          # that the toolchain was sound. Sourcing it from PATH would instead take
-          # whatever the runner happened to have.
           export PATH="$PWD/node_modules/.bin:$PATH"
-          mode=""
-          spec="$(node -p '`${require("./package.json").name}@${require("./package.json").version}`')"
-          if npm view "$spec" version >/dev/null 2>&1; then
-            echo "$spec is already on the registry; re-packing to repair the release artifacts."
-            mode="--dry-run"
-          fi
-          # A bare `npm install` resolves whatever `latest` points at, so a prerelease must
-          # never carry it — that would hand every consumer a release candidate. Semver puts
-          # a hyphen only in the prerelease component, and the step above already proved the
-          # tag equals the manifest version, so the tag name decides this. `next` is the
-          # conventional prerelease dist-tag, not a requirement; change it deliberately.
-          case "${GITHUB_REF_NAME#v}" in
-            *-*) dist_tag=next ;;
-            *) dist_tag=latest ;;
-          esac
-          bun dist/cli.js $mode --tarball-out release-artifacts -- --access public --tag "$dist_tag" --provenance
+          bun scripts/release.ts publish
 
       # npm's own provenance covers the registry; this is the second, registry-
       # independent path (`gh attestation verify`). The subject is the exact tarball
@@ -154,30 +92,11 @@ jobs:
         with:
           subject-path: release-artifacts/*.tgz
 
-      # CHANGELOG.md is the single source of the release notes, so what ships here is what
-      # was reviewed in the tagged commit — editable before the tag, never regenerated after
-      # it. `gh --generate-notes` cannot serve this: it lists merged pull requests, and work
-      # lands on main by direct push, so it renders an empty release (measured on v0.4.0 —
-      # one line, the old release bot's own PR).
-      #
-      # The section runs from `## [x.y.z]` to the next `## [`, a shape owned by cliff.toml.
-      # Extracting it here rather than with a third-party action is deliberate: this job
-      # holds the npm OIDC identity and write access to the Release, and four lines of awk
-      # are a smaller surface than any action added to that blast radius.
-      #
-      # An empty extraction fails the release. A version with no changelog section is the
-      # thin, contentless release note this whole arrangement exists to prevent, and the
-      # local `version` script refuses the same case before the tag is ever made.
+      # Notes were extracted and checked before npm publication, from the tagged changelog.
       - name: Publish the GitHub Release and attach the tarball
         run: |
-          notes="$(awk -v h="## [${GITHUB_REF_NAME#v}]" '
-            index($0, h) == 1 { found = 1; next }
-            found && index($0, "## [") == 1 { exit }
-            found' CHANGELOG.md)"
-          test -n "$(printf '%s' "$notes" | tr -d '[:space:]')" ||
-            { echo "::error::CHANGELOG.md has no ${GITHUB_REF_NAME#v} section"; exit 1; }
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 ||
-            printf '%s\n' "$notes" | gh release create "$GITHUB_REF_NAME" --verify-tag --notes-file -
+            gh release create "$GITHUB_REF_NAME" --verify-tag --notes-file release-artifacts/notes.md
           gh release upload "$GITHUB_REF_NAME" release-artifacts/*.tgz --clobber
         env:
           GH_TOKEN: ${{ github.token }}

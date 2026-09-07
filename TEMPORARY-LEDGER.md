@@ -16,6 +16,8 @@ Art's latest verification ruling supersedes the local full-check-before-each-com
 
 ## Derived work, ordered by harm and dependency
 
+- [ ] Apply Art's simplification review throughout the remaining work: remove repeated help-parser process probes, retire the order-insensitive manifest comparator replaced by exact bytes, and review new process ownership for unnecessary machinery. Do not add a general resolver or an unapproved CLI surface. Each new guard must catch a demonstrated defect or a direct consequence of it.
+
 - [x] Archive interpretation and preservation — effective USTAR/PAX paths and byte-counted records; size overrides; malformed tails and alias/duplicate rejection; final-readback raw entry/order/metadata guard. Verified: typecheck and build; `bunx vitest run test/tarball.test.ts test/cli.test.ts` passed 50 tests in 2.11s, including real pnpm safe/secret long paths and independent tar readback. Synthetic framing test corrected from a valid nine-byte record to a malformed eight-byte one; this was a test expectation error, not a parser fix.
 - [ ] Publication identity and destination — Basis: npm must upload the checked artifact to the requested registry.
   - [ ] Implement R1 after ruling; test supported values and hostile selectors through actual npm and a loopback registry.
@@ -38,11 +40,7 @@ Art's latest verification ruling supersedes the local full-check-before-each-com
   - [ ] Preserve Windows argument safety and its actual platform CI lane.
   - [ ] Complete expected-error/cause diagnostics and escaped filenames. Unknown-field report now says “retained” and emits JSON-escaped keys and valid configuration suggestions.
   - [x] Verify and commit subprocess ownership: typecheck/build passed; command and built-CLI regressions passed 28 tests in 5.27s. Includes a SIGTERM-ignoring lifecycle, 2 MiB logs, private mutation and cwd-sensitive npm probe. Windows cancellation still needs its platform lane; diagnostics remain open below.
-- [ ] Release correctness — basis: no irreversible publication before all preconditions, and repair must preserve published identity.
-  - [ ] Require a tag reference, matching package version and nonempty release notes before publication.
-  - [ ] On rerun, compare candidate integrity with registry integrity before attestation or release-asset replacement; distinguish missing versions from registry failures.
-  - [ ] Preserve the unprivileged verification job and trusted-publishing workflow filename.
-  - [ ] Test release decision boundaries locally without credentials or remote mutations; verify workflow wiring and commit.
+- [x] Release correctness — preflight now checks tag reference, matching manifest and nonempty unique notes in the unprivileged verify job and before publication. Reruns compare candidate bytes with registry dist.integrity before attestation/assets; registry failures are distinct from 404. Workflow keeps `needs: verify` and its filename. Verified: typecheck, 13 release tests in 123ms (including loopback HTTP errors and a SHA-512 standard vector), and actual `GITHUB_REF=refs/tags/v0.7.3 bun scripts/release.ts preflight`. No live release/OIDC claim or remote mutation. Workflow action-update check is required before commit.
 - [ ] Dependency and routine-check health — basis: fix audited development dependency advisories without inflating runtime dependencies.
   - [ ] Refresh compatible vulnerable transitive dependencies; inspect lockfile and manifest deltas and run the actual audit scanner.
   - [ ] Measure ordinary targeted and full lane durations; parallelize independent checks without repeating builds or reducing coverage.
