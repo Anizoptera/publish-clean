@@ -149,12 +149,17 @@ describe.concurrent("monorepo-only dependency specs", () => {
     for (const spec of [
       "file:../outside",
       "./missing",
+      ".\\missing",
+      "file:C:/vendor",
       "file:/absolute",
       "git+file:///repo",
       "file:%zz",
     ])
       expect(() =>
-        assertNoMonorepoProtocols({ dependencies: { local: spec } }, ["index.js"]),
+        assertNoMonorepoProtocols({ dependencies: { local: spec } }, [
+          "index.js",
+          "C:/vendor/package.json",
+        ]),
       ).toThrow(/local target/);
     expect(() =>
       assertNoMonorepoProtocols({ dependencies: { local: "file:vendor" } }, [

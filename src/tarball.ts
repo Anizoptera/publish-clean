@@ -218,7 +218,7 @@ export function assertPreservedArchive(before: TarArchive, after: TarArchive): v
       !result ||
       original.name !== result.name ||
       original.type !== result.type ||
-      (original.name === MANIFEST_PATH
+      (original.name === MANIFEST_PATH && !PAX_TYPES.has(original.type)
         ? !reheader(original.header, result.body.length).equals(result.header)
         : !original.raw.equals(result.raw))
     )
@@ -242,7 +242,10 @@ export function packageFiles(archive: TarArchive): string[] {
 }
 
 function manifestEntry(archive: TarArchive): TarEntry {
-  const entry = archive.entries.find((candidate) => candidate.name === MANIFEST_PATH);
+  // A metadata header's name is only a label, even when it spells package/package.json.
+  const entry = archive.entries.find(
+    (candidate) => candidate.name === MANIFEST_PATH && !PAX_TYPES.has(candidate.type),
+  );
   if (!entry) throw new PublishCleanError(`Tarball does not contain ${MANIFEST_PATH}.`);
   return entry;
 }

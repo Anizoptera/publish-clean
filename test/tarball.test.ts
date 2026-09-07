@@ -8,7 +8,13 @@
 import { gunzipSync, gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 
-import { assertPreservedArchive, packageFiles, readArchive, replaceManifest } from "../src/tarball";
+import {
+  assertPreservedArchive,
+  manifestText,
+  packageFiles,
+  readArchive,
+  replaceManifest,
+} from "../src/tarball";
 
 const BLOCK = 512;
 
@@ -69,6 +75,20 @@ function pax(key: string, value: string): string {
 }
 
 const MANIFEST = "package/package.json";
+
+it("does not mistake a metadata header's name for the manifest member", () => {
+  const source = readArchive(
+    archive([
+      { name: MANIFEST, type: "x", body: pax("mtime", "0") },
+      { name: MANIFEST, body: '{"name":"fixture"}' },
+    ]),
+  );
+  expect(manifestText(source)).toBe('{"name":"fixture"}');
+  const rewritten = readArchive(replaceManifest(source, "{}"));
+  expect(manifestText(rewritten)).toBe("{}");
+  expect(() => assertPreservedArchive(source, rewritten)).not.toThrow();
+  expect(rewritten.entries[0]?.raw.equals(source.entries[0]?.raw ?? Buffer.alloc(0))).toBe(true);
+});
 
 describe("manifest rewriting", () => {
   it("replaces only the manifest and leaves every neighbour byte-identical", () => {

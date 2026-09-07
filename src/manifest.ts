@@ -304,7 +304,7 @@ export function assertNoMonorepoProtocols(pkg: JsonObject, files: readonly strin
         failures.push(`${field}.${name}: ${spec}`);
       // A file dependency is portable only when its target travels inside this tarball.
       // npm can install a shipped vendor directory; rejecting every file: spec would break it.
-      if (/^(?:file:|git\+file:|\.{1,2}(?:\/|$)|\/|~\/|[a-z]:[\\/])/i.test(spec)) {
+      if (/^(?:file:|git\+file:|\.{1,2}(?:[\\/]|$)|\/|~[\\/]|[a-z]:[\\/])/i.test(spec)) {
         let local: string | null = null;
         try {
           local = normalizeDeclaredPath(decodeURIComponent(spec.replace(/^file:/i, "")));
@@ -314,8 +314,7 @@ export function assertNoMonorepoProtocols(pkg: JsonObject, files: readonly strin
         if (
           !local ||
           /[\\]/.test(local) ||
-          spec.startsWith("git+file:") ||
-          spec.startsWith("~/") ||
+          /^(?:git\+file:|~[\\/]|(?:file:)?[a-z]:[\\/])/i.test(spec) ||
           !(
             (/\.(?:tgz|tar\.gz|tar)$/.test(local) && shipped.has(local)) ||
             shipped.has(`${local}/package.json`)
