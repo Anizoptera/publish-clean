@@ -11,6 +11,7 @@ it.concurrent.each([
   { manifest: { main: "./index" }, files: { "index.js": "module.exports = 42" } },
   { manifest: { main: "./lib/" }, files: { "lib/index.js": "module.exports = 42" } },
   { manifest: { main: "." }, files: { "index.js": "module.exports = 42" } },
+  { manifest: { main: "*.js" }, files: { "entry.js": "module.exports = 42" }, broken: true },
   { manifest: { main: "lib" }, files: { "lib/index": "module.exports = 42" }, broken: true },
   {
     manifest: { main: "lib" },

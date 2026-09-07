@@ -248,16 +248,18 @@ export function assertDeclaredFiles(pkg: JsonObject, published: readonly string[
     value: unknown,
     kind: DeclaredFile["kind"],
     mode: "every-string" | "relative-only" = "every-string",
+    patterns = false,
   ) => {
     const names: string[] = [];
     collectDeclaredPaths(value, names, mode);
-    declared.push(...names.map((name) => ({ name, kind, pattern: name.includes("*") })));
+    declared.push(...names.map((name) => ({ name, kind, pattern: patterns && name.includes("*") })));
   };
   collect(pkg.main, "main");
-  for (const field of ["types", "typings", "typesVersions"]) collect(pkg[field], "types");
+  for (const field of ["types", "typings"]) collect(pkg[field], "types");
+  collect(pkg.typesVersions, "types", "every-string", true);
   for (const field of ["module", "bin"]) collect(pkg[field], "file");
   collect(pkg.browser, "file", typeof pkg.browser === "string" ? "every-string" : "relative-only");
-  collect(pkg.sideEffects, "file", "relative-only");
+  collect(pkg.sideEffects, "file", "relative-only", true);
   collectMap(pkg.exports, false, declared);
   collectMap(pkg.imports, true, declared);
   const files = new Set(published);
