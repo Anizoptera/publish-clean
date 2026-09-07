@@ -19,15 +19,15 @@ Art's latest verification ruling supersedes the local full-check-before-each-com
 - [x] Archive interpretation and preservation — effective USTAR/PAX paths and byte-counted records; size overrides; malformed tails and alias/duplicate rejection; final-readback raw entry/order/metadata guard. Verified: typecheck and build; `bunx vitest run test/tarball.test.ts test/cli.test.ts` passed 50 tests in 2.11s, including real pnpm safe/secret long paths and independent tar readback. Synthetic framing test corrected from a valid nine-byte record to a malformed eight-byte one; this was a test expectation error, not a parser fix.
 - [ ] Publication identity and destination — Basis: npm must upload the checked artifact to the requested registry.
   - [ ] Implement R1 after ruling; test supported values and hostile selectors through actual npm and a loopback registry.
-  - [ ] Make explicit registry selection defeat scoped registry configuration; reconcile CLI and manifest precedence.
+  - [x] Explicit registry pins both the general and package-scope setting in the manifest and npm invocation. Actual loopback PUT matched the retained bytes and selected /chosen/ despite scoped /wrong/ configuration (605ms test). The fixture needed an auth key for the exact registry path; a host-only key did not authenticate npm’s preflight. Conflicting forwarded registry options remain tied to R1.
   - [x] Refuse a packed private manifest before stripping, including lifecycle mutation.
   - [x] Bind tool/version probes to the package cwd, bound them, and reuse their results.
   - [ ] Parse effective provenance intent and distinguish artifact preview from publication preflight.
   - [ ] Verify the completed publication surface, update its consumer documentation and commit.
 - [ ] Manifest and consumer behavior — basis: cleaning must preserve useful consumer behavior and reject broken package references.
   - [ ] Implement R2 after ruling; exercise a real lifecycle calling a retained helper.
-  - [ ] Reject malformed configuration values instead of silently ignoring them.
-  - [ ] Protect consumer-resolved fields and make explicit script removal consistent with lifecycle policy.
+  - [x] Reject malformed configuration objects, boolean/list values and registry URLs; validate files entries. Manifest regression lane passed 51 tests.
+  - [ ] Complete script removal under R2. Consumer-resolved ecosystem fields are now protected; their regression cases pass.
   - [ ] Reject nonportable dependency references without substring false positives; determine in-artifact local-reference semantics from actual consumers.
   - [ ] Validate main/bin/browser/types versus exports/imports with their distinct semantics; cover extensionless and directory entry points, invalid targets and missing wildcard targets.
   - [x] Drive all manifest guards from the final readback and preserve condition ordering.
@@ -36,7 +36,7 @@ Art's latest verification ruling supersedes the local full-check-before-each-com
   - [x] Stream pack output without the synchronous capture buffer limit; retain useful failure context without unbounded accumulation.
   - [x] Own cancellation, child settlement and temporary-directory cleanup; test readiness using lifecycle markers, including a descendant ignoring SIGTERM. The cancellation regression initially also counted Node’s compile-cache directory; inspect only directories this CLI owns.
   - [ ] Preserve Windows argument safety and its actual platform CI lane.
-  - [ ] Report expected errors clearly and unexpected failures with useful causes/stacks; escape untrusted display strings and correct premature “published” wording.
+  - [ ] Complete expected-error/cause diagnostics and escaped filenames. Unknown-field report now says “retained” and emits JSON-escaped keys and valid configuration suggestions.
   - [x] Verify and commit subprocess ownership: typecheck/build passed; command and built-CLI regressions passed 28 tests in 5.27s. Includes a SIGTERM-ignoring lifecycle, 2 MiB logs, private mutation and cwd-sensitive npm probe. Windows cancellation still needs its platform lane; diagnostics remain open below.
 - [ ] Release correctness — basis: no irreversible publication before all preconditions, and repair must preserve published identity.
   - [ ] Require a tag reference, matching package version and nonempty release notes before publication.

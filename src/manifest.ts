@@ -88,6 +88,17 @@ export const MONOREPO_PROTOCOLS = ["catalog:", "workspace:", "link:", "portal:"]
  * platform gating, so `devFields` is not allowed to name them.
  */
 export const RUNTIME_MANIFEST_FIELDS = new Set([
+  "config",
+  "deno",
+  "directories",
+  "jsdelivr",
+  "man",
+  "react-native",
+  "sass",
+  "style",
+  "styleModule",
+  "svelte",
+  "unpkg",
   ...DEP_FIELDS,
   "bin",
   "browser",
@@ -113,39 +124,20 @@ export const RUNTIME_MANIFEST_FIELDS = new Set([
   "version",
 ]);
 
-/**
- * Fields npm's registry, website and CLI read, plus the de-facto entry points bundlers
- * and CDNs look for. Recognised, so they raise no report, but a maintainer may legitimately
- * strip any of them through `devFields`: none is load-bearing for an install.
- *
- * Together with RUNTIME_MANIFEST_FIELDS this is the answer to "does anything downstream
- * read this key?". Anything outside both sets is, as far as this tool can tell, project
- * bookkeeping that a consumer downloads and never uses.
- */
+/** Registry metadata is recognised; consumer-resolved fields are protected separately. */
 export const REGISTRY_MANIFEST_FIELDS = new Set([
   "author",
   "bugs",
-  "config",
   "contributors",
-  "deno",
   "description",
-  "directories",
   "funding",
   "gitHead",
   "homepage",
-  "jsdelivr",
   "keywords",
   "maintainers",
-  "man",
   "preferGlobal",
-  "react-native",
   "repository",
-  "sass",
   "scripts",
-  "style",
-  "styleModule",
-  "svelte",
-  "unpkg",
 ]);
 
 /**
@@ -177,6 +169,13 @@ export function stripManifest(pkg: JsonObject, extraDevFields: readonly string[]
   return stripped;
 }
 
+/** npm gives a scope registry priority over the general registry setting. */
+export function packageScope(pkg: JsonObject): string | null {
+  if (typeof pkg.name !== "string" || !pkg.name.startsWith("@")) return null;
+  const slash = pkg.name.indexOf("/");
+  return slash > 1 ? pkg.name.slice(0, slash) : null;
+}
+
 /**
  * Pins the published manifest to a registry, when one was chosen.
  *
@@ -188,10 +187,24 @@ export function stripManifest(pkg: JsonObject, extraDevFields: readonly string[]
  * Returns the manifest unchanged when no registry was chosen, so the caller has no branch and
  * cannot forget one.
  */
+/** A misspelled registry must fail locally rather than fall back to a public destination. */
+export function assertRegistry(value: unknown): asserts value is string {
+  try {
+    if (typeof value !== "string" || !value.trim()) throw new Error("Expected a URL");
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Expected HTTP(S)");
+  } catch (cause) {
+    throw new PublishCleanError("Registry must be an absolute HTTP(S) URL.", { cause });
+  }
+}
+
 export function withRegistry(pkg: JsonObject, registry: null | string): JsonObject {
   if (registry === null) return pkg;
+  assertRegistry(registry);
   const publishConfig = isObject(pkg.publishConfig) ? { ...pkg.publishConfig } : {};
   publishConfig.registry = registry;
+  const scope = packageScope(pkg);
+  if (scope) publishConfig[`${scope}:registry`] = registry;
   return { ...pkg, publishConfig };
 }
 
@@ -258,11 +271,11 @@ export function unrecognizedFieldsReport(pkg: JsonObject, kept: readonly string[
   );
   if (unrecognized.length === 0) return null;
   return (
-    `publish-clean: these manifest fields are not recognised and were published as-is:\n` +
-    `${unrecognized.map((field) => `  ${field}`).join("\n")}\n` +
+    `publish-clean: these manifest fields are not recognised and are retained as-is:\n` +
+    `${unrecognized.map((field) => `  ${JSON.stringify(field)}`).join("\n")}\n` +
     `Strip the ones consumers do not read, and acknowledge the ones they do:\n` +
-    `  "publish-clean": { "devFields": [${unrecognized.map((f) => `"${f}"`).join(", ")}] }\n` +
-    `  "publish-clean": { "keepFields": [${unrecognized.map((f) => `"${f}"`).join(", ")}] }`
+    `  "publish-clean": { "devFields": [${unrecognized.map((f) => JSON.stringify(f)).join(", ")}] }\n` +
+    `  "publish-clean": { "keepFields": [${unrecognized.map((f) => JSON.stringify(f)).join(", ")}] }`
   );
 }
 
@@ -300,8 +313,14 @@ export function assertPublicPackage(pkg: JsonObject): void {
 
 export function assertFilesField(pkg: JsonObject, skip: boolean): void {
   if (skip) return;
-  if (!Array.isArray(pkg.files) || pkg.files.length === 0) {
-    throw new PublishCleanError('Package manifest must define a non-empty "files" array.');
+  if (
+    !Array.isArray(pkg.files) ||
+    pkg.files.length === 0 ||
+    pkg.files.some((file) => typeof file !== "string" || !file.trim())
+  ) {
+    throw new PublishCleanError(
+      'Package manifest must define a non-empty "files" array of non-empty strings.',
+    );
   }
 }
 
@@ -321,13 +340,20 @@ const CONFIG_KEYS = new Set([
 
 export function packageConfig(pkg: JsonObject): JsonObject {
   const config = pkg["publish-clean"];
-  if (!isObject(config)) return {};
+  if (config === undefined) return {};
+  if (!isObject(config)) throw new PublishCleanError('"publish-clean" must be an object.');
   const unknown = Object.keys(config).filter((key) => !CONFIG_KEYS.has(key));
   if (unknown.length > 0)
     throw new PublishCleanError(
       `Unknown "publish-clean" manifest options:\n${unknown.join("\n")}\n` +
         `Valid options: ${[...CONFIG_KEYS].join(", ")}`,
     );
+  for (const key of ["allowSuspicious", "noGitChecks", "skipFileCheck"])
+    if (config[key] !== undefined && typeof config[key] !== "boolean")
+      throw new PublishCleanError(`publish-clean.${key} must be a boolean.`);
+  if (config.registry !== undefined) assertRegistry(config.registry);
+  stringList(config, "devFields");
+  stringList(config, "keepFields");
   return config;
 }
 

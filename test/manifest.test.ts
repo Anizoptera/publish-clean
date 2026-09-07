@@ -215,3 +215,39 @@ describe.concurrent("registry pinning", () => {
     expect(pkg.publishConfig).toEqual({ access: "public" });
   });
 });
+
+describe("strict manifest configuration", () => {
+  it.each([null, false, "config", []])("rejects a non-object configuration %j", (value) => {
+    expect(() => packageConfig({ "publish-clean": value })).toThrow(/must be an object/);
+  });
+  it.each(["allowSuspicious", "skipFileCheck", "noGitChecks"])(
+    "requires a boolean for %s",
+    (key) => {
+      expect(() => packageConfig({ "publish-clean": { [key]: "false" } })).toThrow(/boolean/);
+    },
+  );
+  it.each([42, "registry.npmjs.org", "file:///tmp/registry", ""])(
+    "rejects invalid registries %j",
+    (registry) => {
+      expect(() => packageConfig({ "publish-clean": { registry } })).toThrow(/HTTP/);
+    },
+  );
+  it.each(["svelte", "style", "sass", "react-native", "unpkg", "jsdelivr", "config", "man"])(
+    "protects consumer field %s from devFields",
+    (field) => {
+      expect(() => customDevFields({ devFields: [field] })).toThrow(/cannot remove/);
+    },
+  );
+  it("emits valid JSON suggestions for arbitrary unknown field names", () => {
+    const key = 'a"\n\\b';
+    const report = unrecognizedFieldsReport({ [key]: true }, []);
+    expect(report).toContain(JSON.stringify(key));
+    expect(report).not.toContain("were published");
+  });
+  it("pins the scope-specific registry in the artifact as well", () => {
+    expect(withRegistry({ name: "@audit/pkg" }, "https://r.test").publishConfig).toEqual({
+      registry: "https://r.test",
+      "@audit:registry": "https://r.test",
+    });
+  });
+});

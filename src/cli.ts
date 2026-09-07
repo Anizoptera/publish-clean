@@ -25,6 +25,7 @@ import {
   customDevFields,
   keptFields,
   packageConfig,
+  packageScope,
   stripManifest,
   unrecognizedFieldsReport,
   withRegistry,
@@ -345,9 +346,12 @@ async function packAndClean(
       signal,
     );
     assertRepositoryForTrustedPublish(shippedPkg, opts.publishArgs, publishEnv());
-    const publishArgs = registry
-      ? ["publish", finalTarball, "--registry", registry, ...opts.publishArgs]
-      : ["publish", finalTarball, ...opts.publishArgs];
+    const scope = packageScope(shippedPkg);
+    const publishArgs = ["publish", finalTarball, ...opts.publishArgs];
+    if (registry) {
+      publishArgs.push("--registry", registry);
+      if (scope) publishArgs.push(`--${scope}:registry=${registry}`);
+    }
     // Run from the source package, never the temp tree. npm resolves its project `.npmrc` from
     // the nearest ancestor of the working directory holding a `package.json`, so publishing
     // from a temp directory silently discards the registry and credentials the author
