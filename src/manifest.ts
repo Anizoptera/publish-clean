@@ -159,11 +159,13 @@ export function stripManifest(pkg: JsonObject, extraDevFields: readonly string[]
 
   const scripts = isObject(pkg.scripts) ? pkg.scripts : null;
   if (scripts) {
-    const kept: JsonObject = {};
-    for (const [name, value] of Object.entries(scripts)) {
-      if (CONSUMER_SCRIPTS.has(name) && typeof value === "string") kept[name] = value;
-    }
-    if (Object.keys(kept).length > 0) stripped.scripts = kept;
+    // Lifecycle commands can invoke arbitrary helpers; preserve their scripts as one unit.
+    if (
+      Object.entries(scripts).some(
+        ([name, value]) => CONSUMER_SCRIPTS.has(name) && typeof value === "string",
+      )
+    )
+      stripped.scripts = scripts;
     else delete stripped.scripts;
   }
 
@@ -223,9 +225,8 @@ export function withRegistry(pkg: JsonObject, registry: null | string): JsonObje
  * introduced while rewriting the archive is caught as well as one introduced by stripping.
  *
  * `devFields` entries are exempt: removing those was the request. `scripts` is exempt
- * because it is rewritten rather than removed, down to the install lifecycle hooks a
- * consumer runs, and a package whose scripts are all developer-only correctly ends up with
- * none.
+ * because its entire block survives when consumer lifecycle hooks exist, and otherwise
+ * the development-only block is removed.
  */
 export function assertNoLostConsumerFields(
   sourcePkg: JsonObject,

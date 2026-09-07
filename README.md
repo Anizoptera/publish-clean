@@ -296,9 +296,9 @@ agrees — its registry drops the field from the metadata it serves.
 
 What else goes: `devDependencies`, `workspaces`, `pnpm`, `packageManager`, `overrides`,
 `resolutions`, and the config blocks belonging to test runners, linters, formatters,
-coverage tools, build systems and release tools. Scripts go too, apart from the install
-lifecycle ones a consumer actually runs: `preinstall`, `install`, `postinstall`,
-`prepare` and `uninstall`.
+coverage tools, build systems and release tools. When `preinstall`, `install`, `postinstall`,
+`prepare` or `uninstall` exists, the complete scripts block survives: a lifecycle may call
+any helper script. Otherwise the development-only scripts block is removed.
 
 Anything the tool does not recognise ships, and you get told it did:
 

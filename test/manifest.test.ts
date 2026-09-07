@@ -33,12 +33,12 @@ describe.concurrent("manifest cleaning", () => {
     expect(cleaned.repository).toEqual({ type: "git", url: "git+https://example.test/x.git" });
   });
 
-  it("keeps only the scripts an install actually runs", () => {
+  it("preserves helper scripts when a consumer lifecycle is present", () => {
     const cleaned = stripManifest(
       { name: "x", scripts: { build: "tsc", test: "vitest", postinstall: "node index.js" } },
       [],
     );
-    expect(cleaned.scripts).toEqual({ postinstall: "node index.js" });
+    expect(cleaned.scripts).toEqual({ build: "tsc", test: "vitest", postinstall: "node index.js" });
   });
 
   it("drops the scripts block entirely when nothing in it survives", () => {

@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { run } from "../src/command";
 
 const CLI = path.resolve("dist/cli.js");
 
@@ -176,8 +177,8 @@ describe.concurrent("publish-clean", () => {
         // set after pnpm selected it, and this is the shape that proves it: a pipeline that
         // packed a second time would find no `files` in the cleaned manifest, fall back to
         // this `.gitignore`, and drop `index.d.ts` from the published tarball.
-        files: ["index.js", "index.d.ts", ".gitignore"],
-        scripts: { build: "tsc", postinstall: "node index.js" },
+        files: ["index.js", "index.d.ts", ".gitignore", "install.cjs"],
+        scripts: { build: "tsc", postinstall: "npm run setup", setup: "node install.cjs" },
         devDependencies: { typescript: "^5.0.0" },
         // Unrecognised, and each half of the response matters: staying silent hides the
         // drift, and dropping the field would break a consumer who does read it.
@@ -196,6 +197,7 @@ describe.concurrent("publish-clean", () => {
         "index.js": "export const ok = true;\n",
         "index.d.ts": "export {};\n",
         ".gitignore": "index.d.ts\n",
+        "install.cjs": "require('node:fs').writeFileSync('installed.txt', 'helper ran');",
       },
     );
     const out = path.join(fx.root, "artifacts");
@@ -218,7 +220,11 @@ describe.concurrent("publish-clean", () => {
       >;
       expect(cleaned.devDependencies).toBeUndefined();
       expect(cleaned["publish-clean"]).toBeUndefined();
-      expect(cleaned.scripts).toEqual({ postinstall: "node index.js" });
+      expect(cleaned.scripts).toEqual({
+        build: "tsc",
+        postinstall: "npm run setup",
+        setup: "node install.cjs",
+      });
       expect(cleaned.someToolConfig).toEqual({ threshold: 5 });
       expect(cleaned.contributes).toEqual({ commands: [] });
 
@@ -248,6 +254,26 @@ describe.concurrent("publish-clean", () => {
       expect(listed.map((line) => JSON.parse(line.trim()) as string).sort()).toEqual(
         listTarball(tarball).sort(),
       );
+      const consumer = path.join(fx.root, "consumer");
+      await mkdir(consumer);
+      await writeFile(path.join(consumer, "package.json"), '{"name":"consumer","private":true}');
+      await run(
+        "npm",
+        [
+          "install",
+          tarball,
+          "--offline",
+          "--no-audit",
+          "--no-fund",
+          "--package-lock=false",
+          "--ignore-scripts=false",
+        ],
+        consumer,
+        { timeout: 5000 },
+      );
+      expect(
+        await readFile(path.join(consumer, "node_modules/fixture-complete/installed.txt"), "utf8"),
+      ).toBe("helper ran");
     } finally {
       await cleanup(fx.root);
     }
