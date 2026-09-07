@@ -149,10 +149,13 @@ interface DeclaredFile {
   pattern: boolean;
 }
 
+/** Arrays skip invalid targets, but package-configuration errors must escape the fallback. */
+class InvalidPackageTarget extends PublishCleanError {}
+
 /** Export targets are URLs, unlike legacy main/bin paths; normalization must not hide invalid segments. */
 function targetPath(target: string): string {
   if (!target.startsWith("./") || /%2f|%5c/i.test(target))
-    throw new PublishCleanError(
+    throw new InvalidPackageTarget(
       `Manifest declares invalid package paths: ${JSON.stringify(target)}`,
     );
   try {
@@ -168,52 +171,59 @@ function targetPath(target: string): string {
       "/package/".length,
     );
   } catch (cause) {
-    throw new PublishCleanError(
+    throw new InvalidPackageTarget(
       `Manifest declares invalid package paths: ${JSON.stringify(target)}`,
       { cause },
     );
   }
 }
 
-/** Collect reachable targets without treating array fallbacks or external imports as file promises. */
+/** True selects a target, null blocks a condition, undefined leaves later conditions reachable. */
 function collectTargets(
   value: unknown,
   imports: boolean,
   pattern: boolean,
   out: DeclaredFile[],
-): boolean {
-  if (value === null) return true;
+): true | null | undefined {
+  if (value === null) return null;
   if (typeof value === "string") {
     if (imports && !value.startsWith(".") && !value.startsWith("/")) return true;
     out.push({ name: targetPath(value), kind: "target", pattern });
     return true;
   }
   if (Array.isArray(value)) {
-    let invalid: unknown;
+    if (value.length === 0) return null;
+    let invalid: InvalidPackageTarget | null | undefined;
     for (const item of value) {
       try {
-        if (collectTargets(item, imports, pattern, out)) return true;
+        const result = collectTargets(item, imports, pattern, out);
+        if (result === true) return true;
+        // Unlike condition objects, arrays continue after null and clear an earlier error.
+        if (result === null) invalid = null;
       } catch (error) {
+        if (!(error instanceof InvalidPackageTarget)) throw error;
         invalid = error;
       }
     }
     if (invalid) throw invalid;
-    return false;
+    return invalid;
   }
   if (!isObject(value))
-    throw new PublishCleanError(
+    throw new InvalidPackageTarget(
       "Invalid exports/imports target; expected a path, condition object, array or null.",
     );
-  for (const [condition, item] of Object.entries(value)) {
-    if (
-      condition.startsWith(".") ||
-      (String(Number(condition)) === condition && Number.isInteger(Number(condition)))
-    )
+  const conditions = Object.entries(value);
+  // Node rejects numeric condition names before choosing any branch, including default.
+  for (const [condition] of conditions) {
+    const number = Number(condition);
+    if (String(number) === condition && number >= 0 && number < 0xffff_ffff)
       throw new PublishCleanError(`Invalid export condition: ${JSON.stringify(condition)}.`);
-    const definite = collectTargets(item, imports, pattern, out);
-    if (condition === "default" && definite) return true;
   }
-  return false;
+  for (const [condition, item] of conditions) {
+    const definite = collectTargets(item, imports, pattern, out);
+    if (condition === "default" && definite !== undefined) return definite;
+  }
+  return undefined;
 }
 
 function collectMap(value: unknown, imports: boolean, out: DeclaredFile[]): void {

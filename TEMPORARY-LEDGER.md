@@ -16,6 +16,8 @@ Art's latest verification ruling supersedes the local full-check-before-each-com
 
 ## Derived work, ordered by harm and dependency
 
+- [x] Node-backed regressions exposed null fallback, swallowed configuration-error and numeric-condition mismatches in the new resolver. Preserve Node's three outcomes and skip only invalid-target errors; typecheck and 110 path/manifest/artifact tests passed in 108ms after the failing cases were repaired.
+
 - [x] Rewrite the owned temporary tarball directly, removing a directory creation and second artifact path while retaining final disk readback. Typecheck/build and 55 CLI/archive/actual-upload regressions passed in 2.37s.
 - [ ] Restore the explicit pnpm-only requirement weakened by the documentation compression; keep the measured bundling limitation and rationale link.
 

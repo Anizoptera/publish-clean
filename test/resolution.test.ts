@@ -23,6 +23,32 @@ it.concurrent.each([
     files: { "index.js": "module.exports = 42" },
   },
   {
+    manifest: { exports: [null, "./missing.js"] },
+    files: { "index.js": "module.exports = 42" },
+    broken: true,
+  },
+  {
+    manifest: { exports: [{ default: null }, "./missing.js"] },
+    files: { "index.js": "module.exports = 42" },
+    broken: true,
+  },
+  {
+    manifest: { exports: { ".": "./index.js", "./hidden": ["invalid", null] } },
+    files: { "index.js": "module.exports = 42" },
+  },
+  {
+    manifest: {
+      exports: { ".": "./index.js", "./hidden": { default: null, node: "./missing.js" } },
+    },
+    files: { "index.js": "module.exports = 42" },
+  },
+  {
+    manifest: {
+      exports: { ".": { "-1": "./index.js", ".custom": "./index.js", default: "./index.js" } },
+    },
+    files: { "index.js": "module.exports = 42" },
+  },
+  {
     manifest: { exports: "./with%20space.js?variant" },
     files: { "with space.js": "module.exports = 42" },
   },
@@ -59,6 +85,8 @@ it.concurrent.each([
   "./lib/../index.js",
   "./%2e%2e/index.js",
   "./node_modules/index.js",
+  [{ "0": "./index.js" }, "./index.js"],
+  [{ default: "./index.js", "0.5": "./index.js" }, "./index.js"],
 ])("rejects a target Node refuses: %s", async (target) => {
   const root = await mkdtemp(path.join(tmpdir(), "publish-clean-invalid-target-"));
   const dir = path.join(root, "node_modules", "fixture");
@@ -70,9 +98,7 @@ it.concurrent.each([
     );
     await writeFile(path.join(dir, "index.js"), "module.exports = 42");
     expect(() => createRequire(path.join(root, "consumer.cjs"))("fixture")).toThrow(/Invalid/);
-    expect(() => assertDeclaredFiles({ exports: target }, ["index.js"])).toThrow(
-      /invalid package paths/,
-    );
+    expect(() => assertDeclaredFiles({ exports: target }, ["index.js"])).toThrow(/invalid/i);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
