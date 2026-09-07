@@ -2,9 +2,10 @@
 
 - Keep this CLI dependency-free at runtime.
 - Use `pnpm pack` as the source of truth for file selection, workspace/catalog resolution and
-  `publishConfig` overrides. Before replacing it, read `docs/why-pnpm-and-npm.md` and rerun the
-  relevant compatibility cases. A hoisted linker can enable pnpm bundling, but this tool still
-  refuses bundled `node_modules`; changing packers or linkers does not waive that policy.
+  `publishConfig` overrides; NEVER substitute `bun pm pack` or `npm pack`. The evidence belongs
+  in `docs/why-pnpm-and-npm.md`; update it and this bullet together. A hoisted linker can enable
+  pnpm bundling, but this tool still refuses bundled `node_modules`; changing packers or linkers
+  does not waive that policy.
 - Pack exactly ONCE. The published artifact is pnpm's tarball with its `package/package.json` member
   rewritten in place (`src/tarball.ts`), never a repack of the cleaned directory. Packing again hands
   the file set to a second packer that re-derives it from `files` — the very field being stripped — so

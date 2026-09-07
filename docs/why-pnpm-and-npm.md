@@ -1,7 +1,7 @@
 # Why pnpm packs and npm publishes
 
-Keep pnpm as the packer and npm as the uploader until a replacement preserves workspace
-resolution, manifest overrides and the checked tarball's bytes.
+Use pnpm to pack and npm to upload. Replacing either requires Art's ruling and evidence
+that the replacement preserves workspace resolution, manifest overrides and the checked tarball's bytes.
 
 The packer comparisons below were measured against pnpm 11.21, npm 11.19 and Bun 1.3.14;
 they are regression cases to rerun when evaluating another version, not universal claims.

@@ -32,7 +32,7 @@ each, which is the place to start if you want to argue with one.
 - Validate the tarball that gets published, and nothing else. Checking an extracted copy or
   the repository tree proves things about something no user receives.
 - Cleaning must not modify the source tree; package lifecycle scripts may. Pack only once. The manifest is read out of the packed
-  tarball and written back into a copy of it as a member replacement; repacking would hand
+  tarball and replaced inside that temporary file; repacking would hand
   the file set to a second packer that re-derives it from the stripped `files`.
 - This is not a release manager. Versions, changelogs, tags, GitHub Releases and dist-tag
   policy belong to other tools.

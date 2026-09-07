@@ -222,16 +222,16 @@ It covers workspace resolution, pnpm overrides, bundled dependencies and the exa
 upload requirement. Other clients also support provenance; that feature alone does not
 establish equivalent behavior throughout this pipeline.
 
-### Why the manifest is cleaned on a copy
+### Why cleaning happens in the tarball
 
-The manifest is read out of the packed tarball and written back into a copy of it, in a
-temp directory. The cleaner never writes the source manifest; pack hooks still run in
+The manifest is rewritten inside the tarball in a temporary directory.
+The cleaner never writes the source manifest; pack hooks still run in
 your source directory and may change it.
 
 The obvious alternative is what a lot of hand-rolled release scripts do: edit
 `package.json`, publish, edit it back. That's fine until something dies in the middle,
 and then your repo is sitting on a manifest nobody meant to keep. It also can't be run
-twice at once. Cleaning a copy has neither problem and costs a directory in `/tmp`.
+twice at once. Cleaning the temporary tarball avoids those source edits.
 
 ### Why the tarball is edited instead of packed again
 
@@ -256,9 +256,8 @@ timestamp and file modes. A plain `tar` invocation would replace those with what
 machine happens to have.
 
 Lifecycle scripts run once, at the first pack. `pnpm pack` runs your `prepare` and
-`prepack`, which is how build output reaches the package at all. Nothing runs afterwards:
-npm skips `prepack`/`postpack` when it is handed a tarball rather than a directory, so
-nothing can alter the artifact after it was checked.
+`prepack`, which is how build output reaches the package at all. npm skips package lifecycle
+scripts for a tarball input, so upload does not rerun hooks against the checked artifact.
 
 ## What it checks
 

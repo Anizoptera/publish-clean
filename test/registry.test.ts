@@ -1,4 +1,4 @@
-/** Observe npm's actual upload to a loopback registry, without credentials or external writes. */
+/** Compare npm's loopback upload with the validated bytes without contacting an external registry. */
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
