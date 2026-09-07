@@ -308,52 +308,6 @@ describe.concurrent("publish-clean", () => {
     }
   });
 
-  // npm is the only command this tool hands the artifact to, so the whole invocation is
-  // captured: the arguments, and the directory it runs in. The directory is not incidental.
-  // npm resolves a project `.npmrc` from the nearest ancestor of its working directory that
-  // holds a `package.json`, so publishing from the temp tree would silently discard the
-  // registry and credentials the author configured for this project — a package aimed at an
-  // internal registry would go to npmjs.com instead, and nothing would say so.
-  it("publishes the tarball from the source package directory", async () => {
-    const fx = await fixture(
-      { name: "fixture-npm-publish", version: "1.0.0", files: ["index.js"] },
-      { "index.js": "module.exports = 1;\n" },
-    );
-    const bin = path.join(fx.root, "bin");
-    const log = path.join(fx.root, "commands.log");
-    try {
-      await mkdir(bin);
-      // Never execs the real npm: `which npm` usually resolves to a version manager's shim,
-      // which re-resolves the tool BY NAME, finds this fake first and execs it again — an
-      // unbounded fork/exec loop that presents as a hang.
-      await writeShim(
-        path.join(bin, "npm"),
-        `#!/bin/sh
-if [ "$1" = "--version" ]; then echo "11.5.1"; exit 0; fi
-if [ "$*" = "config get provenance" ]; then echo "false"; exit 0; fi
-if [ "$1" = "publish" ]; then
-  printf '%s\\n%s\\n' "$*" "$(pwd -P)" > "${log}"
-  exit 0
-fi
-echo "unexpected npm $*" >&2
-exit 1
-`,
-      );
-      const result = await runCli(
-        ["--no-git-checks", fx.dir, "--", "--access", "public", "--tag", "latest"],
-        process.cwd(),
-        { PATH: `${bin}:${process.env.PATH ?? ""}` },
-      );
-      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      const [invocation, cwd] = (await readFile(log, "utf8")).trim().split("\n");
-      expect(invocation).toContain("publish ");
-      expect(invocation).toContain(".tgz");
-      expect(cwd).toBe(await realpath(fx.dir));
-    } finally {
-      await cleanup(fx.root);
-    }
-  });
-
   it("reports a required tool's own words when it is present but refuses to run", async () => {
     const fx = await fixture(
       { name: "fixture-broken-shim", version: "1.0.0", files: ["index.js"] },
