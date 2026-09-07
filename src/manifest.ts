@@ -17,9 +17,8 @@ export const DEV_FIELDS = new Set([
   "catalog",
   "catalogs",
   "patchedDependencies",
-  // The refusal to publish reads `private` from the source manifest before any stripping
-  // happens, so removing it here cannot open a bypass. In a published manifest npm never
-  // reads it back.
+  // Both the source and packed manifests are checked before stripping: pack hooks can
+  // change this flag, and removing it first would bypass the refusal.
   "private",
   // A packing instruction, spent once the tarball exists: the published artifact is that
   // tarball with its manifest replaced, so nothing re-derives a file set from this field, and

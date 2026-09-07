@@ -649,3 +649,135 @@ it("scans and preserves the effective names pnpm emits for long USTAR and PAX pa
     await cleanup(fx.root);
   }
 });
+
+it("rejects a private flag written by prepack before it can be stripped", async () => {
+  const fx = await fixture(
+    {
+      name: "becomes-private",
+      version: "1.0.0",
+      files: ["index.js"],
+      scripts: { prepack: "node mark-private.cjs" },
+    },
+    {
+      "index.js": "module.exports = 1",
+      "mark-private.cjs": `const fs = require('node:fs'); const pkg = JSON.parse(fs.readFileSync('package.json')); pkg.private = true; fs.writeFileSync('package.json', JSON.stringify(pkg));`,
+    },
+  );
+  try {
+    const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("private: true");
+  } finally {
+    await cleanup(fx.root);
+  }
+});
+
+it("streams verbose lifecycle output without a capture-buffer failure", async () => {
+  const fx = await fixture(
+    {
+      name: "verbose-pack",
+      version: "1.0.0",
+      files: ["index.js"],
+      scripts: { prepack: "node verbose.cjs" },
+    },
+    {
+      "index.js": "module.exports = 1",
+      "verbose.cjs": `process.stdout.write('x'.repeat(2 * 1024 * 1024));`,
+    },
+  );
+  try {
+    const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+    expect(result.status, result.stderr.slice(-2000)).toBe(0);
+    expect(result.stderr.length).toBeGreaterThan(2 * 1024 * 1024);
+    expect(result.stdout).toContain("cleaned package.json");
+  } finally {
+    await cleanup(fx.root);
+  }
+});
+
+it.skipIf(process.platform === "win32")(
+  "cancels a live lifecycle and removes its temporary archive directory",
+  async () => {
+    const fx = await fixture(
+      {
+        name: "cancel-pack",
+        version: "1.0.0",
+        files: ["index.js"],
+        scripts: { prepack: "node waiting.cjs" },
+      },
+      {
+        "index.js": "module.exports = 1",
+        "waiting.cjs": `process.on('SIGTERM', () => {}); console.log('PACK_READY:' + process.pid); setInterval(() => {}, 1000);`,
+      },
+    );
+    const temp = path.join(fx.root, "temp");
+    await mkdir(temp);
+    let lifecyclePid: number | undefined;
+    const child = spawn("node", [CLI, "--dry-run", "--no-git-checks", fx.dir], {
+      env: { ...process.env, TMPDIR: temp },
+      timeout: 5000,
+      killSignal: "SIGKILL",
+    });
+    try {
+      const result = await new Promise<{ status: number | null; stderr: string }>(
+        (resolve, reject) => {
+          let stderr = "";
+          child.stdout.resume();
+          child.stderr.on("data", (chunk: Buffer) => {
+            stderr += chunk.toString();
+            const match = /PACK_READY:(\d+)/.exec(stderr);
+            if (match && lifecyclePid === undefined) {
+              lifecyclePid = Number(match[1]);
+              child.kill("SIGTERM");
+            }
+          });
+          child.on("error", reject);
+          child.on("close", (status) => resolve({ status, stderr }));
+        },
+      );
+      expect(lifecyclePid, result.stderr).toBeDefined();
+      expect(result.status, result.stderr).toBe(143);
+      expect((await readdir(temp)).filter((name) => name.startsWith("publish-clean-"))).toEqual([]);
+      expect(() => process.kill(lifecyclePid ?? 0, 0)).toThrow();
+    } finally {
+      child.kill("SIGKILL");
+      if (lifecyclePid !== undefined) {
+        try {
+          process.kill(lifecyclePid, "SIGKILL");
+        } catch {}
+      }
+      await cleanup(fx.root);
+    }
+  },
+);
+
+it("probes the npm version in the package directory, once", async () => {
+  const fx = await fixture(
+    { name: "cwd-version", version: "1.0.0", files: ["index.js"] },
+    { "index.js": "x" },
+  );
+  const bin = path.join(fx.root, "bin");
+  const log = path.join(fx.root, "probe.log");
+  try {
+    await mkdir(bin);
+    await writeShim(
+      path.join(bin, "npm"),
+      `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  pwd -P >> '${log}'
+  if [ "$(pwd -P)" = '${await realpath(fx.dir)}' ]; then echo 10.0.0; else echo 11.19.0; fi
+  exit 0
+fi
+exit 97
+`,
+    );
+    const result = await runCli(["--no-git-checks", fx.dir, "--", "--provenance"], process.cwd(), {
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("requires npm 11.5.1");
+    expect((await readFile(log, "utf8")).trim().split("\n")).toEqual([await realpath(fx.dir)]);
+  } finally {
+    await cleanup(fx.root);
+  }
+});

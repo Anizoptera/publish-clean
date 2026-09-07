@@ -12,9 +12,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { assertDeclaredFiles, assertSameEntries, validatePackedFiles } from "./artifact";
-import { outputFromError, requireTool, run, runAttached } from "./command";
+import { outputFromError, requireTool, run } from "./command";
 import { PublishCleanError } from "./error";
-import { isObject, stableJson, stringifyJson } from "./json";
+import { isObject, stringifyJson } from "./json";
 import type { JsonObject } from "./json";
 import {
   PUBLISH_ADVISORY,
@@ -114,8 +114,8 @@ function readJson(file: string): JsonObject {
  * is a compatibility claim (1.3.14 reports 24.3.0) about a runtime that never runs npm at all,
  * so reading it would answer a question nobody asked while looking exactly like a check.
  */
-function toolVersion(command: string): readonly [number, number, number] {
-  const raw = run(command, ["--version"], process.cwd()).trim().replace(/^v/, "");
+function toolVersion(command: string, version: string): readonly [number, number, number] {
+  const raw = version.trim().replace(/^v/, "");
   const parts = raw.split(".").map((part) => Number.parseInt(part, 10));
   if (parts.length < 3 || parts.some((part) => Number.isNaN(part)))
     throw new PublishCleanError(`Unable to parse ${command} version: ${raw}`);
@@ -135,14 +135,20 @@ function publishEnv(): TrustedPublishEnv {
   };
 }
 
-function assertTrustedPublishingRuntime(pkg: JsonObject, publishArgs: readonly string[]): void {
+async function assertTrustedPublishingRuntime(
+  pkg: JsonObject,
+  publishArgs: readonly string[],
+  cwd: string,
+  npmVersion: string,
+  signal: AbortSignal,
+): Promise<void> {
   if (!wantsTrustedPublish(pkg, publishArgs, publishEnv())) return;
-  const npm = toolVersion("npm");
+  const npm = toolVersion("npm", npmVersion);
   if (!isAtLeast(npm, MIN_TRUSTED_NPM_VERSION))
     throw new PublishCleanError(
       `Trusted npm publishing requires npm ${MIN_TRUSTED_NPM_VERSION.join(".")} or newer; found ${npm.join(".")}.`,
     );
-  const node = toolVersion("node");
+  const node = toolVersion("node", await requireTool("node", cwd, signal));
   if (isAtLeast(node, MIN_TRUSTED_NODE_VERSION)) return;
   throw new PublishCleanError(
     `Trusted npm publishing requires Node.js ${MIN_TRUSTED_NODE_VERSION.join(".")} or newer; found ${node.join(".")}.`,
@@ -155,10 +161,16 @@ function warnIfNonPnpmLifecycle(): void {
   console.warn(`${PUBLISH_ADVISORY} Detected lifecycle user agent: ${userAgent}`);
 }
 
-function assertCleanGit(packageDir: string, skip: boolean): void {
+async function assertCleanGit(
+  packageDir: string,
+  skip: boolean,
+  signal: AbortSignal,
+): Promise<void> {
   if (skip) return;
   try {
-    const output = run("git", ["status", "--porcelain", "--", "."], packageDir).trim();
+    const output = (
+      await run("git", ["status", "--porcelain", "--", "."], packageDir, { signal })
+    ).trim();
     if (output) throw new PublishCleanError(`Source package has uncommitted changes:\n${output}`);
   } catch (error) {
     if (error instanceof PublishCleanError) throw error;
@@ -220,6 +232,7 @@ async function soleTarball(packRoot: string): Promise<string> {
 
 async function packAndClean(
   packageDir: string,
+  signal: AbortSignal,
   opts: {
     /** Publish an artifact carrying tests, CI config, lockfiles or tsconfig anyway. */
     allowSuspicious: boolean;
@@ -239,13 +252,14 @@ async function packAndClean(
     tarballOut: null | string;
   },
 ): Promise<void> {
-  requireTool("pnpm");
-  requireTool("npm");
+  const [, npmVersion] = await Promise.all([
+    requireTool("pnpm", packageDir, signal),
+    requireTool("npm", packageDir, signal),
+  ]);
   warnIfNonPnpmLifecycle();
 
   const sourcePkgPath = path.join(packageDir, "package.json");
   const sourcePkg = readJson(sourcePkgPath);
-  if (!opts.guardOnly && !opts.dryRun) assertTrustedPublishingRuntime(sourcePkg, opts.publishArgs);
   const config = packageConfig(sourcePkg);
   // Two independent policies, never one switch. The `files` requirement is a manifest
   // convention some packages legitimately do not follow; the artifact scan is what keeps
@@ -259,22 +273,21 @@ async function packAndClean(
   const keepFields = keptFields(config);
 
   assertPublicPackage(sourcePkg);
-  assertCleanGit(packageDir, noGitChecks);
+  await assertCleanGit(packageDir, noGitChecks, signal);
   assertFilesField(sourcePkg, skipFileCheck);
 
   const root = await mkdtemp(path.join(tmpdir(), "publish-clean-"));
   try {
-    run("pnpm", ["pack", "--pack-destination", root], packageDir);
+    await run("pnpm", ["pack", "--pack-destination", root], packageDir, { signal, output: "pack" });
     const tarball = await soleTarball(root);
     const packed = await readTarball(tarball);
 
     // Cleaned straight out of the packed tarball and written back into a copy of that same
     // tarball: no intermediate directory to clean, and no second packer that could re-decide
     // the file set from the `files` field this strips.
-    const cleanedPkg = withRegistry(
-      stripManifest(manifestOf(packed, "the packed tarball"), extraDevFields),
-      registry,
-    );
+    const packedPkg = manifestOf(packed, "the packed tarball");
+    assertPublicPackage(packedPkg);
+    const cleanedPkg = withRegistry(stripManifest(packedPkg, extraDevFields), registry);
     const unrecognized = unrecognizedFieldsReport(cleanedPkg, keepFields);
     if (unrecognized) console.warn(unrecognized);
 
@@ -292,9 +305,8 @@ async function packAndClean(
     assertSameEntries(packageFiles(packed), finalFiles);
     assertPreservedArchive(packed, published);
     validatePackedFiles(finalFiles, allowSuspicious);
-    assertDeclaredFiles(cleanedPkg, finalFiles);
-
     const shippedPkg = manifestOf(published, "the published tarball");
+    assertDeclaredFiles(shippedPkg, finalFiles);
     assertNoMonorepoProtocols(shippedPkg);
     // A tripwire for this tool's own bugs: every field it would catch is either kept by design
     // or removed on request, and a removal on request is excluded from the comparison. Its
@@ -302,7 +314,7 @@ async function packAndClean(
     assertNoLostConsumerFields(sourcePkg, shippedPkg, extraDevFields);
     // The manifest is the one member this tool authors rather than copies, so this is the check
     // that the rewrite produced the bytes the guards approved, not merely bytes that parse.
-    if (stableJson(shippedPkg) !== stableJson(cleanedPkg))
+    if (manifestText(published) !== stringifyJson(cleanedPkg))
       throw new PublishCleanError("Rewritten tarball manifest differs from the cleaned manifest.");
 
     // Copied before publishing, and in every mode, so the retained bytes are exactly
@@ -325,7 +337,14 @@ async function packAndClean(
     }
     if (opts.guardOnly) return;
 
-    assertRepositoryForTrustedPublish(cleanedPkg, opts.publishArgs, publishEnv());
+    await assertTrustedPublishingRuntime(
+      shippedPkg,
+      opts.publishArgs,
+      packageDir,
+      npmVersion,
+      signal,
+    );
+    assertRepositoryForTrustedPublish(shippedPkg, opts.publishArgs, publishEnv());
     const publishArgs = registry
       ? ["publish", finalTarball, "--registry", registry, ...opts.publishArgs]
       : ["publish", finalTarball, ...opts.publishArgs];
@@ -334,14 +353,14 @@ async function packAndClean(
     // from a temp directory silently discards the registry and credentials the author
     // configured for this project. Measured on npm 11: `npm config get registry` returns the
     // project value only when cwd sits under that manifest.
-    runAttached("npm", publishArgs, packageDir);
+    await run("npm", publishArgs, packageDir, { signal, output: "publish" });
   } finally {
     // No mode keeps this tree. A failed run must not strand package contents in temp.
     await rm(root, { recursive: true, force: true });
   }
 }
 
-async function main(): Promise<void> {
+async function main(signal: AbortSignal): Promise<void> {
   const rawArgs = process.argv.slice(2);
   const separator = rawArgs.indexOf("--");
   const cliArgs = separator === -1 ? rawArgs : rawArgs.slice(0, separator);
@@ -377,7 +396,7 @@ async function main(): Promise<void> {
     );
 
   const packageDir = path.resolve(String(parsed.positionals[0] ?? "."));
-  await packAndClean(packageDir, {
+  await packAndClean(packageDir, signal, {
     allowSuspicious: parsed.values["allow-suspicious"] === true,
     dryRun: parsed.values["dry-run"] === true,
     guardOnly: parsed.values["guard-only"] === true,
@@ -390,7 +409,19 @@ async function main(): Promise<void> {
   });
 }
 
-main().catch((error: unknown) => {
+const cancellation = new AbortController();
+let interrupted = false;
+for (const [signal, code] of [
+  ["SIGINT", 130],
+  ["SIGTERM", 143],
+] as const)
+  process.once(signal, () => {
+    interrupted = true;
+    process.exitCode = code;
+    cancellation.abort(new PublishCleanError(`Cancelled by ${signal}.`));
+  });
+
+main(cancellation.signal).catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
   const details = [
     message,
@@ -398,5 +429,5 @@ main().catch((error: unknown) => {
     outputFromError(error, "stderr"),
   ].filter((detail) => detail.length > 0);
   console.error(`publish-clean: ${details.join("\n")}`);
-  process.exitCode = 1;
+  if (!interrupted) process.exitCode = 1;
 });

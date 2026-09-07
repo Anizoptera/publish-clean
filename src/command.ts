@@ -6,17 +6,12 @@
  * arguments a caller wrote after `--` straight into `npm publish`, so that vector is
  * attacker-shaped by design. Every spawn here passes an argument vector, never a command line.
  */
-import { execFileSync } from "node:child_process";
+import { spawn } from "node:child_process";
 
 import { PublishCleanError } from "./error";
 import { isObject } from "./json";
 
-/**
- * The probe below is bounded because a wedged shim would otherwise hang the publish with no
- * end: `execFileSync` blocks this thread, so no timer here could ever interrupt it. The bound
- * belongs on the spawn itself. It stays generous because the only job is to separate a tool
- * that answers from one that never will.
- */
+/** Bound a hung version-manager shim without blocking the event loop. */
 const TOOL_PROBE_TIMEOUT_MS = 10_000;
 
 /**
@@ -53,28 +48,124 @@ export function spawnArgs(
   return ["cmd.exe", ["/d", "/c", command, ...args]];
 }
 
-export function run(command: string, args: readonly string[], cwd: string): string {
-  return execFileSync(...spawnArgs(command, args, process.platform), {
-    cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+interface RunOptions {
+  signal?: AbortSignal | undefined;
+  output?: "capture" | "pack" | "publish";
+  timeout?: number;
 }
 
-/**
- * Runs a command with its streams attached to this process instead of captured.
- *
- * Reserved for `npm publish`. Every other command here is run for its output or its
- * effect, but the publish is the one irreversible step, and npm's output is the only
- * receipt the operator gets: the version that went out, the tarball size, the integrity
- * hash, and the registry's own wording when it refuses. `run` would swallow all of it on
- * success and hold the failure text until the process exits, which in CI means a log
- * that says nothing about the one action that cannot be undone.
- */
-export function runAttached(command: string, args: readonly string[], cwd: string): void {
-  execFileSync(...spawnArgs(command, args, process.platform), {
-    cwd,
-    stdio: ["ignore", "inherit", "inherit"],
+/** Await child settlement before returning, so temporary files cannot be removed under a live packer. */
+export function run(
+  command: string,
+  args: readonly string[],
+  cwd: string,
+  options: RunOptions = {},
+): Promise<string> {
+  options.signal?.throwIfAborted();
+  const output = options.output ?? "capture";
+  return new Promise((resolve, reject) => {
+    const child = spawn(...spawnArgs(command, args, process.platform), {
+      cwd,
+      detached: process.platform !== "win32",
+      stdio:
+        output === "capture"
+          ? ["ignore", "pipe", "pipe"]
+          : output === "pack"
+            ? ["ignore", process.stderr, process.stderr]
+            : "inherit",
+    });
+    let stdout = "";
+    let stderr = "";
+    let failure: Error | undefined;
+    let escalation: ReturnType<typeof setTimeout> | undefined;
+    let stopping = false;
+    let termination: Promise<void> | undefined;
+    const killGroup = (signal: NodeJS.Signals) => {
+      try {
+        if (child.pid !== undefined) process.kill(-child.pid, signal);
+      } catch (error) {
+        if (!isObject(error) || error.code !== "ESRCH")
+          failure = error instanceof Error ? error : new Error(String(error));
+      }
+    };
+    const stop = () => {
+      if (stopping || child.pid === undefined) return;
+      stopping = true;
+      // POSIX process groups include lifecycle grandchildren. Windows uses taskkill's
+      // tree operation and waits for that operation before releasing the temporary files.
+      if (process.platform === "win32") {
+        termination = new Promise((done) => {
+          const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+            stdio: "ignore",
+          });
+          killer.on("error", (error) => {
+            failure = error;
+            child.kill();
+          });
+          killer.once("close", (status) => {
+            if (status !== 0 && !failure)
+              failure = new PublishCleanError("Unable to terminate the child process tree.");
+            done();
+          });
+        });
+      } else {
+        killGroup("SIGTERM");
+        // A deadline bounds a child ignoring cancellation; it never establishes readiness.
+        escalation = setTimeout(() => killGroup("SIGKILL"), 1_000);
+        escalation.unref();
+      }
+    };
+    const timer =
+      options.timeout === undefined
+        ? undefined
+        : setTimeout(() => {
+            failure = new PublishCleanError(
+              `${command} did not finish within ${options.timeout}ms.`,
+            );
+            stop();
+          }, options.timeout);
+    const collect = (chunk: Buffer, stream: "stdout" | "stderr") => {
+      if (stream === "stdout") stdout += chunk.toString();
+      else stderr += chunk.toString();
+      if (stdout.length + stderr.length > 1024 * 1024) {
+        failure = new PublishCleanError(
+          `${command} exceeded the output limit for a metadata query.`,
+        );
+        stdout = stdout.slice(-4096);
+        stderr = stderr.slice(-4096);
+        stop();
+      }
+    };
+    child.stdout?.on("data", (chunk: Buffer) => collect(chunk, "stdout"));
+    child.stderr?.on("data", (chunk: Buffer) => collect(chunk, "stderr"));
+    child.on("error", (error) => {
+      failure = error;
+    });
+    options.signal?.addEventListener("abort", stop, { once: true });
+    child.once("close", async (status, signal) => {
+      if (stopping && process.platform !== "win32") killGroup("SIGKILL");
+      await termination;
+      clearTimeout(timer);
+      clearTimeout(escalation);
+      options.signal?.removeEventListener("abort", stop);
+      if (options.signal?.aborted) {
+        reject(options.signal.reason);
+        return;
+      }
+      if (failure || status !== 0) {
+        const reason =
+          failure && isObject(failure) && failure.code === "ENOENT"
+            ? "is not available in PATH"
+            : (failure?.message ?? `exited with ${signal ?? status}`);
+        reject(
+          new PublishCleanError(
+            `${command} ${reason}${stderr.trim() ? `: ${stderr.trim()}` : ""}`,
+            { cause: failure },
+          ),
+        );
+      } else resolve(stdout);
+    });
+    if (options.signal?.aborted) stop();
   });
 }
 
@@ -87,35 +178,11 @@ export function outputFromError(error: unknown, key: "stderr" | "stdout"): strin
   return "";
 }
 
-/**
- * A required tool can fail three ways, and each one asks something different of the
- * reader, so the probe reports what it observed instead of assuming the common case.
- * A version-manager shim (asdf, mise, volta, corepack) resolves in PATH and still refuses
- * to run when no version is pinned; calling that absence sends the reader to verify the
- * one thing already correct, and `which pnpm` then agrees with them and not with us. The
- * shim's own message names the fix, so it is forwarded rather than replaced.
- */
-function toolFailureReason(cause: unknown): string {
-  if (isObject(cause)) {
-    if (cause.code === "ENOENT") return "is not available in PATH";
-    if (cause.code === "ETIMEDOUT")
-      return `did not answer --version within ${TOOL_PROBE_TIMEOUT_MS}ms`;
-  }
-  const stderr = outputFromError(cause, "stderr");
-  // Not "is present but failed": on Windows the spawn goes through cmd.exe, which always
-  // exists, so a genuinely missing tool arrives here as an exit code and cmd's own
-  // "is not recognized as an internal or external command" — a message that would then be
-  // introduced by a claim contradicting it. The forwarded stderr carries the diagnosis either way.
-  return `failed to run${stderr ? `: ${stderr}` : ""}`;
-}
-
-export function requireTool(name: string): void {
-  try {
-    execFileSync(...spawnArgs(name, ["--version"], process.platform), {
-      stdio: ["ignore", "ignore", "pipe"],
-      timeout: TOOL_PROBE_TIMEOUT_MS,
-    });
-  } catch (cause) {
-    throw new PublishCleanError(`Required tool "${name}" ${toolFailureReason(cause)}.`, { cause });
-  }
+/** Probe in the package directory: version-manager shims resolve their toolchain from cwd. */
+export async function requireTool(
+  name: string,
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  return (await run(name, ["--version"], cwd, { signal, timeout: TOOL_PROBE_TIMEOUT_MS })).trim();
 }
