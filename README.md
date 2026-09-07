@@ -27,7 +27,7 @@ under conditions npm decides.
 
 `publish-clean` packs the package once, rewrites the `package.json` inside that tarball
 down to what consumers actually use, checks the result, and publishes those exact bytes.
-Your working tree is never modified. If the artifact still has something in it that should
+Cleaning does not edit your working tree; your pack lifecycle scripts can. If the artifact still has something in it that should
 not ship, or declares a `main`, `exports`, or `bin` path that is not in the tarball, it
 fails instead of publishing.
 
@@ -61,22 +61,17 @@ supply-chain risk of its own, and this one has no transitive code to audit.
 `--provenance` additionally needs npm 11.5.1+ and a cloud CI runner. npm will not sign a
 publish that came from your laptop.
 
-### Running it under Bun packs a smaller tarball
+### Running it under Bun
 
-gzip encoding belongs to whichever runtime executes the CLI, and Bun's (libdeflate) beats
-Node's zlib on tar-shaped data: 0.17% smaller for this package, 0.28% for a sibling one, with
-a byte-identical archive inside. To get it, pass Bun the **file path**:
+gzip bytes depend on the runtime and version executing the CLI. To run it under Bun,
+pass Bun the **file path**:
 
 ```sh
 bun ./node_modules/.bin/publish-clean
 ```
 
-Naming the bin instead does not work, and does not say so: `bun publish-clean`,
-`bun run publish-clean` and `bunx publish-clean` all hand the file to the OS, which honours
-its `#!/usr/bin/env node` shebang and runs Node. They succeed, and you get Node's bytes.
-
-Not `bunx --bun`, which forces Bun onto the `pnpm` this tool spawns as well; pnpm 11 needs
-`node:sqlite`, which Bun does not implement, and that is the error you get.
+The installed command has a Node shebang. Passing the file directly avoids relying on
+how a package runner selects an interpreter or changes the child tools' environment.
 
 Either runtime produces valid gzip with identical contents, so the choice is free. The one
 rule is not to switch runtimes _within_ a version: if a release is re-run to repair its
@@ -84,9 +79,9 @@ artifacts, the bytes have to come out the same, and the two encoders do not agre
 
 ## Package managers
 
-Why pnpm packs and npm publishes: pnpm is the only packer that resolves every workspace
-layout correctly, and npm is the only client that can sign a release. The measurements are
-in [why pnpm packs and npm publishes](docs/why-pnpm-and-npm.md).
+pnpm resolves workspace dependencies and applies its manifest overrides; npm uploads the
+resulting tarball. Compatibility evidence and limitations live in
+[why pnpm packs and npm publishes](docs/why-pnpm-and-npm.md).
 
 Started with anything other than pnpm, it prints an advisory on stderr saying so. That is
 a warning, not an error. Nothing behaves differently because of it, and there is no flag
@@ -170,10 +165,10 @@ If Changesets, semantic-release, release-it or np already owns your releases, us
 }
 ```
 
-It packs, cleans and validates, then exits without publishing. A leaked file, an
-unresolved `workspace:` spec or a `main` path that is missing from the tarball fails the
-release before your tool uploads anything. The limit is real though: your tool still
-publishes its own tarball, so you get the checks and not the cleaned manifest.
+It checks a pnpm-produced preview and exits without publishing. Your release tool still
+creates and uploads its own artifact, which may differ: this gate does not validate those
+uploaded bytes or clean their manifest. To publish the checked bytes, configure that tool
+to invoke `publish-clean` for the upload instead.
 
 ### Looking at what would be published
 
@@ -215,31 +210,23 @@ The checks are listed under [What it checks](#what-it-checks). The point of the 
 that they all read the tarball that gets uploaded, so what passed the checks and what
 reached the registry are the same bytes, not two things that ought to match.
 
-`--dry-run` and `--guard-only` run the whole pipeline and stop before the publish.
+`--dry-run` and `--guard-only` validate the artifact. They do not contact the registry or
+validate publication credentials, provenance runtime requirements or repository identity.
 
 ## Why it works this way
 
 ### Why pnpm packs, and npm publishes
 
-pnpm because of workspaces. A dependency written `"@acme/utils": "workspace:*"` has to
-become a real version range before it ships, and pnpm is the only packer that does that
-for every layout it might find, including a Bun one. npm writes `workspace:*` into the
-tarball unchanged and exits 0, publishing a package nobody can install. Bun resolves only
-what Bun installed, and quietly mangles an aliased workspace dependency.
-
-npm because of provenance. The signed attestation behind the "Built and signed on GitHub
-Actions" badge is minted by the npm CLI talking to Sigstore, and trusted publishing, which
-removes the long-lived token entirely, is npm's own exchange with the registry. No other
-client does either one. `npm publish` also takes a tarball directly, which is what the
-packing step already produced.
-
-The measurements behind both choices, and the one thing packing with pnpm costs you, are
-in [why pnpm packs and npm publishes](docs/why-pnpm-and-npm.md).
+Use the [packer and uploader rationale](docs/why-pnpm-and-npm.md) when evaluating a replacement.
+It covers workspace resolution, pnpm overrides, bundled dependencies and the exact-byte
+upload requirement. Other clients also support provenance; that feature alone does not
+establish equivalent behavior throughout this pipeline.
 
 ### Why the manifest is cleaned on a copy
 
 The manifest is read out of the packed tarball and written back into a copy of it, in a
-temp directory. Your working tree is never touched.
+temp directory. The cleaner never writes the source manifest; pack hooks still run in
+your source directory and may change it.
 
 The obvious alternative is what a lot of hand-rolled release scripts do: edit
 `package.json`, publish, edit it back. That's fine until something dies in the middle,
@@ -262,10 +249,10 @@ exclusion, and quietly drops files the first pack included. A package shipping a
 `.gitignore` that excludes any other shipped file loses it.
 
 Editing avoids the question. Only the `package/package.json` member is replaced. Every
-other entry is copied without being decoded, so the file set stays exactly what pnpm chose,
-and entry shapes this tool does not model (pax headers for long paths, prefix splitting)
-pass through untouched. It also keeps pnpm's normalised metadata: owner `0:0`, a fixed
-timestamp, mode 644. A plain `tar` invocation would replace those with whatever the build
+other entry's raw bytes are preserved. The reader resolves USTAR prefixes and PAX paths
+before scanning; malformed or unsupported path metadata is refused. This keeps pnpm's
+normalised metadata: owner `0:0`, a fixed
+timestamp and file modes. A plain `tar` invocation would replace those with whatever the build
 machine happens to have.
 
 Lifecycle scripts run once, at the first pack. `pnpm pack` runs your `prepare` and
@@ -285,8 +272,8 @@ nothing can alter the artifact after it was checked.
   silently disarms the artifact scan)
 - the tarball holds something that should never ship: a `.env`, an `.npmrc`, `.git`,
   `node_modules`, or a private key. This one has no off switch, by any flag or config key
-- a dependency is still written as `catalog:`, `workspace:`, `link:` or `portal:`, which
-  nobody outside your repo can install
+- a dependency is still written as `catalog:`, `workspace:`, `link:` or `portal:`, or a local
+  dependency points outside the shipped files
 - the manifest points `exports`, `types`, `main`, `browser`, `bin` or `sideEffects` at a
   path that is not in the tarball
 - rewriting the manifest changed anything else in the tarball
@@ -317,8 +304,8 @@ lifecycle ones a consumer actually runs: `preinstall`, `install`, `postinstall`,
 Anything the tool does not recognise ships, and you get told it did:
 
 ```
-publish-clean: these manifest fields are not recognised and were published as-is:
-  someToolConfig
+publish-clean: these manifest fields are not recognised and are retained as-is:
+  "someToolConfig"
 Strip the ones consumers do not read, and acknowledge the ones they do:
   "publish-clean": { "devFields": ["someToolConfig"] }
   "publish-clean": { "keepFields": ["someToolConfig"] }
@@ -356,8 +343,8 @@ choices like dist-tags on the command line and stable project policy in the mani
 
 | Flag                 | `package.json`    | What it does                                                                               |
 | -------------------- | ----------------- | ------------------------------------------------------------------------------------------ |
-| `--dry-run`          | -                 | Run everything up to the publish, then print the file list and the cleaned `package.json`. |
-| `--guard-only`       | -                 | Run everything up to the publish and exit, printing nothing.                               |
+| `--dry-run`          | -                 | Validate a preview artifact and print its file list and cleaned `package.json`. |
+| `--guard-only`       | -                 | Validate a preview artifact without the file list or manifest output. |
 | `--tarball-out DIR`  | -                 | Copy the final tarball into `DIR` before publishing.                                       |
 | `--registry URL`     | `registry`        | Set `publishConfig.registry` on the cleaned manifest, and publish to it.                   |
 | `--skip-file-check`  | `skipFileCheck`   | Allow a manifest with no `files` array.                                                    |
@@ -400,8 +387,8 @@ that.
 
 It isn't a release manager. It won't pick your version number, write a changelog, tag
 anything, push a commit, create a GitHub release, or set up trusted publishing for you. It
-also doesn't check that your entry points resolve correctly for consumers. Pair it with a
-release manager and a validator; the next section names them.
+checks declared paths, not whether the JavaScript executes or the type declarations work
+for every consumer. Pair it with a release manager and a validator; the next section names them.
 
 It can't publish a package that uses `bundleDependencies`. pnpm links dependencies rather
 than copying them, so it has nothing to bundle and refuses:
@@ -410,9 +397,9 @@ than copying them, so it has nothing to bundle and refuses:
 Add "nodeLinker: hoisted" to pnpm-workspace.yaml or delete bundleDependencies
 ```
 
-Doing what it says makes the package publishable again. This is the one thing you give up
-by packing with pnpm, and it's a fair trade: `bundleDependencies` is rare, and the failure
-is loud and tells you the fix.
+A hoisted layout can let pnpm bundle dependencies, but this tool still refuses the resulting
+`node_modules` entries. Changing the linker does not bypass that artifact policy. Packages
+that must ship bundled dependencies need a different publication policy.
 
 ## How it compares
 
@@ -420,20 +407,18 @@ is loud and tells you the fix.
 art, and the reason this package exists at all. It copies your source tree into a temp
 directory, deletes the files and fields it recognises, and publishes that.
 
-The difference is where the file list comes from. clean-publish starts with your whole
-source tree and subtracts, so anything its rules do not recognise gets published.
-`publish-clean` starts from what `pnpm pack` produced, which is already the exact file
+`publish-clean` starts from what `pnpm pack` produced, which is the file
 list your package manager would have shipped, including `files`, `.npmignore`, packlist
 rules and resolved `workspace:` specs. Only the manifest is rewritten after that, and the
-result is validated again before upload. clean-publish does not re-check its output.
+result is validated again before upload.
 
 Release managers ([Changesets](https://github.com/changesets/changesets),
 [release-please](https://github.com/googleapis/release-please),
 [semantic-release](https://github.com/semantic-release/semantic-release),
 [release-it](https://github.com/release-it/release-it),
 [np](https://github.com/sindresorhus/np)) pick versions, write changelogs, tag, and call
-`npm publish`. None of them look inside the tarball. Use one of them together with this,
-via the `--guard-only` setup above.
+`npm publish`. See the `--guard-only` setup above for its preview-only boundary; configure
+the upload through `publish-clean` when the release must use the checked artifact.
 
 [`publint`](https://publint.dev) and
 [`@arethetypeswrong/cli`](https://github.com/arethetypeswrong/arethetypeswrong.github.io)

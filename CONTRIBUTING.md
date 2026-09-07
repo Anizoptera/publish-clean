@@ -11,7 +11,7 @@ bun run check
 ```
 
 `bun run check` is the required gate. It checks formatting, typechecks, builds, runs the
-Vitest and Bun suites against that build, rejects a tracked `dist/`, and finally runs the
+Vitest suite against that build, rejects a tracked `dist/`, and runs the
 freshly built CLI on this package itself — asserting the cleaned artifact has no runtime
 dependencies and passing it to `publint` and `@arethetypeswrong/cli`.
 
@@ -23,10 +23,10 @@ each, which is the place to start if you want to argue with one.
 
 - Runtime dependencies stay at zero.
 - `pnpm pack` decides what is in the package. Do not add file-selection rules of our own.
-- `npm publish` does the upload, because provenance lives there.
+- `npm publish` uploads the checked tarball verbatim; see `docs/why-pnpm-and-npm.md` before changing the uploader.
 - Validate the tarball that gets published, and nothing else. Checking an extracted copy or
   the repository tree proves things about something no user receives.
-- Never modify the source tree, and pack only once. The manifest is read out of the packed
+- Cleaning must not modify the source tree; package lifecycle scripts may. Pack only once. The manifest is read out of the packed
   tarball and written back into a copy of it as a member replacement; repacking would hand
   the file set to a second packer that re-derives it from the stripped `files`.
 - This is not a release manager. Versions, changelogs, tags, GitHub Releases and dist-tag

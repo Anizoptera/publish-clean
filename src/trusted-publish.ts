@@ -12,8 +12,8 @@ import type { JsonObject } from "./json";
  * The floors npm's trusted publishing puts on the toolchain, each formatted into its own error
  * message so the version a reader is told to install is the version the comparison made.
  *
- * The Node floor is also the package's declared `engines.node`, since a publisher that cannot
- * produce provenance cannot do this tool's job; a test asserts the two agree.
+ * These floors apply to trusted publication; ordinary token-based publication can use the
+ * lower Node floor declared by engines.node.
  */
 export const MIN_TRUSTED_NPM_VERSION = [11, 5, 1] as const;
 export const MIN_TRUSTED_NODE_VERSION = [22, 14, 0] as const;

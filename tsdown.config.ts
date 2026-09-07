@@ -59,8 +59,7 @@ export default defineConfig({
   platform: "node",
   shims: false, // disable all shims/polyfills
   sourcemap: false,
-  // Must not exceed the floor promised by package.json engines.node, which is the Node version
-  // npm's trusted publishing needs — this tool cannot do its job below it.
+  // Stay within engines.node; trusted publishing checks its stricter runtime floor separately.
   target: ["es2022", "node22"],
   tsconfig: "./tsconfig.build.json",
 

@@ -1,19 +1,15 @@
 # @anizoptera/publish-clean
 
 - Keep this CLI dependency-free at runtime.
-- Use `pnpm pack` as the source of truth for file selection and workspace/catalog resolution. NEVER swap it
-  for `bun pm pack` on the grounds that this repo runs on Bun, nor for `npm pack`. File selection is
-  identical across all three and decides nothing; pnpm alone resolves every workspace layout it can be
-  handed, applies `publishConfig` field overrides, and refuses what it cannot resolve instead of packing it
-  broken. Its one price is `bundleDependencies`, which pnpm refuses loudly while naming the fix
-  (`nodeLinker: hoisted`) — do not answer that by switching packers, which forfeits the rest. Measurements,
-  tool versions and the exact failure of each alternative: `docs/why-pnpm-and-npm.md`, which is also the
-  README's answer to "why do I need pnpm installed". Update it and this bullet together.
+- Use `pnpm pack` as the source of truth for file selection, workspace/catalog resolution and
+  `publishConfig` overrides. Before replacing it, read `docs/why-pnpm-and-npm.md` and rerun the
+  relevant compatibility cases. A hoisted linker can enable pnpm bundling, but this tool still
+  refuses bundled `node_modules`; changing packers or linkers does not waive that policy.
 - Pack exactly ONCE. The published artifact is pnpm's tarball with its `package/package.json` member
   rewritten in place (`src/tarball.ts`), never a repack of the cleaned directory. Packing again hands
   the file set to a second packer that re-derives it from `files` — the very field being stripped — so
   it falls back to `.gitignore`/`.npmignore` and silently drops entries pnpm selected. Rewriting also
-  inherits pnpm's normalisation (uid/gid 0, fixed mtime, mode 644) that a plain `tar` invocation
+  inherits pnpm's normalisation (uid/gid 0, fixed mtime and file modes) that a plain `tar` invocation
   replaces with the build machine's own identity. Do not reintroduce a second pack to "validate" the
   output; validate the rewritten bytes instead.
 - Use `npm publish <tarball>` for registry upload. It uploads those bytes verbatim

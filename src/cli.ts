@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Node, never bun, however much smaller Bun's gzip encoder packs (see src/tarball.ts). Node is
+// Node is the installed interpreter; invoking the file with Bun is an explicit alternative. Node is
 // already guaranteed here — this tool spawns `npm`, which is itself a Node script — while Bun
 // is not, and the shebang is the hard requirement: on POSIX the installed bin is a symlink the
 // kernel resolves through this line, and npm's cmd-shim copies the interpreter name out of it

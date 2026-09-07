@@ -67,7 +67,7 @@ describe.concurrent("critical file patterns", () => {
 
 // The default hygiene check, and the one an author meets most often: it refuses outright
 // rather than warning, so a package shipping its own test tree or lockfile cannot publish
-// until someone decides. `--skip-file-check` exists precisely because that verdict is a
+// until someone decides. `--allow-suspicious` exists precisely because that verdict is a
 // judgement call, unlike a leaked key, which is never one.
 describe.concurrent("suspicious file patterns", () => {
   const junk = [

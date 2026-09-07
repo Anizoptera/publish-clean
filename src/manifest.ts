@@ -177,6 +177,17 @@ export function packageScope(pkg: JsonObject): string | null {
   return slash > 1 ? pkg.name.slice(0, slash) : null;
 }
 
+/** A misspelled registry must fail locally rather than fall back to a public destination. */
+export function assertRegistry(value: unknown): asserts value is string {
+  try {
+    if (typeof value !== "string" || !value.trim()) throw new Error("Expected a URL");
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Expected HTTP(S)");
+  } catch (cause) {
+    throw new PublishCleanError("Registry must be an absolute HTTP(S) URL.", { cause });
+  }
+}
+
 /**
  * Pins the published manifest to a registry, when one was chosen.
  *
@@ -188,16 +199,6 @@ export function packageScope(pkg: JsonObject): string | null {
  * Returns the manifest unchanged when no registry was chosen, so the caller has no branch and
  * cannot forget one.
  */
-/** A misspelled registry must fail locally rather than fall back to a public destination. */
-export function assertRegistry(value: unknown): asserts value is string {
-  try {
-    if (typeof value !== "string" || !value.trim()) throw new Error("Expected a URL");
-    const url = new URL(value);
-    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Expected HTTP(S)");
-  } catch (cause) {
-    throw new PublishCleanError("Registry must be an absolute HTTP(S) URL.", { cause });
-  }
-}
 
 export function withRegistry(pkg: JsonObject, registry: null | string): JsonObject {
   if (registry === null) return pkg;

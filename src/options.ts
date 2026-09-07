@@ -16,7 +16,7 @@ artifact, and publishes that exact tarball with npm. Arguments after \`--\` go t
 
 Options:
   --dry-run              Pack, clean and validate; print the file list and manifest, publish nothing.
-  --guard-only           Same checks, no output and no publish. For a pre-publish gate.
+  --guard-only           Validate a preview artifact; no file-list output or publish.
   --tarball-out DIR      Also write the validated tarball into DIR, for attestation or release upload.
   --registry URL         Publish to URL, and record it in the artifact's publishConfig.
   --no-git-checks        Publish from a working tree with uncommitted changes.
@@ -33,6 +33,7 @@ Manifest configuration, under a "publish-clean" key in package.json:
   skipFileCheck boolean  Default for --skip-file-check.
   allowSuspicious boolean Default for --allow-suspicious.
 
+Preview modes do not test registry access, credentials or provenance eligibility.
 Requires pnpm and npm on PATH. npm provenance additionally requires Node.js 22.14+ and
 npm 11.5.1+, and only a cloud CI runner can produce it.`;
 

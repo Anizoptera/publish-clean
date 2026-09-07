@@ -13,6 +13,7 @@ Art's latest verification ruling supersedes the local full-check-before-each-com
 - [ ] R1 — Restrict forwarded npm options to documented publication options, rejecting artifact/workspace selectors. Requested because `--workspaces .` demonstrably uploads an unchecked workspace. Existing arbitrary forwarding is a public promise; proposed restriction is pending Art's answer.
 - [ ] R2 — Preserve the complete scripts block when consumer lifecycle hooks exist; otherwise strip development scripts. Fixes helper-script deletion while retaining more manifest content. Pending Art's answer.
 - [ ] R3 — Decide whether to add a public `--json` artifact report. Recommended scope is defect repairs and existing output polish; no new CLI contract without Art's ruling.
+- [ ] R4 — Reject credential-bearing registry URLs and require npm configuration for authentication. A fixture URL with user:fixture-secret appears verbatim in both emitted registry fields. Pending Art's ruling because rejecting accepted URLs or moving their credentials changes the public contract. On approval, cover explicit/configured registry URLs and the final packed manifest; prevent credential values from appearing in diagnostics.
 
 ## Derived work, ordered by harm and dependency
 
@@ -47,9 +48,9 @@ Art's latest verification ruling supersedes the local full-check-before-each-com
   - [ ] Evaluate whether a security check adds timely evidence without making ordinary local checks network-dependent.
   - [ ] Verify dependency/check changes and commit.
 - [ ] Documentation and final integration — basis: published promises must match observable behavior.
-  - [ ] Correct pnpm/npm provenance exclusivity claims using current primary sources; retain npm uploader unless Art changes that ruling.
-  - [ ] Correct lifecycle source-mutation, publishConfig, external-publisher guard, bundled-dependency and runtime-version claims.
-  - [ ] Keep reasons beside the owning code; remove duplicated historical detail from guidance without losing operative requirements.
+  - [x] Corrected pnpm/npm provenance exclusivity claims using pnpm's current publish documentation and npm's installed upload/pack implementation; uploader unchanged. Historical packer measurements are explicitly version-bounded. Bun 1.4.1 directly imported node:sqlite.DatabaseSync, falsifying the old warning; Art confirmed the recent Bun upgrade.
+  - [x] Corrected lifecycle source-mutation, consumed publishConfig overrides, external-publisher preview boundary, bundled-dependency and runtime-version claims. Removed repeated packer arguments and unsupported comparative absolutes.
+  - [x] Kept artifact-preservation and runtime reasons beside their owners; moved misplaced registry documentation onto withRegistry and corrected the suspicious-files opt-out comment.
   - [ ] Resolve R3; if approved, implement and test the report from the same validated artifact record used for retention/publication.
   - [ ] Audit every final changed line against the baseline and pair every promise with an appropriate observable check.
   - [ ] Run the full routine lane, record its scope and duration, inspect final git diff/status and commit remaining verified work.
