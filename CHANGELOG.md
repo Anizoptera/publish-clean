@@ -3,7 +3,7 @@
 Notable changes per release, newest first. This file is the source of the GitHub Release
 notes: the section for a version is published verbatim when its tag is pushed.
 
-## [0.9.0] - 2026-09-08
+## [0.9.1] - 2026-09-08
 
 ### Added
 
@@ -13,6 +13,7 @@ notes: the section for a version is published verbatim when its tag is pushed.
 
 - Releases now wait for Linux checks, the dependency audit and Windows checks on the
   tagged commit before publishing. CI and release verification share the same workflow.
+- Windows release checks exercise validator argument safety and uploaded byte identity. The consumer-install smoke test uses the ordinary child-process hang deadline rather than a five-second cutoff.
 
 ## [0.8.0] - 2026-09-08
 
