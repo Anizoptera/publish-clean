@@ -269,7 +269,7 @@ describe.concurrent("publish-clean", () => {
           "--ignore-scripts=false",
         ],
         consumer,
-        { timeout: 5000 },
+        { timeout: CLI_TIMEOUT_MS },
       );
       expect(
         await readFile(path.join(consumer, "node_modules/fixture-complete/installed.txt"), "utf8"),

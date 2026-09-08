@@ -73,7 +73,7 @@ jobs:
           package-manager-cache: false
       - run: bun install --frozen-lockfile
       - run: bun run build
-      - run: bunx vitest run test/command.test.ts
+      - run: bunx vitest run test/command.test.ts test/registry.test.ts
       # pnpm comes from this repo's devDependencies, so the same version resolves here as in
       # every other lane, rather than whatever the runner happens to carry.
       - run: echo "${{ github.workspace }}\node_modules\.bin" >> $env:GITHUB_PATH
