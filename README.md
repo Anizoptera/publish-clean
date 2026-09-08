@@ -294,6 +294,7 @@ boolean flags enable their setting. Pass per-release npm options, such as dist-t
 | `--no-git-checks`    | `noGitChecks`     | Allow publishing from a dirty working tree.                                                |
 | -                    | `devFields`       | Extra manifest fields to strip.                                                            |
 | -                    | `keepFields`      | Fields that belong in the published package, so stop reporting them.                       |
+| -                    | [`validateArtifact`](#validate-the-final-artifact) | Run your checks on the cleaned tarball before copying or publishing it. |
 | `-h`, `--help`       | -                 | Print usage, every flag, and the config keys.                                              |
 | `-v`, `--version`    | -                 | Print the installed version.                                                               |
 
@@ -320,11 +321,35 @@ maps to prevent accidental removal.
 Use `keepFields` for consumer fields the tool does not recognise, such as a VS Code
 extension's `contributes` and `publisher`. It suppresses reports; it does not restore stripped fields.
 
+### Validate the final artifact
+
+Use `validateArtifact` to check what users will install, such as package imports or type declarations. Add the command to your `package.json`:
+
+```json
+{
+  "publish-clean": {
+    "validateArtifact": ["node", "scripts/check-artifact.mjs"]
+  }
+}
+```
+
+This runs `node scripts/check-artifact.mjs /absolute/path/to/package.tgz` from your package directory. Read the tarball path from `process.argv.at(-1)`; configured arguments come before it.
+
+The command runs once after built-in checks and before publication or a `--tarball-out` copy. It also runs in `--dry-run` and `--guard-only` modes. The config is removed from the published manifest.
+
+The first item must name an executable on `PATH` or by its path. Use `node` or `bun` to run scripts, including on Windows; `.cmd` shims are not supported. Arguments are passed literally, without a shell: no pipes, redirection or environment assignments. Relative paths start at your package directory.
+
+Exit with code 0 to pass or a nonzero code to reject the package. A failed launch, failed check, or changed or deleted tarball stops publication and copying. Output is hidden on success and shown on failure, with a capture limit to bound memory use. Cancellation stops the command and its child processes before removing temporary files.
+
+Your script runs with your permissions. Keep it read-only and wait for its child processes to finish; publish-clean does not sandbox it or protect other project files.
+
+Check the supplied tarball. Packing again checks different bytes; calling publish-clean from the script runs the same hook again.
+
 ## What it does not do
 
 Use your release tool for versions, changelogs, tags and GitHub releases. Configure trusted
-publishing separately. `publish-clean` checks declared paths; it does not execute your
-package or validate its type declarations.
+publishing separately. Built-in checks verify declared paths. To test package imports or
+type declarations, supply a [validation command](#validate-the-final-artifact).
 
 Bundled `node_modules` are not allowed. pnpm may first reject `bundleDependencies` with:
 
@@ -383,24 +408,3 @@ reporting, not public issues: see [SECURITY.md](SECURITY.md).
 ## License
 
 Apache-2.0. Copyright 2026 Anizoptera and Art Shendrik.
-
-
-## Validate the final artifact
-
-Set `publish-clean.validateArtifact` to an executable and its arguments to check the exact cleaned tarball before retention or upload:
-
-```json
-{
-  "publish-clean": {
-    "validateArtifact": ["node", "scripts/check-artifact.mjs"]
-  }
-}
-```
-
-The command runs once in the source package directory, with the absolute tarball path appended as its last argument. It runs in normal, `--dry-run` and `--guard-only` modes, after built-in artifact checks and before `--tarball-out` copies anything. The configuration is stripped from the published manifest.
-
-Use an executable, not a shell command or a Windows `.cmd` shim. Arguments remain literal; pipes, redirection and environment assignments are not interpreted. Relative script paths resolve from the package directory. The executable must be available in PATH or named by a path.
-
-The validator must finish successfully and leave the tarball bytes unchanged. A launch failure, nonzero exit, changed or missing artifact stops retention and publication. Successful output is quiet; failure output is reported, with captured output bounded to prevent runaway memory use. Cancellation stops the child process tree before temporary files are removed. The validator is trusted project code, not a sandbox: it must not leave background writers or modify other project files.
-
-Inspect the supplied archive directly. Do not invoke `publish-clean` or pack the package again inside the validator; that would recurse or validate different bytes.
