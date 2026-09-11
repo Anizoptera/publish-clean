@@ -145,6 +145,14 @@ Measured 2026-09-11 on macOS with Node 24.20.0, each case beside a control:
   The usual fix is to add a `module-sync` branch, which exists precisely so `require` and `import`
   can load one ES module.
 
+  The check does NOT read `engines.node`, and that is measured rather than lazy. Gating on the
+  declared range would only matter for a package promising a floor at or above `^20.19.0 ||
+  >=22.12.0`; of the 662 packages with `exports` in the local corpus, 8 have a `require` branch
+  resolving to ESM and every one of them declares no `engines.node` at all. A package that promises
+  nothing is installable on a Node where this throws, so refusing is right for the whole measured
+  population, and a semver range parser in a dependency-free CLI would change no verdict. Revisit
+  if a package ever declares that floor and is refused.
+
 ## A check that was measured and dropped
 
 An unexecutable `bin` file in the tarball looked like an obvious defect. It is not: installed with
