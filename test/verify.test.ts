@@ -164,6 +164,38 @@ it.concurrent("refuses to publish files nothing in the package reaches", async (
   expect(imported.status).toBe(0);
 });
 
+it.concurrent("refuses a package whose own declarations import an unexported subpath", async () => {
+  // The shape `@eslint-community/regexpp` publishes. It has to be proven through a real tarball:
+  // the defect exists only because resolution goes through `exports`, and in the source tree the
+  // same import resolves by path, which is exactly why the author never sees it.
+  const pkg = {
+    ...SOUND,
+    files: ["index.js", "index.d.ts", "ast.d.ts"],
+    exports: { ".": { types: "./index.d.ts", default: "./index.js" } },
+  };
+  const files = {
+    ...INDEX,
+    "ast.d.ts": "export type Node = { kind: string };\n",
+    "index.d.ts":
+      'import type { Node } from "fixture-verify/ast";\nexport declare const n: Node;\n',
+  };
+  const refused = await check(pkg, files, ["--dry-run"]);
+  expect(refused.status).not.toBe(0);
+  expect(refused.stderr).toContain("self-import-not-exported");
+  expect(refused.stderr).toContain('"./ast"');
+
+  // Exporting the subpath is the fix the message names, and it must actually clear the finding.
+  const fixed = await check(
+    {
+      ...pkg,
+      exports: { ...pkg.exports, "./ast": { types: "./ast.d.ts", default: "./index.js" } },
+    },
+    files,
+    ["--dry-run"],
+  );
+  expect(fixed.status).toBe(0);
+});
+
 it.concurrent("reports a types branch that does not resolve to declarations", async () => {
   const lying = {
     ...SOUND,

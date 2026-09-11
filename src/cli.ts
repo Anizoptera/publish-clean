@@ -15,7 +15,7 @@ import { requireTool, run } from "./command";
 import { allowedUnreferenced, customDevFields, keptFields, packageConfig } from "./config";
 import { reviewExports } from "./exports";
 import { decide, formatFindings, isFatal } from "./finding";
-import { reviewShippedFiles, reviewUnreferencedFiles } from "./shipped";
+import { reviewSelfReferences, reviewShippedFiles, reviewUnreferencedFiles } from "./shipped";
 import { HELP, parseOptions } from "./options";
 import { PublishCleanError } from "./error";
 import { isObject, stringifyJson } from "./json";
@@ -294,6 +294,7 @@ async function packAndClean(
     const contents = packageContents(published);
     findings.push(
       ...reviewShippedFiles(shippedPkg, contents),
+      ...reviewSelfReferences(shippedPkg, contents),
       ...reviewUnreferencedFiles(shippedPkg, contents, allowUnreferenced),
     );
     if (findings.length > 0) console.warn(formatFindings(findings, opts.strict));
