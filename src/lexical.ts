@@ -29,9 +29,31 @@ const ZONES: readonly Zone[] = ["code", "comment", "text"];
  * from a position they cannot trust: a missed defect costs less than a refused publish.
  *
  * A line comment IS allowed to reach the end of a file, so it does not count as a desync.
+ *
+ * Measured over 3051 shipped `.js`/`.ts` files in installed packages: 1.8% desync, but 11.3% of
+ * BYTES, because the losses concentrate in large bundles — this tool's own `dist/cli.js` is one.
+ * Teaching the scanner to tell a regex from a division would recover them and is deliberately NOT
+ * done: at 1.8% of files the loss only ever SUPPRESSES a report, while a wrong guess about where a
+ * regex ends shifts string parity and can mark text as code, which is how a correct package gets
+ * refused. A smaller safe gap is not worth a larger unsafe one.
  */
 export function lexicalZones(source: string): Uint8Array | null {
   const zones = new Uint8Array(source.length);
+  /**
+   * Brace depth inside each open `${…}`, innermost last; empty means no interpolation is open.
+   *
+   * Template interpolation is the one construct that UNHIDES text, so a scanner defined by what
+   * hides text cannot skip it. Without this a template's inner backtick reads as the outer
+   * template's terminator, and everything after it shifts zone: text becomes code and code becomes
+   * text, with the parity restored by the closing backtick so nothing ever reports a desync. That
+   * is the dangerous direction — a generated import sitting in a NESTED template is handed to the
+   * self-import scan as running code, which aborts a publish that was correct. Code generators are
+   * exactly the packages that nest templates, and exactly the ones that write imports into them.
+   *
+   * The depth is needed because an interpolation ends at its OWN closing brace, and an object
+   * literal or block inside it carries braces of its own.
+   */
+  const interpolations: number[] = [];
   let state = CODE;
   let quote = "";
   let index = 0;
@@ -62,6 +84,20 @@ export function lexicalZones(source: string): Uint8Array | null {
         quote = char;
         continue;
       }
+      const open = interpolations.length - 1;
+      if (open >= 0 && (char === "{" || char === "}")) {
+        const depth = interpolations[open] ?? 0;
+        // The brace that closes the interpolation hands the rest of the line back to the template.
+        if (char === "}" && depth === 0) {
+          interpolations.pop();
+          zones[index] = TEXT;
+          index += 1;
+          state = TEXT;
+          quote = "`";
+          continue;
+        }
+        interpolations[open] = char === "{" ? depth + 1 : depth - 1;
+      }
       zones[index] = CODE;
       index += 1;
       continue;
@@ -73,6 +109,14 @@ export function lexicalZones(source: string): Uint8Array | null {
       if (char === "\\") {
         zones[index + 1] = TEXT;
         index += 2;
+        continue;
+      }
+      // Only a template interpolates; `${` is ordinary text in a quoted string.
+      if (quote === "`" && char === "$" && next === "{") {
+        zones[index + 1] = TEXT;
+        interpolations.push(0);
+        index += 2;
+        state = CODE;
         continue;
       }
       if (char === quote) state = CODE;
@@ -88,6 +132,9 @@ export function lexicalZones(source: string): Uint8Array | null {
     }
     index += 1;
   }
+  // An open interpolation at the end of a file means an unterminated template, whatever state the
+  // scan stopped in — including a line comment, which is otherwise allowed to run to the end.
+  if (interpolations.length > 0) return null;
   return state === CODE || (state === COMMENT && quote === "\n") ? zones : null;
 }
 

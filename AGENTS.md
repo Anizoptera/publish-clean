@@ -89,7 +89,11 @@
   text in template literals, and commented-out `require`. Decide where a specifier sits from
   `src/lexical.ts`, NEVER from the matched line; a line-shaped test refuses sound packages. Keep
   that scanner's end-of-file check — it carries no grammar, a regex holding a quote or `/*`
-  desyncs it, and a file it reports untrusted MUST yield no finding. Evidence, the measured
+  desyncs it, and a file it reports untrusted MUST yield no finding. Keep it tracking `${…}`
+  too: interpolation is the one construct that UNHIDES text, and without it a template nested in
+  a template reads its inner TEXT as running code — parity restored by the closing backtick, so
+  nothing reports a desync — which refuses correct packages from code generators, the very
+  packages that write imports into templates. Evidence, the measured
   false-positive population and why the rule has no override: `docs/exports.md`.
 - NEVER generalise `import-case-mismatch` to report a specifier that resolves to NOTHING, however
   obviously that reads as the same defect — the scan already computes it and deliberately discards
