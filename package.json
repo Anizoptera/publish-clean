@@ -56,7 +56,7 @@
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "prepare": "tsdown",
-    "prepublishOnly": "pnpm run build && node dist/cli.js --guard-only",
+    "prepublishOnly": "pnpm run build && node dist/cli.js verify",
     "preversion": "bun run check",
     "release": "pnpm version",
     "test": "bun run build && bun run test:built",

@@ -1,7 +1,7 @@
 # @anizoptera/publish-clean
 
-Publish npm packages with a clean `package.json` and checks for unwanted files,
-unresolved workspace dependencies and missing entry points.
+Publish npm packages with a clean `package.json`, verified `exports`, and checks for
+unwanted files, unresolved workspace dependencies and missing entry points.
 
 [![npm version](https://img.shields.io/npm/v/@anizoptera/publish-clean?label=npm)](https://www.npmjs.com/package/@anizoptera/publish-clean)
 [![Signed provenance](https://img.shields.io/badge/provenance-signed-2ea44f?logo=npm&logoColor=white)](https://www.npmjs.com/package/@anizoptera/publish-clean#provenance)
@@ -18,12 +18,15 @@ It packs once with pnpm, cleans the manifest inside the tarball, checks that fil
 uploads it with npm. The checked bytes are the published bytes. Cleaning leaves your
 source files alone; your pack hooks still run and can change them.
 
-Preview, then publish:
+Check, then publish:
 
 ```sh
-pnpm exec publish-clean --dry-run
+pnpm exec publish-clean verify
 pnpm exec publish-clean -- --access public --tag latest --provenance
 ```
+
+`verify` runs every check and publishes nothing. It works on a `private: true` package, so
+a package that never goes to a registry can still be checked by the rules it would face.
 
 Requires Node.js 22+, pnpm and npm. The CLI has no runtime dependencies. The publish
 command above needs [CI provenance setup](#publishing-a-public-package-from-ci).
@@ -138,7 +141,7 @@ For a preview check only, add:
 ```json
 {
   "scripts": {
-    "prepublishOnly": "publish-clean --guard-only"
+    "prepublishOnly": "publish-clean verify"
   }
 }
 ```
@@ -184,7 +187,7 @@ flowchart TD
   E -->|all pass| G[npm publish this same tarball]
 ```
 
-`--dry-run` and `--guard-only` validate the artifact, but skip publication preflight.
+`verify` and `--dry-run` validate the artifact, but skip publication preflight.
 Neither proves that registry access, credentials, provenance requirements or repository
 identity are correct. Pack hooks still run, including any network operations they perform.
 
@@ -229,9 +232,33 @@ Publication stops when:
 - rewriting the manifest changed anything else in the tarball
 - GitHub trusted publishing or provenance is enabled, but the `repository` in your manifest
   is not the repository the workflow is running in
+- a `types` condition resolves to something that is not a declaration file, so a type checker
+  reads JavaScript as your package's types
+- a `require` condition resolves to an ES module
+- the tarball holds a file nothing in the package reaches — no entry point, no import from a
+  reached file, no script. Declare the ones that are deliberate:
+  `"publish-clean": { "allowUnreferenced": ["assets"] }`, which matches whole subtrees. This
+  check only runs when `exports` closes the package; without that field every shipped path is
+  importable, so nothing is dead.
 
 File guards check paths, not file contents. They cannot detect a credential embedded
 in an otherwise allowed source file. See [the rules](src/artifact.ts).
+
+## What it repairs
+
+An `exports` map is order-sensitive: a consumer activates a whole set of conditions at once and
+takes the first key in that set, so the order you wrote picks the winner. `publish-clean`
+flattens the map into the resolution it produces for every possible consumer, and rewrites it
+only when the result is provably identical — dropping a `node` branch that repeats `default`,
+collapsing `{"default": "./x.js"}`, ordering keys the measured constraints force. Every repair is
+reported, lands only in the published manifest, and never touches your source. `--no-heal`, or
+`"publish-clean": { "heal": false }`, reports without rewriting.
+
+Defects it cannot repair without guessing what you meant are reported and left alone: a
+`types` key that would have to be hoisted (right for one shared `.d.ts`, wrong for separate
+`.d.mts`/`.d.cts`), anything inside a fallback array (Bun resolves those differently from Node
+and Deno), and any map too large to enumerate. [`docs/exports.md`](docs/exports.md) has the
+measured condition sets behind these rules.
 
 ## What the cleaned manifest keeps
 
@@ -285,8 +312,12 @@ boolean flags enable their setting. Pass per-release npm options, such as dist-t
 
 | Flag                 | `package.json`    | What it does                                                                               |
 | -------------------- | ----------------- | ------------------------------------------------------------------------------------------ |
+| `verify [dir]`       | -                 | Run every check and publish nothing. Works on a `private: true` package. |
+| `--verify-only`      | -                 | The `verify` subcommand, for scripts that can only pass flags. |
+| `--strict`           | -                 | Treat warnings as errors. Never makes an already-applied repair fatal. |
+| `--no-heal`          | `heal: false`     | Report repairable `exports`/`imports` defects without repairing them. |
 | `--dry-run`          | -                 | Validate a preview artifact and print its file list and cleaned `package.json`. |
-| `--guard-only`       | -                 | Validate a preview artifact without the file list or manifest output. |
+| `--guard-only`       | -                 | Deprecated alias for `verify`; fails on a `private: true` package. |
 | `--tarball-out DIR`  | -                 | Copy the final tarball into `DIR` before publishing.                                       |
 | `--registry URL`     | `registry`        | Set `publishConfig.registry` on the cleaned manifest, and publish to it.                   |
 | `--skip-file-check`  | `skipFileCheck`   | Allow a manifest with no `files` array.                                                    |
@@ -294,6 +325,7 @@ boolean flags enable their setting. Pass per-release npm options, such as dist-t
 | `--no-git-checks`    | `noGitChecks`     | Allow publishing from a dirty working tree.                                                |
 | -                    | `devFields`       | Extra manifest fields to strip.                                                            |
 | -                    | `keepFields`      | Fields that belong in the published package, so stop reporting them.                       |
+| -                    | `allowUnreferenced` | Shipped paths nothing imports on purpose. Prefixes match whole subtrees.                 |
 | -                    | [`validateArtifact`](#validate-the-final-artifact) | Run your checks on the cleaned tarball before copying or publishing it. |
 | `-h`, `--help`       | -                 | Print usage, every flag, and the config keys.                                              |
 | `-v`, `--version`    | -                 | Print the installed version.                                                               |
@@ -335,7 +367,7 @@ Use `validateArtifact` to check what users will install, such as package imports
 
 This runs `node scripts/check-artifact.mjs /absolute/path/to/package.tgz` from your package directory. Read the tarball path from `process.argv.at(-1)`; configured arguments come before it.
 
-The command runs once after built-in checks and before publication or a `--tarball-out` copy. It also runs in `--dry-run` and `--guard-only` modes. The config is removed from the published manifest.
+The command runs once after built-in checks and before publication or a `--tarball-out` copy. It also runs in `verify` and `--dry-run` modes. The config is removed from the published manifest.
 
 The first item must name an executable on `PATH` or by its path. Use `node` or `bun` to run scripts, including on Windows; `.cmd` shims are not supported. Arguments are passed literally, without a shell: no pipes, redirection or environment assignments. Relative paths start at your package directory.
 
