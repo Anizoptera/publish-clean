@@ -162,7 +162,7 @@ Measured 2026-09-11 on macOS with Node 24.20.0, each case beside a control:
   population, and a semver range parser in a dependency-free CLI would change no verdict. Revisit
   if a package ever declares that floor and is refused.
 
-## A check that was measured and dropped
+## Checks that were measured and dropped
 
 An unexecutable `bin` file in the tarball looked like an obvious defect. It is not: installed with
 bun, a `0644` member came out `0755` and ran; pnpm 11 does the same. Installers have to restore the
@@ -171,6 +171,21 @@ bit because Windows-authored tarballs routinely lack it. npm cannot fail to, by 
 mode, reached from both `link-bin.js` and `shim-bin.js`, so every platform takes it. yarn remains
 unmeasured — install a package whose `bin` member is `0644` and stat the link target; if it does
 not restore the bit, this check comes back.
+
+The legacy `browser` FIELD contradicting an `exports` browser target is publint's
+`EXPORTS_VALUE_CONFLICTS_WITH_BROWSER`, and it is real: a bundler honouring the field substitutes a
+file `exports` never chose, with nothing raised anywhere. Measured over 3490 installed packages,
+resolving through this tool's own row engine: 34 carry both mechanisms, and exactly 2 distinct
+packages disagree — `css-tree` (four versions) and `@napi-rs/lzma`. Both are deliberate: the field
+sends field-reading bundlers to a prebuilt browser bundle while `exports` hands source to
+condition-reading ones. A rule here would fire on packages that work, which is the same reason the
+name-based dead-directory rule was dropped.
+
+Two traps for whoever re-measures. A condition set holding BOTH `import` and `require` matches no
+row at all — sibling-key exclusivity is encoded in the rows — so it silently reports zero. And
+comparing the browser condition's target against a remap of the NODE target pits an ESM path
+against a CJS one, which makes `nanoid`, `uuid` and `clipanion` look like conflicts; the sound test
+is whether the field remaps the very file the browser condition resolved to.
 
 Recorded because the next person will have the same idea, and re-deriving the answer costs an
 afternoon.
