@@ -189,6 +189,11 @@ export function equivalent(before: unknown, after: unknown): boolean {
  * both describes nobody. Without this filter the commonest shape in the ecosystem —
  * `{"import": …, "require": …}` — would be reported as unreachable for a consumer that does not
  * exist, and a check that fires on a correct package is worse than no check.
+ *
+ * This is the ONLY predicate here that depends on what a consumer activates, and it reads one
+ * binary fact rather than any runtime's condition list — so measuring further runtimes cannot move
+ * it. Were the fact ever false, the cost is a SUPPRESSED warning, never a refused publish: it can
+ * only silence `exports-unresolvable`, which is a `waste` finding and never aborts.
  */
 export function reachableByAnyConsumer(literals: Literals): boolean {
   return !(literals.get("import") === false && literals.get("require") === false);

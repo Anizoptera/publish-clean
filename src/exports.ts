@@ -30,6 +30,10 @@ import type { JsonObject } from "./json";
  * `browser`/`node` and `import`/`require` share a tier because their order relative to each other
  * is free — they never co-occurred in any measured profile. A tool must not report a "wrong"
  * order where no constraint binds.
+ *
+ * The runtime names share ONE tier, so an unmeasured runtime's exact condition set cannot change
+ * its rank: every outcome already places it here, ahead of `node` (which Bun and Deno activate).
+ * Installing a runtime to measure it buys documentation accuracy, never a different verdict.
  */
 const TIERS: readonly { readonly forced: boolean; readonly names: readonly string[] }[] = [
   { forced: true, names: ["types"] },
