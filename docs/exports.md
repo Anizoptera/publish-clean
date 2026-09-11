@@ -109,6 +109,21 @@ Measured 2026-09-11 on macOS with Node 24.20.0, each case beside a control:
   (`@opentui/core` writes an import statement into a string). Suppression is the safe direction
   here, because unlike the dead-file scan this finding stops a publish.
 
+  Both rules ask where a specifier SITS, which is why `src/lexical.ts` answers it by scanning the
+  file rather than by reading the matched line. A line-shaped test gets three real shapes wrong —
+  a block comment whose line does not open it, a template literal spanning lines, a trailing `//`
+  after code — and each one is a refused publish over a package that is fine. The scanner carries
+  no grammar, so a regular expression holding a quote or the bytes `/*` can desync it; that shows
+  up as a string or block comment still open at the end of a file, which valid JavaScript cannot
+  produce, and such a file is dropped entirely.
+
+  Two further distinctions the corpus forced, each a false positive before it was made. A subpath
+  exposed through a fallback array IS exposed: this tool refuses to rewrite an array because the
+  resolvers disagree about them, and that is not a claim that nobody resolves it. `yargs` and
+  `generator-function` both publish their root that way. And only `import(…)` is load-bearing
+  inside a comment — a commented-out `require(…)` is dead code no checker resolves, which is how
+  `yargs` documents its own usage.
+
   The same defect exists for `#` specifiers a package's own `imports` never declares, and it is NOT
   checked: 12 of those 662 packages use a `#` specifier at all, and the only undeclared one found
   was a code generator emitting an import for its user's project. A rule whose entire measured

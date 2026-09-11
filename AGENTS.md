@@ -79,6 +79,13 @@
   population. A specifier inside a template literal is generated text, not this file's import.
   Suppression is the safe direction ONLY here, where the finding stops a publish — the opposite of
   the dead-file scan in the same file, where over-matching merely hides a report. Do not unify them.
+- Decide that scan from `src/lexical.ts`, never from the matched line. Where a specifier sits is a
+  lexical question, and a line-shaped test answers three real shapes wrongly — a block comment whose
+  line does not open it, a template literal spanning lines, a trailing `//` after code — each one a
+  refused publish over a sound package. The scanner carries no grammar, so keep its end-of-file
+  check: a regular expression may hold a quote or the bytes `/*`, and the desync that follows shows
+  up as a string or block comment still open where valid JavaScript cannot leave one. Never make it
+  answer from a position it reports as untrusted.
 - Verification is the same pipeline minus the publish, and `verify` skips exactly ONE guard:
   `assertPublicPackage`. A package checked before it goes public must be checked by the rules it will
   actually face, so never let a second exemption in. Every check reports through `src/finding.ts`
