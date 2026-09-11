@@ -267,6 +267,16 @@ const MUTATIONS: readonly Mutation[] = [
     from: /if \(!reportReachability\(node, where, findings\)\) return node;/,
     to: "reportReachability(node, where, findings);",
   },
+
+  // --- scripts/git-hooks.ts: the installer stays inside this repository -------------------------
+  {
+    // The pre-fix behaviour exactly: wire unless there is no repository anywhere above, which in a
+    // package installed under someone else's checkout means wiring THEIRS.
+    name: "hooks: installer wires whatever repository encloses it",
+    file: "scripts/git-hooks.ts",
+    from: /if \(enclosingRepository\(\) !== realpathSync\(ROOT\)\)/,
+    to: "if (enclosingRepository() === null)",
+  },
 ];
 
 /**

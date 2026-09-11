@@ -18,29 +18,47 @@
  * every fresh clone and CI checkout gets, so a `100644` mode leaves the author gated and everybody
  * else silently ungated, which no local test can see.
  */
-import { accessSync, constants, existsSync } from "node:fs";
+import { accessSync, constants, existsSync, realpathSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import path from "node:path";
 
 /** The tracked hooks directory. Git resolves `core.hooksPath` against the top of the worktree. */
 const HOOKS_PATH = ".githooks";
 const PRE_COMMIT = `${HOOKS_PATH}/pre-commit`;
 const INSTALL = "bun run hooks:install";
 
+/** This checkout, taken from the script's own location so no answer here depends on the cwd. */
+const ROOT = path.resolve(import.meta.dirname, "..");
+const PRE_COMMIT_FILE = path.join(ROOT, PRE_COMMIT);
+
+/** Pinned to this checkout so the answers describe this repository and not the caller's cwd. */
 const git = (...args: string[]): string =>
-  execFileSync("git", args, { encoding: "utf8" }).trimEnd();
+  execFileSync("git", args, { encoding: "utf8", cwd: ROOT }).trimEnd();
+
+/** The repository Git would act on from here, which is NOT always this one — see `--install`. */
+function enclosingRepository(): string | null {
+  try {
+    return realpathSync(git("rev-parse", "--show-toplevel"));
+  } catch {
+    return null;
+  }
+}
 
 if (process.argv[2] === "--install") {
-  // `prepare` runs this on every install, including one that is not a Git checkout at all — a
-  // source tarball, or this package pulled in as a git dependency. There is nothing to wire there
-  // and failing would break the install, so say so in one line and let the build continue. The
-  // check below is what refuses loudly, and it only ever runs inside a checkout.
-  try {
-    git("config", "core.hooksPath", HOOKS_PATH);
-  } catch {
+  // `prepare` runs this on EVERY install, including ones that are not this checkout — a source
+  // tarball, or this package pulled in as a git dependency under someone else's repository. Git
+  // resolves `core.hooksPath` against the repository it finds by walking UP from here, so an
+  // unguarded write lands in whatever encloses the install and points a stranger's hooks at a
+  // `.githooks` that does not exist there, silently disabling every hook they have. Measured:
+  // installing into `consumer/node_modules/publish-clean` set `core.hooksPath` in `consumer`.
+  //
+  // Nothing is wired unless the repository Git finds IS this one, and a refusal exits 0 because
+  // breaking an install over hooks nobody asked for would be the larger harm.
+  if (enclosingRepository() !== realpathSync(ROOT))
     console.error(
-      `Not a Git checkout, so no commit hooks were wired. Run \`${INSTALL}\` in a clone.`,
+      `Not a checkout of this repository, so no commit hooks were wired. Run \`${INSTALL}\` inside a clone of it.`,
     );
-  }
+  else git("config", "core.hooksPath", HOOKS_PATH);
   process.exit(0);
 }
 
@@ -61,11 +79,11 @@ if (configured !== HOOKS_PATH)
 
 try {
   // The same question Git asks, and it follows a symlink to the target the way Git does.
-  accessSync(PRE_COMMIT, constants.X_OK);
+  accessSync(PRE_COMMIT_FILE, constants.X_OK);
 } catch {
   // Missing and present-but-unrunnable both end here and take different repairs, so a single
   // message would send half its readers to chmod a file that is not there.
-  const gone = !existsSync(PRE_COMMIT);
+  const gone = !existsSync(PRE_COMMIT_FILE);
   problems.push(
     `${PRE_COMMIT} is ${gone ? "missing" : "not executable"} on disk, so Git runs no check and creates the commit at exit 0.\n` +
       `    Repair: ${gone ? `git checkout -- ${PRE_COMMIT}` : `chmod +x ${PRE_COMMIT}`}`,
