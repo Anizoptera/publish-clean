@@ -22,6 +22,14 @@ notes: the section for a version is published verbatim when its tag is pushed.
   resolving to something that is not a declaration file, a `require` condition resolving to an ES
   module, a branch no consumer can reach, a consumer no branch serves, a condition no measured
   consumer activates, a fallback array, and a `bin` shebang ending in CR.
+- **Publication stops when a packed name would not survive extraction.** Two files whose names
+  differ only in letter case or Unicode form become ONE file on macOS and Windows, so the install
+  reports success and the package is silently missing a file. A name Windows cannot create — a
+  reserved device name like `aux.js` in any path component, a character such as `:` or `?`, a
+  trailing dot or space — fails the install outright there. Both are invisible on the machine that
+  built the package. If the package genuinely does not run on Windows, declare `"os": ["!win32"]`
+  and the Windows half stops applying; a path component over 255 bytes is reported regardless,
+  because no filesystem here accepts one.
 - **`--strict` treats warnings as errors.** It never makes an already-applied repair fatal.
 - **Publication stops when the package imports itself through a subpath its own `exports` does not
   expose.** Self-reference resolves through `exports` like anyone else's import, so shipping the

@@ -10,6 +10,7 @@
 import path from "node:path";
 
 import { PublishCleanError } from "./error";
+import type { Finding } from "./finding";
 import { isObject } from "./json";
 import type { JsonObject } from "./json";
 
@@ -58,6 +59,152 @@ export function validatePackedFiles(files: readonly string[], skipSuspicious: bo
     throw new PublishCleanError(
       `Suspicious files in package artifact:\n${suspicious.map((file) => JSON.stringify(file)).join("\n")}`,
     );
+}
+
+/**
+ * Windows refuses these names in ANY path component, whatever the extension follows: `CON.txt`
+ * names the console device, not a file, and `lib/aux/index.js` is as unopenable as `aux.js`.
+ */
+const RESERVED_DEVICE = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
+/**
+ * `\` cannot reach here — the archive reader rejects it as a path alias — but it stays in the class
+ * so this reads as the whole Win32 rule rather than a remainder a later reader has to reconstruct.
+ * The control range is what forbids a newline inside a name.
+ */
+const WINDOWS_ILLEGAL = /[<>:"|?*\\\u0000-\u001f]/;
+/** Win32 strips a trailing dot or space silently, landing the file under a name nothing imports. */
+const WINDOWS_TRAILING = /[. ]$/;
+/** ext4, APFS and NTFS all stop at 255 per component; UTF-8 bytes is the strictest reading. */
+const MAX_COMPONENT_BYTES = 255;
+
+interface Unportable {
+  readonly reason: string;
+  /** A Windows-only rule is waived by a package that declares it does not run there. */
+  readonly windowsOnly: boolean;
+}
+
+function unportableName(name: string): Unportable | undefined {
+  for (const part of name.split("/")) {
+    const quoted = JSON.stringify(part);
+    if (RESERVED_DEVICE.test(part))
+      return { reason: `${quoted} is a reserved device name on Windows`, windowsOnly: true };
+    if (WINDOWS_ILLEGAL.test(part))
+      return { reason: `${quoted} holds a character Windows forbids in a name`, windowsOnly: true };
+    if (WINDOWS_TRAILING.test(part))
+      return {
+        reason: `${quoted} ends in a dot or space, which Windows strips`,
+        windowsOnly: true,
+      };
+    if (Buffer.byteLength(part, "utf8") > MAX_COMPONENT_BYTES)
+      return { reason: `${quoted} is longer than 255 bytes`, windowsOnly: false };
+  }
+  return undefined;
+}
+
+/**
+ * Whether a consumer on Windows can install this package at all.
+ *
+ * `os` is npm's own platform gate — a mismatch is EBADPLATFORM and the install never unpacks — so a
+ * package that excludes Windows cannot break a Windows consumer with a name Windows refuses. Reading
+ * it is what keeps this rule from refusing a publish over a platform the author already opted out
+ * of.
+ *
+ * A list of plain names is an allowlist and a `!win32` entry is a blocklist. Doubt resolves to
+ * "does not target Windows", which SUPPRESSES: this gate exists only to prevent a fabricated
+ * refusal, so erring toward silence keeps it doing the one job it has.
+ */
+function targetsWindows(os: unknown): boolean {
+  if (!Array.isArray(os)) return true;
+  const names = os
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.toLowerCase());
+  if (names.length === 0) return true;
+  if (names.includes("!win32")) return false;
+  const allowed = names.filter((value) => !value.startsWith("!"));
+  return allowed.length === 0 || allowed.includes("win32");
+}
+
+/**
+ * Names that do not survive extraction onto a consumer's machine.
+ *
+ * Every other guard here asks what a file CONTAINS, or whether a file the manifest names is
+ * PRESENT. These two ask whether the extracted tree can match the archive's nominal tree at all,
+ * which fails differently and worse: both defects are invisible on the machine that built the
+ * package, and a published version number cannot be taken back.
+ *
+ * Findings rather than throws, unlike the guards above. Neither poisons a later check the way a
+ * missing declared file does, so the run continues and reports everything else in the same output;
+ * the consequence model then stops it, because `breaks` unhealed is fatal.
+ *
+ * Measured over the population each rule judges before either was written. Collisions: zero across
+ * 319 published tarballs, 15844 members — installed directories are the WRONG instrument for this
+ * one, since two names differing only in case cannot coexist in a directory on a folding
+ * filesystem, so a zero from them measures the filesystem and not the packages. Unportable names:
+ * zero over those same tarballs and zero across 3490 installed packages, 187187 files. Neither zero
+ * retires its rule. Frequency is not what decides here — irreversibility is — and neither rule has
+ * a false-positive population to weigh against it: two names that fold together DO become one file,
+ * and a name Windows refuses IS refused.
+ */
+export function reviewPackedNames(pkg: JsonObject, files: readonly string[]): Finding[] {
+  const findings: Finding[] = [];
+
+  const byFold = new Map<string, string[]>();
+  for (const file of files) {
+    const group = byFold.get(foldName(file));
+    if (group) group.push(file);
+    else byFold.set(foldName(file), [file]);
+  }
+  const collisions = [...byFold.values()].filter((group) => group.length > 1);
+  if (collisions.length > 0)
+    findings.push({
+      rule: "packed-name-collision",
+      consequence: "breaks",
+      healed: false,
+      where: `${collisions.length} colliding names`,
+      message:
+        `These files become ONE file wherever the filesystem ignores letter case or Unicode ` +
+        `form, which is macOS and Windows by default. One silently replaces the other, the ` +
+        `install reports success, and the package is missing a file:\n` +
+        collisions
+          .map((group) => {
+            // NFC collapses form, so an equal NFC form leaves case as the only difference and an
+            // unequal one leaves form as the only remaining candidate.
+            const axis =
+              new Set(group.map((file) => file.normalize("NFC"))).size === 1
+                ? "Unicode form"
+                : "letter case";
+            return `  ${group.join(" and ")} — differ only in ${axis}`;
+          })
+          .join("\n") +
+        `\nRename one of each group so the names differ by more than case or Unicode form.`,
+    });
+
+  const windows = targetsWindows(pkg.os);
+  const unportable = files
+    .map((file) => ({ file, defect: unportableName(file) }))
+    .filter(
+      (item): item is { file: string; defect: Unportable } =>
+        item.defect !== undefined && (windows || !item.defect.windowsOnly),
+    );
+  if (unportable.length > 0)
+    findings.push({
+      rule: "packed-name-unportable",
+      consequence: "breaks",
+      healed: false,
+      where: `${unportable.length} files`,
+      message:
+        `These packed names cannot be created on a consumer's filesystem. Installing either ` +
+        `fails outright or writes the file under a different name, and nothing imports the name ` +
+        `it lands under:\n` +
+        unportable.map((item) => `  ${item.file} — ${item.defect.reason}`).join("\n") +
+        `\nRename them so every path component is legal everywhere.` +
+        (unportable.every((item) => item.defect.windowsOnly)
+          ? ` If this package genuinely does not run on Windows, say so instead and npm will ` +
+            `refuse the install there rather than break it: "os": ["!win32"].`
+          : ``),
+    });
+
+  return findings;
 }
 
 /**
@@ -256,6 +403,22 @@ function mainExists(name: string, files: ReadonlySet<string>): boolean {
 }
 
 /**
+ * How two names are compared when asking whether a filesystem could confuse them.
+ *
+ * The single definition of "the same name" for every rule that asks: a manifest target that
+ * misses, an import that misses, and two packed files that collide. They report different defects,
+ * but a disagreement here would let one call a pair identical while another calls it absent, which
+ * reads as a contradiction inside one report.
+ *
+ * `toLowerCase` is not any real filesystem's fold — NTFS uses an uppercase table and APFS full
+ * Unicode case folding — but it is the same approximation everywhere in this tool, and agreement
+ * between the rules matters more here than matching one filesystem exactly.
+ */
+export function foldName(value: string): string {
+  return value.normalize("NFC").toLowerCase();
+}
+
+/**
  * The archive entry a missing target almost names.
  *
  * Case and Unicode form are the two ways a target can be wrong and still resolve on the machine
@@ -266,23 +429,12 @@ function mainExists(name: string, files: ReadonlySet<string>): boolean {
  * about form elsewhere — macOS may normalise in its VFS rather than per filesystem, so the
  * instrument cannot separate them, and a filesystem that normalises nothing is unmeasured here.
  * Hence the report names no platform: both differences are reported the same way because both work
- * for their author, which is why nobody catches either. The report is the only place this is recoverable: told merely that the
- * file is "missing", an author looking straight at it hunts a build that is working.
+ * for their author, which is why nobody catches either. The report is the only place this is
+ * recoverable: told merely that the file is "missing", an author looking straight at it hunts a
+ * build that is working.
  *
  * Runs only for a target already proven absent, so the usual path allocates nothing.
  */
-/**
- * How two names are compared when asking whether a filesystem could confuse them.
- *
- * Shared with the import-graph scan so both halves of the tool agree on what "the same name"
- * means. They report different defects — a manifest target that misses, an import that misses —
- * but a disagreement here would let one half call a pair identical while the other calls it
- * absent, which reads as a contradiction in the same report.
- */
-export function foldName(value: string): string {
-  return value.normalize("NFC").toLowerCase();
-}
-
 function nearMatch(name: string, published: readonly string[]): string | undefined {
   const folded = foldName(name);
   return published.find((file) => foldName(file) === folded);

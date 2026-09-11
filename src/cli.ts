@@ -10,7 +10,12 @@ import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertDeclaredFiles, assertSameEntries, validatePackedFiles } from "./artifact";
+import {
+  assertDeclaredFiles,
+  assertSameEntries,
+  reviewPackedNames,
+  validatePackedFiles,
+} from "./artifact";
 import { requireTool, run } from "./command";
 import { allowedUnreferenced, customDevFields, keptFields, packageConfig } from "./config";
 import { reviewExports } from "./exports";
@@ -293,6 +298,8 @@ async function packAndClean(
     // decoded, so this costs a map rather than a second decompression.
     const contents = packageContents(published);
     findings.push(
+      // Judges names alone, so it takes the file list rather than the bodies beside it.
+      ...reviewPackedNames(shippedPkg, finalFiles),
       ...reviewShippedFiles(shippedPkg, contents),
       ...reviewSelfReferences(shippedPkg, contents),
       ...reviewUnreferencedFiles(shippedPkg, contents, allowUnreferenced),
