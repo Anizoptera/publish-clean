@@ -364,16 +364,25 @@ function healNode(node: unknown, where: string, findings: Finding[]): unknown {
   if (!isObject(node)) return node;
 
   // Bottom up: a child that collapses to a string can make its parent collapsible in turn.
+  // `changed` tracks whether anything actually moved, so an untouched map is returned AS the
+  // object it came in as. The caller compares by identity to decide whether the manifest needs
+  // rewriting at all, and a copy that merely looks the same would report a repair on every
+  // package carrying a condition map — measured at 81.5% of them before this was tracked.
+  let changed = false;
   let current: JsonObject = reorder(node, Object.keys(node));
-  for (const key of Object.keys(current))
-    current[key] = healNode(current[key], `${where}[${JSON.stringify(key)}]`, findings);
+  for (const key of Object.keys(current)) {
+    const healed = healNode(current[key], `${where}[${JSON.stringify(key)}]`, findings);
+    changed ||= healed !== current[key];
+    current[key] = healed;
+  }
 
   const keys = Object.keys(current);
-  if (keys.length === 0) return current;
+  const repaired = () => (changed ? current : node);
+  if (keys.length === 0) return repaired();
 
   // A map holding a fallback array anywhere below is frozen whole: the proof that authorises
   // every rewrite here is relative to a resolver, and the resolvers disagree about arrays.
-  if (keys.some((key) => containsArray(current[key]))) return current;
+  if (keys.some((key) => containsArray(current[key]))) return repaired();
 
   for (const key of keys) {
     if (!isKnown(key))
@@ -407,6 +416,7 @@ function healNode(node: unknown, where: string, findings: Finding[]): unknown {
         `Delete it from your package.json to stop this report.`,
     });
     current = candidate;
+    changed = true;
   }
 
   // Canonical order, applied only when the permutation is provably neutral.
@@ -426,6 +436,7 @@ function healNode(node: unknown, where: string, findings: Finding[]): unknown {
           `default. Apply the same order in your package.json to stop this report.`,
       });
       current = permuted;
+      changed = true;
     } else if (forcedOrderViolation(Object.keys(current))) {
       findings.push({
         rule: "exports-condition-order-unsafe",
@@ -466,7 +477,7 @@ function healNode(node: unknown, where: string, findings: Finding[]): unknown {
     }
   }
 
-  return current;
+  return repaired();
 }
 
 function containsArray(node: unknown): boolean {
@@ -518,38 +529,65 @@ function reportReachability(node: unknown, where: string, findings: Finding[]): 
           `that shadows it.`,
       });
 
+  // WARNING, not an error, and the measurement is the whole reason. This fires on 25.5% of the
+  // 659 published packages on this machine, and the samples are dominated by shapes the author
+  // chose: `@types/ws` exports only a `types` branch because runtime resolution is MEANT to fail,
+  // and a package offering only `node` and `browser` has decided not to serve anything else.
+  // Refusing to publish a quarter of the ecosystem would teach every reader to ignore this tool.
+  // `--strict` is the ruled way to demand otherwise.
   if (rows.some((row) => row.target.kind === "miss" && reachableByAnyConsumer(row.literals)))
     findings.push({
       rule: "exports-unresolvable",
-      consequence: "breaks",
+      consequence: "waste",
       healed: false,
       where,
       message:
         `Some consumer resolves nothing here and fails with ERR_PACKAGE_PATH_NOT_EXPORTED. ` +
         `Edge runtimes (workerd, edge-light, netlify, fastly) activate neither "node" nor ` +
-        `"browser", and a bundler targeting neither activates neither, so a map built only from ` +
-        `environment names leaves them with no branch at all. Add a "default" key as the last ` +
-        `entry, pointing at the build that works anywhere.`,
+        `"browser", and a bundler targeting neither activates neither, so a map built from ` +
+        `environment names alone leaves them with no branch at all. Add a "default" key as the ` +
+        `last entry, pointing at the build that works anywhere. Ignore this if excluding those ` +
+        `consumers is deliberate — a types-only package resolves nothing at run time by design.`,
     });
 }
 
+/**
+ * Targets whose reachability this tool can actually answer.
+ *
+ * A fallback array is deliberately NOT descended into. It resolves to one opaque row, so every
+ * string inside it would otherwise appear in no row and be reported as dead — which measured as
+ * the entire population of this rule's hits on real packages: `acorn` and `escalade` wrap their
+ * whole entry point in an array, and every target they declare was called unreachable. Those
+ * targets are unanalysed, not dead, and silence is the only honest answer for them.
+ */
 function collectStrings(node: unknown, out: string[]): void {
   if (typeof node === "string") out.push(node);
-  else if (Array.isArray(node)) for (const item of node) collectStrings(item, out);
   else if (isObject(node)) for (const value of Object.values(node)) collectStrings(value, out);
 }
 
+export interface ExportsReview {
+  /** The manifest to publish: the input itself when nothing was repaired. */
+  readonly manifest: JsonObject;
+  readonly findings: readonly Finding[];
+}
+
 /**
- * Verifies and repairs the `exports` and `imports` of a manifest that is about to be published.
+ * Verifies — and, unless asked not to, repairs — the `exports` and `imports` of a manifest about
+ * to be published.
  *
- * Returns a new manifest; the input is never modified. Each repaired node is asserted equivalent
- * to the one it replaces before it is handed back, so a defect in any transformation above fails
- * here — loudly, naming itself as this tool's bug — rather than in a stranger's build.
+ * The input is never modified, and `manifest` is the input object itself when nothing changed, so
+ * a caller can tell a real repair from a copy by identity.
  *
- * `heal: false` keeps every finding and withholds only the rewrite, which is why the findings
+ * Each repaired node is asserted equivalent to the one it replaces before it is returned, so a
+ * defect in any transformation above fails HERE, naming itself as this tool's bug, rather than in
+ * a stranger's build.
+ *
+ * `heal: false` keeps every finding and withholds only the rewrite, which is why those findings
  * are corrected to stop claiming a repair the published artifact does not carry.
  */
-export function healExports(pkg: JsonObject, findings: Finding[], heal: boolean): JsonObject {
+export function reviewExports(pkg: JsonObject, options: { readonly heal: boolean }): ExportsReview {
+  const { heal } = options;
+  const findings: Finding[] = [];
   const analyse = (node: unknown, where: string): unknown => {
     reportReachability(node, where, findings);
     const first = findings.length;
@@ -567,7 +605,7 @@ export function healExports(pkg: JsonObject, findings: Finding[], heal: boolean)
     return node;
   };
 
-  let result = pkg;
+  let result: JsonObject = pkg;
   for (const field of ["exports", "imports"]) {
     const value = pkg[field];
     if (value === undefined || value === null) continue;
@@ -591,5 +629,5 @@ export function healExports(pkg: JsonObject, findings: Finding[], heal: boolean)
     }
     if (changed) result = { ...result, [field]: rebuilt };
   }
-  return result;
+  return { manifest: result, findings };
 }

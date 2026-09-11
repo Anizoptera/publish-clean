@@ -12,8 +12,7 @@
  * as "a key is redundant when a later key repeats its target" gets backwards.
  */
 import { expect, it } from "vitest";
-import { equivalent, healExports } from "../src/exports";
-import type { Finding } from "../src/finding";
+import { equivalent, reviewExports } from "../src/exports";
 import { isObject } from "../src/json";
 
 const NAMES = ["types", "node", "browser", "import", "require", "module", "custom"] as const;
@@ -121,9 +120,8 @@ it("never treats a fallback array as interchangeable with anything but itself", 
 });
 
 function heal(pkg: Record<string, unknown>, enabled = true) {
-  const findings: Finding[] = [];
-  const result = healExports(pkg, findings, enabled);
-  return { findings, result, rules: findings.map((finding) => finding.rule) };
+  const { manifest, findings } = reviewExports(pkg, { heal: enabled });
+  return { findings, result: manifest, rules: findings.map((finding) => finding.rule) };
 }
 
 it("repairs only what it can prove, and proves what it repaired", () => {
@@ -190,7 +188,17 @@ it("reports the branch nobody reaches and the consumer nobody serves, and never 
 
   const hole = heal({ exports: { ".": { node: "./n.js", browser: "./b.js" } } });
   expect(hole.rules).toContain("exports-unresolvable");
-  expect(hole.findings.find((f) => f.rule === "exports-unresolvable")?.consequence).toBe("breaks");
+  // A warning, because it fires on a quarter of published packages and most of those chose the
+  // shape: a types-only package resolves nothing at run time on purpose. `--strict` promotes it.
+  expect(hole.findings.find((f) => f.rule === "exports-unresolvable")?.consequence).toBe("waste");
+
+  // A target inside a fallback array is unanalysed, never dead. Reporting those was this rule's
+  // entire measured population before the fix: `acorn` and `escalade` wrap their whole entry
+  // point in an array, and every target they declare was called unreachable.
+  const wrapped = heal({
+    exports: { ".": [{ import: "./m.mjs", require: "./c.js" }, "./c.js"] },
+  });
+  expect(wrapped.rules).not.toContain("exports-unreachable-branch");
 
   // The commonest shape in the ecosystem must not be reported: every consumer activates exactly
   // one of import/require, so the row denying both describes nobody.
