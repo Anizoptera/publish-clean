@@ -50,6 +50,13 @@
   forever. The manifest is the ONLY surface authorised for this — file selection belongs to `pnpm pack`,
   and no other file's contents are ever altered. Unrecognised fields ship and are reported, never dropped
   silently: dropping a key some consumer resolves breaks a stranger's build with no signal here.
+- Never reorder or remove anything inside `exports` or `imports` without a proof that resolution is
+  unchanged. A consumer activates many conditions at once — webpack activates six — and takes the
+  first key of the package's object that is in its set, so the order written here picks the winner
+  and no reorder is cosmetic. The proof is cheap because resolution reads only an object's own keys:
+  enumerate the subsets of the names present and require every one to agree. The measured condition
+  sets, the runtimes that disagree with each other, and why Node's published array algorithm does not
+  match real Node belong in `docs/exports.md`; update it and this bullet together.
 - Do not add package-manager-specific behavior unless tests prove the published tarball invariant.
 - Split CLI args at `--` before parsing; accept only the publication options in `src/options.ts`
   afterward. Reject extra operands, workspace selectors and flag-shaped values: npm reparses
