@@ -12,7 +12,8 @@
  * as "a key is redundant when a later key repeats its target" gets backwards.
  */
 import { expect, it } from "vitest";
-import { equivalent, reviewExports } from "../src/exports";
+import { equivalent } from "../src/conditions";
+import { reviewExports } from "../src/exports";
 import { isObject } from "../src/json";
 
 const NAMES = ["types", "node", "browser", "import", "require", "module", "custom"] as const;

@@ -1,67 +1,18 @@
 /**
- * Proving what an `exports`/`imports` condition map does, so this tool may repair one without
- * changing what a consumer resolves.
+ * What this tool reports and repairs in an `exports`/`imports` map.
  *
- * A consumer does not activate one condition. It activates a SET — webpack activates six — and
- * then takes the first key of the package's object that is in that set. The order written in the
- * manifest picks the winner, so no reorder here is cosmetic and nothing may be removed on the
- * strength of a rule of thumb. Every transformation in this file is therefore accompanied by a
- * proof, and `heal` asserts that proof again over the value it returns.
- *
- * THE PROOF. Walking a map top to bottom yields a DECISION LIST: rows of
- * `{conjunction of condition literals → target}` that are mutually exclusive and cover every
- * possible active set. Two maps are equivalent exactly when every pair of rows whose conjunctions
- * are jointly satisfiable carries the same target, and satisfiability of two pure conjunctions is
- * a scan for one name bound both ways. The cost is linear in the map's STRUCTURE.
- *
- * The rejected alternative was enumerating the 2^n subsets of the names present. It is
- * exponential in the names rather than the structure, so it needs a cap and answers "not proven"
- * on real packages — a survey of this machine's dependency closure holds a condition object with
- * 25 distinct names, which is 33 million subsets. A closed-form shortcut ("a key is inert when
- * every later key has its target") was rejected as WRONG: in `{import: X, require: Y, default: X}`
- * the `import` key IS inert, because `require` cannot be active alongside it, and the shortcut
- * says otherwise.
+ * The proof that authorises every rewrite here lives in `src/conditions.ts`: a map flattens to a
+ * decision list, and two maps are equivalent when every jointly satisfiable pair of rows agrees.
+ * This file owns the policy on top of it — the canonical condition order and which parts of it a
+ * measurement actually forces, the messages, and the repairs. Every transformation is verified
+ * with `equivalent` against the value it replaces.
  *
  * Ambient inputs arrive as parameters — no process, filesystem or argv here.
  */
+import { equivalent, reachableByAnyConsumer, ROW_BUDGET, rowsOf } from "./conditions";
 import type { Finding } from "./finding";
 import { isObject } from "./json";
 import type { JsonObject } from "./json";
-
-/**
- * What a branch yields. `blocked` (an explicit `null`) and `miss` (no key matched) both fail
- * resolution, but they are kept distinct so a transformation has to prove the stronger claim:
- * treating them as equal would let `{node: null, default: "./a.js"}` lose its `node` branch,
- * which is a real change for a consumer that activates `node`.
- */
-type Target =
-  | { readonly kind: "blocked" }
-  | { readonly kind: "file"; readonly file: string }
-  | { readonly kind: "miss" }
-  | { readonly kind: "opaque"; readonly key: string };
-
-/** A conjunction: each named condition is required to be active (`true`) or inactive (`false`). */
-type Literals = ReadonlyMap<string, boolean>;
-
-interface Row {
-  readonly literals: Literals;
-  readonly target: Target;
-}
-
-/**
- * Pairs that never co-occur, folded in as the rows are built so that a contradictory branch
- * produces no row at all.
- *
- * `import`/`require` is Node's own documented split and held across all 20 consumer profiles
- * measured for this work. `development`/`production` is documented as mutually exclusive.
- * Nothing else may be assumed: an unrecognised name is a free variable, which is what makes
- * `{"X": "./a.js", "default": "./a.js"}` provably removable whatever X means, while
- * `{"X": "./src/index.ts", "default": "./dist/index.js"}` is untouchable.
- */
-const EXCLUSIVE: readonly (readonly [string, string])[] = [
-  ["import", "require"],
-  ["development", "production"],
-];
 
 /**
  * The canonical order, most specific first. Each tier's index is its rank; `forced` marks the
@@ -136,138 +87,6 @@ function conditionRank(name: string): number | undefined {
 
 function isKnown(name: string): boolean {
   return KNOWN.has(name) || name.startsWith("types@");
-}
-
-/** A map too large to reason about. Nothing is healed inside it, and the run is told why. */
-const ROW_BUDGET = 4096;
-class TooComplex extends Error {}
-
-function bind(base: Literals, name: string, value: boolean): Literals | null {
-  const existing = base.get(name);
-  if (existing !== undefined) return existing === value ? base : null;
-  const next = new Map(base);
-  next.set(name, value);
-  if (!value) return next;
-  for (const [left, right] of EXCLUSIVE) {
-    const other = left === name ? right : right === name ? left : null;
-    if (other === null) continue;
-    if (next.get(other) === true) return null;
-    next.set(other, false);
-  }
-  return next;
-}
-
-/**
- * A fallback array becomes one opaque target keyed by its own text, so it compares equal only to
- * an identical array. That is what makes this tool's refusal to rewrite arrays automatic rather
- * than a rule somebody has to remember: the runtimes disagree about them — Bun fails on
- * `[null, "./b.js"]` and `["not-relative", "./b.js"]` where Node and Deno resolve — so a proof
- * written against Node's array semantics would be quietly wrong for exactly the packages that
- * need the most care.
- */
-function flatten(node: unknown, under: Literals, out: Row[]): void {
-  if (out.length > ROW_BUDGET) throw new TooComplex();
-  if (node === null) {
-    out.push({ literals: under, target: { kind: "blocked" } });
-    return;
-  }
-  if (typeof node === "string") {
-    out.push({ literals: under, target: { kind: "file", file: node } });
-    return;
-  }
-  if (Array.isArray(node)) {
-    out.push({ literals: under, target: { kind: "opaque", key: JSON.stringify(node) } });
-    return;
-  }
-  if (!isObject(node)) {
-    // A number or boolean here is an invalid target. `assertDeclaredFiles` refuses it with the
-    // message that names the offending value; this walker only has to not claim it resolves.
-    out.push({ literals: under, target: { kind: "miss" } });
-    return;
-  }
-
-  // `pending` holds the conjunctions that have fallen through every key so far. A branch whose
-  // own resolution MISSES rejoins them, which is how Node's nested fall-through works: an object
-  // that resolves nothing lets the next sibling key be tried.
-  let pending: Literals[] = [under];
-  for (const [key, value] of Object.entries(node)) {
-    const next: Literals[] = [];
-    for (const context of pending) {
-      const taken = key === "default" ? context : bind(context, key, true);
-      if (taken) {
-        const sub: Row[] = [];
-        flatten(value, taken, sub);
-        for (const row of sub) {
-          if (row.target.kind === "miss") next.push(row.literals);
-          else out.push(row);
-        }
-      }
-      if (key !== "default") {
-        const skipped = bind(context, key, false);
-        if (skipped) next.push(skipped);
-      }
-    }
-    pending = next;
-  }
-  for (const context of pending) out.push({ literals: context, target: { kind: "miss" } });
-}
-
-function rowsOf(node: unknown): Row[] | null {
-  const out: Row[] = [];
-  try {
-    flatten(node, new Map(), out);
-  } catch (error) {
-    if (error instanceof TooComplex) return null;
-    throw error;
-  }
-  return out;
-}
-
-function satisfiable(left: Literals, right: Literals): boolean {
-  for (const [name, value] of left) {
-    const other = right.get(name);
-    if (other !== undefined && other !== value) return false;
-  }
-  return true;
-}
-
-function sameTarget(left: Target, right: Target): boolean {
-  if (left.kind !== right.kind) return false;
-  if (left.kind === "file" && right.kind === "file") return left.file === right.file;
-  if (left.kind === "opaque" && right.kind === "opaque") return left.key === right.key;
-  return true;
-}
-
-/**
- * True when two condition maps resolve identically for every possible set of active conditions.
- *
- * This is proved standalone, with every name free, which is STRICTLY STRONGER than what the
- * surrounding map needs: a nested object is always evaluated under conditions its parent has
- * already bound. Proving the stronger claim can only refuse a rewrite that would have been safe,
- * never allow one that is not — and refusing a safe rewrite costs nothing, because preserving
- * semantics beats saving bytes.
- *
- * An unprovable map (`null` rows, over budget) answers `false`, so the caller leaves it alone.
- */
-export function equivalent(before: unknown, after: unknown): boolean {
-  const rowsBefore = rowsOf(before);
-  const rowsAfter = rowsOf(after);
-  if (!rowsBefore || !rowsAfter) return false;
-  for (const left of rowsBefore)
-    for (const right of rowsAfter)
-      if (satisfiable(left.literals, right.literals) && !sameTarget(left.target, right.target))
-        return false;
-  return true;
-}
-
-/**
- * Every measured consumer activates exactly one of `import` and `require`, so a row that denies
- * both describes nobody. Without this filter the commonest shape in the ecosystem —
- * `{"import": …, "require": …}` — would be reported as unreachable for a consumer that does not
- * exist, and a check that fires on a correct package is worse than no check.
- */
-function reachableByAnyConsumer(literals: Literals): boolean {
-  return !(literals.get("import") === false && literals.get("require") === false);
 }
 
 /**
