@@ -134,9 +134,31 @@ async function assertCleanGit(
   signal: AbortSignal,
 ): Promise<void> {
   if (skip) return;
-  const output = (
-    await run("git", ["status", "--porcelain", "--", "."], packageDir, { signal })
-  ).trim();
+  let output: string;
+  try {
+    output = (
+      await run("git", ["status", "--porcelain", "--", "."], packageDir, { signal })
+    ).trim();
+  } catch (error) {
+    // Not being able to read a working tree is not a defect in the package, so it does not stop
+    // the run. A directory under no version control is the ordinary case — it has no commit for
+    // its tree to differ from, and `pnpm publish` packs from one without complaint, measured — but
+    // an absent `git` and an unreadable index land here too and are the same epistemic state: this
+    // check cannot be performed. Which one it was is git's to say, so the reason is quoted rather
+    // than classified; parsing it would bind this branch to git's locale.
+    //
+    // Continuing is what this repository's own rule prescribes: a run stops for a finding that
+    // leaks something or breaks a consumer, and an unverified working tree does neither — every
+    // guard that reads the artifact still runs. The warning carries the cost instead, and names
+    // the directory, because the reader who most needs it is the one who believed they were in a
+    // checkout and is one directory out.
+    if (signal.aborted) throw error;
+    console.warn(
+      `publish-clean: skipping the uncommitted-changes check — ${error instanceof Error ? error.message : String(error)}\n` +
+        `Expected a Git checkout at ${packageDir}? Then this publishes source that was never compared against a commit.`,
+    );
+    return;
+  }
   if (output) throw new PublishCleanError(`Source package has uncommitted changes:\n${output}`);
 }
 

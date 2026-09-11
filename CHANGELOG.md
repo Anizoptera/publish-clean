@@ -47,6 +47,14 @@ notes: the section for a version is published verbatim when its tag is pushed.
   for you; prefixes match whole subtrees. The check runs only when `exports` closes the package,
   because without that field every shipped path is importable and nothing is dead.
 
+- **A package directory that is not a Git repository no longer fails the run.** It used to abort
+  with a raw `git exited with 128`, which made `--no-git-checks` — documented as allowing a dirty
+  working tree — the only way to publish a directory that has no repository at all. There is no
+  commit there for a tree to differ from, so the check now reports that it was skipped and the run
+  continues. An absent `git` and an unreadable index behave the same way, for the same reason, and
+  the warning quotes git's own explanation of which it was. Use `--no-git-checks` for what it
+  says: a repository whose tree is dirty, which still stops the run.
+
 ## [0.9.1] - 2026-09-08
 
 ### Added

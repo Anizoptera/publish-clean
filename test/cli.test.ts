@@ -543,12 +543,21 @@ exit 1
     }
   });
 
-  it("keeps guard-only subject to source git cleanliness", async () => {
+  it("checks the working tree where there is one, and says so where there is not", async () => {
     const fx = await fixture(
       { name: "fixture-guard-git", version: "1.0.0", files: ["index.js"] },
       { "index.js": "module.exports = 1;\n" },
     );
     try {
+      // One `git init` apart, in the same position. A directory under no version control has no
+      // commit for its tree to differ from, so this check has nothing to assert about it and must
+      // not stop the run — measured, `pnpm publish` packs from such a directory without complaint,
+      // and this tool packs with `pnpm pack`, whose own git check never runs. Silence would be
+      // wrong too: an author who believed they were in a checkout is publishing unverified source.
+      const unversioned = await runCli(["--guard-only", fx.dir], process.cwd());
+      expect(unversioned.status, `${unversioned.stdout}\n${unversioned.stderr}`).toBe(0);
+      expect(unversioned.stderr).toContain("skipping the uncommitted-changes check");
+
       spawnSync("git", ["init"], { cwd: fx.dir, stdio: "ignore" });
       const result = await runCli(["--guard-only", fx.dir], process.cwd());
       expect(result.status).not.toBe(0);

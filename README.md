@@ -219,7 +219,8 @@ artifact during upload.
 Publication stops when:
 
 - the package is marked `private: true`
-- the working tree has uncommitted changes (`--no-git-checks` to allow it)
+- the working tree has uncommitted changes (`--no-git-checks` to allow it). A directory under no
+  version control has no commit to differ from, so it warns and continues instead
 - the package has no non-empty `files` array (`--skip-file-check` to allow it)
 - the tarball contains a recognised test, CI, lockfile or `tsconfig` path
   (`--allow-suspicious` to allow it)
