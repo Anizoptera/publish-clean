@@ -680,7 +680,12 @@ it.skipIf(process.platform === "win32").concurrent(
     let repeatedSignal = false;
     const child = spawn("node", [CLI, "--dry-run", "--no-git-checks", fx.dir], {
       env: { ...process.env, TMPDIR: temp },
-      timeout: 5000,
+      // The file's own bound, not a tighter one. This child is killed BY the test the moment it
+      // reports readiness, so the timeout exists only to bound a hang — and when it fires early it
+      // SIGKILLs, turning the exit code into 137 and failing the assertion below as "expected 137
+      // to be 143", which reads as a cancellation defect rather than as a slow machine. At 5s it
+      // had 1.6x headroom over this case's measured 3.1s, which a slower runner does not have.
+      timeout: CLI_TIMEOUT_MS,
       killSignal: "SIGKILL",
     });
     try {

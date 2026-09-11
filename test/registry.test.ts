@@ -110,7 +110,11 @@ if (behavior === 'mutate') fs.appendFileSync(artifact, 'changed');
             "--",
             ...forwarded,
           ],
-          { env, timeout: 10_000, killSignal: "SIGKILL" },
+          // Bounds a hang only. This run packs a real package and uploads it through real npm, and
+          // it measures 4.3s here — the slowest case in the suite — so 10s left barely twice that
+          // for a runner several times slower. It stays well under vitest's own 60s so that the
+          // child's bound is the one that fires, which is the only one that can kill the process.
+          { env, timeout: 30_000, killSignal: "SIGKILL" },
         );
         let output = "";
         child.stdout.on("data", (chunk: Buffer) => {
