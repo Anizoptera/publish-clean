@@ -124,6 +124,14 @@ Measured 2026-09-11 on macOS with Node 24.20.0, each case beside a control:
   inside a comment — a commented-out `require(…)` is dead code no checker resolves, which is how
   `yargs` documents its own usage.
 
+  This rule has NO override, and that is a consequence of what an override would carry rather than
+  of how confident the check is. `allowUnreferenced` exists because an author knows something the
+  tool cannot — a file loaded by path at run time is reachable and looks dead. Here there is no such
+  knowledge to carry: an unexported subpath resolves for nobody, so an author cannot know better,
+  only fix it, and the message prints the line that does. A flag would therefore exist solely to
+  publish a package the author has been told is broken. Both measured hits are real defects that
+  shipped, and both would have shipped again behind one.
+
   The same defect exists for `#` specifiers a package's own `imports` never declares, and it is NOT
   checked: 12 of those 662 packages use a `#` specifier at all, and the only undeclared one found
   was a code generator emitting an import for its user's project. A rule whose entire measured
