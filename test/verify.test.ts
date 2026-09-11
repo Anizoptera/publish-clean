@@ -210,6 +210,27 @@ it.concurrent("refuses an import only a case-folding filesystem can resolve", as
   );
   expect(mentioned.stderr).not.toContain("import-case-mismatch");
 
+  // Declarations import their siblings as `./Types.js` while the file shipped is `types.d.ts` —
+  // the commonest shape in a typed package, and one a checker resolves through its own rules. A
+  // resolver that stops at the `.js`/`.ts` swap finds no near match here and reports nothing, so
+  // the rule would be silent exactly where most packages live.
+  const types = await check(
+    {
+      ...SOUND,
+      files: ["index.js", "index.d.ts", "types.d.ts"],
+      exports: { ".": { types: "./index.d.ts", default: "./index.js" } },
+    },
+    {
+      ...INDEX,
+      "index.d.ts": 'export * from "./Types.js";\nexport declare const ok: boolean;\n',
+      "types.d.ts": "export type A = 1;\n",
+    },
+    ["--dry-run"],
+  );
+  expect(types.status).not.toBe(0);
+  expect(types.stderr).toContain("import-case-mismatch");
+  expect(types.stderr).toContain("types.d.ts");
+
   // A specifier naming nothing at all must NOT be claimed as a misspelling: no folded name matches
   // it, so it stays an unresolved import and the file it never reaches stays dead weight.
   const absent = await check(pkg, { ...helper, "index.js": 'export * from "./missing.js";\n' }, [

@@ -414,6 +414,13 @@ export function reviewUnreferencedFiles(
           queue.push(near);
         }
       }
+      // The `near === undefined` case — a relative import resolving to NOTHING — is deliberately
+      // not reported. Measured: it fires on 9.1% of packages with `exports` (135 of 1482), and
+      // narrowing it to exclude interpolated specifiers, `.node` bindings and declaration sources
+      // still leaves 6.5%, all of them packages that work. The near match is not a narrowing, it
+      // is the CORROBORATION that makes this rule sound: a folded name hitting a real shipped file
+      // is independent evidence that the specifier is a static path to a file that exists, which
+      // "resolves to nothing" never establishes. `docs/exports.md` carries the specimens.
     }
     for (const candidate of targets)
       if (!reached.has(candidate)) {
@@ -537,10 +544,19 @@ function expand(name: string, files: ReadonlyMap<string, Buffer>): string[] {
   // closure stops at the first source file and reports a package's whole `src` tree as dead —
   // measured on zod, where it mislabelled 4 MB, most of it genuinely reachable.
   const swapped = name.replace(/\.([cm]?)js$/, ".$1ts");
-  const bases = swapped === name ? [name] : [name, swapped, swapped.replace(/ts$/, "tsx")];
+  // The same convention one file-kind further: a DECLARATION imports its sibling as `./types.js`
+  // and what ships is `types.d.ts`. Without this, a wrong-CASE import between two declaration
+  // files resolves to nothing, no near match is found, and the case-mismatch rule — which exists
+  // precisely to catch that — stays silent on the commonest shape in a typed package.
+  const declared = name.replace(/\.([cm]?)js$/, ".d.$1ts");
+  const bases =
+    swapped === name ? [name] : [name, swapped, swapped.replace(/ts$/, "tsx"), declared];
   return bases
     .flatMap((base) =>
-      ["", ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".tsx", ".json", ".node"]
+      // `.d.ts` covers the EXTENSIONLESS form (`from "./types"`), which belongs to the classic
+      // resolution style; that style predates the `.mts`/`.cts` family, so there is no
+      // extensionless `.d.mts` to look for. Their explicit-extension forms ride on `declared`.
+      ["", ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".tsx", ".json", ".node", ".d.ts"]
         .flatMap((suffix) => [base + suffix, `${base}/index${suffix}`])
         .concat(base),
     )
