@@ -1,4 +1,12 @@
 /**
+ * The three reviewers of `src/shipped.ts`, which read the files a package actually ships.
+ *
+ * They are separated here because they point in OPPOSITE safe directions and one scan carries
+ * both. Reachability may over-match: a spurious match only hides a report. `import-case-mismatch`
+ * and the self-import scan INVERT that — a spurious match invents a refusal of a correct package,
+ * and a published version cannot be taken back. So every case that reports is paired with the
+ * control that must stay silent, in the same position, usually one character apart.
+ *
  * Falsifies the self-import check against the shapes that made it hard, each taken from a real
  * package in the surveyed corpus rather than invented.
  *
@@ -11,15 +19,15 @@
  * Both asymmetries are questions about a specifier's POSITION, so the cases that wrap a comment or
  * a template across lines are the ones that separate a real answer from a line-shaped guess.
  */
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { JsonObject } from "../src/json";
-import { reviewSelfReferences } from "../src/shipped";
+import { reviewSelfReferences, reviewShippedFiles, reviewUnreferencedFiles } from "../src/shipped";
+
+const asFiles = (sources: Record<string, string>) =>
+  new Map(Object.entries(sources).map(([file, body]) => [file, Buffer.from(body, "utf8")]));
 
 function review(exports: unknown, sources: Record<string, string>, name = "pkg") {
-  const files = new Map(
-    Object.entries(sources).map(([file, body]) => [file, Buffer.from(body, "utf8")]),
-  );
-  return reviewSelfReferences({ name, exports } as JsonObject, files).map(
+  return reviewSelfReferences({ name, exports } as JsonObject, asFiles(sources)).map(
     (finding) => finding.message,
   );
 }
@@ -179,4 +187,139 @@ it.concurrent("stays silent on a file whose scan cannot find its own way out", (
 
   // The control: the same type import in a file the scanner tracks to the end IS reported.
   expect(review(ONLY_ROOT, { "b.js": '// @typedef {import("pkg/gone").T}\n' })).toHaveLength(1);
+});
+
+describe.concurrent("a manifest branch pointing at the wrong kind of file", () => {
+  const rules = (pkg: JsonObject, sources: Record<string, string>) =>
+    reviewShippedFiles(pkg, asFiles(sources)).map((finding) => finding.rule);
+
+  it("reports a types branch that hands a checker something other than declarations", () => {
+    // The consumer-visible effect is silent: the checker reads the JavaScript beside it and types
+    // the whole package `any`, so nobody sees an error anywhere.
+    expect(
+      rules({ exports: { ".": { types: "./index.js", default: "./index.js" } } }, {}),
+    ).toContain("types-branch-not-declarations");
+    // One character of difference, same position: the branch that is correct must stay silent.
+    expect(
+      rules({ exports: { ".": { types: "./index.d.ts", default: "./index.js" } } }, {}),
+    ).toEqual([]);
+    // A non-script target is somebody else's concern, not a mislabelled declaration file.
+    expect(rules({ exports: { ".": { types: "./schema.json" } } }, {})).toEqual([]);
+  });
+
+  it("reports a require branch whose file require() cannot load", () => {
+    // Judged by Node's own parser rather than by a pattern, so these are the forms that really
+    // throw: ESM syntax, and — on every Node version — top-level await.
+    const esm = { "cjs.js": "export const x = 1;\n" };
+    expect(rules({ exports: { ".": { require: "./cjs.js" } } }, esm)).toContain(
+      "require-branch-is-esm",
+    );
+    expect(
+      rules({ exports: { ".": { require: "./cjs.js" } } }, { "cjs.js": "await fetch(1);\n" }),
+    ).toContain("require-branch-is-esm");
+
+    // Controls. Real CommonJS is silent; so is a target absent from the archive, because a missing
+    // file is `assertDeclaredFiles`' finding and reporting it twice gives opposite instructions.
+    expect(
+      rules({ exports: { ".": { require: "./cjs.js" } } }, { "cjs.js": "module.exports = 1;\n" }),
+    ).toEqual([]);
+    expect(rules({ exports: { ".": { require: "./cjs.js" } } }, {})).toEqual([]);
+  });
+
+  it("reports a shebang ended by a carriage return", () => {
+    // Invisible in every editor and fatal on every POSIX system, because the kernel passes the CR
+    // to execve as part of the interpreter's name.
+    expect(rules({}, { "cli.js": "#!/usr/bin/env node\r\nrun();\n" })).toContain(
+      "shebang-carriage-return",
+    );
+    // The same file with the line ending it should have, and a CR that is not on the shebang line.
+    expect(rules({}, { "cli.js": "#!/usr/bin/env node\nrun();\n" })).toEqual([]);
+    expect(rules({}, { "cli.js": "#!/usr/bin/env node\nrun();\r\n" })).toEqual([]);
+    // No shebang at all: a CR on line one of an ordinary module breaks nothing.
+    expect(rules({}, { "lib.js": "const a = 1;\r\n" })).toEqual([]);
+  });
+});
+
+describe.concurrent("files the package ships but nothing reaches", () => {
+  const ROOT = { ".": "./index.js" };
+  const review = (
+    sources: Record<string, string>,
+    allow: readonly string[] = [],
+    exports: unknown = ROOT,
+  ) => reviewUnreferencedFiles({ name: "pkg", exports } as JsonObject, asFiles(sources), allow);
+  const rules = (...args: Parameters<typeof review>) => review(...args).map((f) => f.rule);
+
+  it("refuses an import that only a case-folding filesystem resolves", () => {
+    // The author's own machine resolves it, every Linux consumer's does not, and the package
+    // installs cleanly either way — so nothing but this reports it before the version is burned.
+    expect(
+      rules({ "index.js": 'import "./Utils.js";\n', "utils.js": "export const u = 1;\n" }),
+    ).toContain("import-case-mismatch");
+    // The control one character apart: the correct casing is silent, and the file counts as
+    // reached — a rule that reported it as dead weight too would give opposite instructions.
+    expect(
+      rules({ "index.js": 'import "./utils.js";\n', "utils.js": "export const u = 1;\n" }),
+    ).toEqual([]);
+  });
+
+  it("never invents that refusal from text the runtime does not execute", () => {
+    // This is the whole measured false-positive population, and the reason position comes from
+    // `lexical.ts` rather than from the matched line. Each of these mentions a shipped file in the
+    // wrong case; none of them is an import, so each must stay silent while the file stays reached.
+    const utils = { "utils.js": "export const u = 1;\n" };
+    for (const mention of [
+      'import "./utils.js"; // see also ./Utils.js\n',
+      'import "./utils.js";\n/** Re-exported from ./Utils.js */\n',
+      'import "./utils.js";\nconst gen = `import "./Utils.js";`;\n',
+      'import "./utils.js";\nconst gen = `pre${`import "./Utils.js";`}post`;\n',
+    ])
+      expect(rules({ "index.js": mention, ...utils })).toEqual([]);
+  });
+
+  it("reports a file nothing reaches, and stops the run over it", () => {
+    const found = review({ "index.js": "export const a = 1;\n", "orphan.js": "dead\n".repeat(80) });
+    expect(found.map((f) => f.rule)).toEqual(["unreferenced-file"]);
+    // Waste that aborts anyway, carried as data on the finding rather than as a branch on its name.
+    expect(found[0]?.consequence).toBe("waste");
+    expect(found[0]?.rulesAbort).toBe(true);
+    // Named exactly, because the message's whole value is the line the author pastes to resolve it.
+    expect(found[0]?.message).toContain("orphan.js");
+  });
+
+  it("stays silent on the categories an import graph has no standing over", () => {
+    // Each of these is reached by something the closure cannot see, and the failure is asymmetric:
+    // deleting a nested package.json on this rule's advice breaks how the directory loads.
+    for (const orphan of [
+      "README.md",
+      "LICENSE",
+      "dist/cjs/package.json",
+      "index.d.ts",
+      "prebuilds/linux-x64/node.napi.node",
+      "styles/main.css",
+      "bundle.js.LICENSE.txt",
+    ])
+      expect(rules({ "index.js": "export const a = 1;\n", [orphan]: "x\n".repeat(80) })).toEqual(
+        [],
+      );
+  });
+
+  it("takes the author's word for a file the graph cannot see", () => {
+    const orphan = { "index.js": "export const a = 1;\n", "data/table.js": "x\n".repeat(80) };
+    expect(rules(orphan)).toContain("unreferenced-file");
+    expect(rules(orphan, ["data/"])).toEqual([]);
+    expect(rules(orphan, ["data/table.js"])).toEqual([]);
+  });
+
+  it("says nothing at all about a package without exports", () => {
+    // Without the field every shipped path is a public entry point a consumer may already require,
+    // so "nothing reaches this" is not a true statement about it. The manifest is built here rather
+    // than through the helper, because a default parameter cannot express an ABSENT key.
+    const sources = asFiles({ "index.js": "export const a = 1;\n", "orphan.js": "x\n".repeat(80) });
+    expect(reviewUnreferencedFiles({ name: "pkg" } as JsonObject, sources, [])).toEqual([]);
+    // The control: the identical package with the field present does report it, so the silence
+    // above measures the gate and not an orphan the closure happened to reach.
+    expect(
+      reviewUnreferencedFiles({ name: "pkg", exports: ROOT } as JsonObject, sources, []),
+    ).toHaveLength(1);
+  });
 });
