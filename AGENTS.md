@@ -105,7 +105,9 @@
   filesystem, so a disk-based check measures the filesystem and reports a zero about nothing. The
   Windows half is waived by the manifest's `os` field, and the waiver is per REASON rather than per
   rule — a path component over 255 bytes fails on ext4 and APFS too, so no platform claim excuses
-  it. Doubt about `os` suppresses, because that gate exists only to prevent a fabricated refusal.
+  it. Decide the waiver DURING the scan, never by filtering what the scan returned: one name holds
+  several reasons at once, so waiving the first one found hands `os` authority over a reason it does
+  not own. Doubt about `os` suppresses, because that gate exists only to prevent a fabricated refusal.
 - Verification is the same pipeline minus the publish, and `verify` skips exactly ONE guard:
   `assertPublicPackage`. A package checked before it goes public must be checked by the rules it will
   actually face, so never let a second exemption in. Every check reports through `src/finding.ts`

@@ -52,13 +52,30 @@ const MAX_COMPONENT_BYTES = 255;
 
 interface Unportable {
   readonly reason: string;
-  /** A Windows-only rule is waived by a package that declares it does not run there. */
+  /** Reported only to a package that targets Windows, and so the only kind the advice can address. */
   readonly windowsOnly: boolean;
 }
 
-function unportableName(name: string): Unportable | undefined {
+/**
+ * The first reason this name cannot be created on a filesystem the package targets.
+ *
+ * `windows` is consulted HERE rather than by the caller, and that is the whole design. One name can
+ * hold several defects at once — `aux.` followed by 300 bytes is both a reserved device name and an
+ * over-long component — so a scan that returns whichever it meets first and lets the caller waive on
+ * THAT defect's platform hands the `os` waiver authority over a reason it does not own, and the
+ * package ships a name no Linux or macOS consumer can unpack. Skipping the waived checks instead
+ * makes the whole class unreachable: nothing waivable is ever returned to be waived.
+ *
+ * Byte length goes first for the same reason. When both apply, the reason that binds EVERYWHERE is
+ * the true one, and it also picks the honest advice: suggesting `"os": ["!win32"]` over a name ext4
+ * refuses anyway sends the author to do the one thing that cannot help.
+ */
+function unportableName(name: string, windows: boolean): Unportable | undefined {
   for (const part of name.split("/")) {
     const quoted = JSON.stringify(part);
+    if (Buffer.byteLength(part, "utf8") > MAX_COMPONENT_BYTES)
+      return { reason: `${quoted} is longer than 255 bytes`, windowsOnly: false };
+    if (!windows) continue;
     if (RESERVED_DEVICE.test(part))
       return { reason: `${quoted} is a reserved device name on Windows`, windowsOnly: true };
     if (WINDOWS_ILLEGAL.test(part))
@@ -68,8 +85,6 @@ function unportableName(name: string): Unportable | undefined {
         reason: `${quoted} ends in a dot or space, which Windows strips`,
         windowsOnly: true,
       };
-    if (Buffer.byteLength(part, "utf8") > MAX_COMPONENT_BYTES)
-      return { reason: `${quoted} is longer than 255 bytes`, windowsOnly: false };
   }
   return undefined;
 }
@@ -172,8 +187,8 @@ export function reviewPackedNames(pkg: JsonObject, files: readonly string[]): Fi
   const windows = targetsWindows(pkg.os);
   const unportable: { file: string; defect: Unportable }[] = [];
   for (const file of files) {
-    const defect = unportableName(file);
-    if (defect !== undefined && (windows || !defect.windowsOnly)) unportable.push({ file, defect });
+    const defect = unportableName(file, windows);
+    if (defect !== undefined) unportable.push({ file, defect });
   }
   if (unportable.length > 0)
     findings.push({

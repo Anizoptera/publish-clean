@@ -105,6 +105,19 @@ describe.concurrent("names that do not survive extraction", () => {
     // Per REASON, not per rule: an over-long component fails on ext4 and APFS too, so no platform
     // claim waives it. A gate applied to the whole rule would silently drop this.
     expect(rules(["a".repeat(256)], { os: ["darwin"] })).toContain("packed-name-unportable");
+
+    // Per reason is not enough on its own: ONE name can hold several, so a scan that reports the
+    // first defect it meets and waives on THAT defect's platform hands the waiver authority over a
+    // reason it does not own. Reachable inside one component and across two.
+    expect(rules([`aux.${"a".repeat(300)}`], { os: ["!win32"] })).toContain(
+      "packed-name-unportable",
+    );
+    expect(rules([`aux/${"a".repeat(300)}.js`], { os: ["!win32"] })).toContain(
+      "packed-name-unportable",
+    );
+    // The same ordering decides the ADVICE. Telling an author to declare `!win32` over a name that
+    // ext4 refuses anyway sends them to do the one thing that cannot help.
+    expect(message([`aux.${"a".repeat(300)}`])).not.toContain(`"os": ["!win32"]`);
     // A collision is not a platform claim either.
     expect(rules(["A.js", "a.js"], { os: ["darwin"] })).toContain("packed-name-collision");
   });
