@@ -352,7 +352,17 @@ export function reviewUnreferencedFiles(
   const EMPTY = Buffer.alloc(0);
   let foldedNames: Map<string, string> | undefined;
   let foldedFiles: Map<string, Buffer> | undefined;
-  const visit = (declared: string, from: string): void => {
+  // Zones for the file currently being drained, computed only if a mismatch is about to be
+  // reported — which measured zero times across 300 packages, so the closure never pays for it.
+  let zoned: { file: string; zones: null | Uint8Array } | undefined;
+  const inCode = (source: string, file: string, at: number): boolean => {
+    if (zoned?.file !== file) zoned = { file, zones: lexicalZones(source) };
+    // A scanner with no grammar can desync; it says so, and from an untrusted position this scan
+    // must yield nothing rather than refuse a sound package.
+    return zoned.zones !== null && zoneAt(zoned.zones, at) === "code";
+  };
+
+  const visit = (declared: string, from: string, source?: string, at?: number): void => {
     // Join against the referring file BEFORE normalising: normalisation strips the leading `./`,
     // so testing for relativity afterwards answers about the wrong string and every sibling
     // import resolves to the package root instead. That single ordering mistake left the closure
@@ -373,7 +383,21 @@ export function reviewUnreferencedFiles(
     // `assertDeclaredFiles`, and the script-token seeds are over-matched on purpose, so a miss
     // there carries no information. Patterns are excluded because `expand` answers them by
     // scanning, where an empty result means no match rather than a broken name.
-    if (targets.length === 0 && relative && from !== "" && !resolved.includes("*")) {
+    //
+    // And ONLY from a code position. `SPECIFIER` over-matches deliberately, which is safe for the
+    // dead-file rule because a spurious match can only suppress a report — this finding INVERTS
+    // that direction, so the same spurious match would invent one and abort a correct publish. A
+    // comment reading `see ./Utils.js` beside a shipped `utils.js` is the whole false-positive
+    // population, and `lexical.ts` is what tells the two apart.
+    if (
+      targets.length === 0 &&
+      relative &&
+      from !== "" &&
+      !resolved.includes("*") &&
+      source !== undefined &&
+      at !== undefined &&
+      inCode(source, from, at)
+    ) {
       foldedNames ??= new Map([...files.keys()].map((file) => [foldName(file), file]));
       // Folding the LOOKUP rather than re-implementing it: `expand` owns the suffix list and the
       // `.js`→`.ts` convention, so a second matcher here would drift from the real one.
@@ -433,8 +457,9 @@ export function reviewUnreferencedFiles(
     // calls the entire compiler unreferenced. The shebang identifies the rest.
     if (body === undefined || !(SCRIPT.test(name) || body.subarray(0, 2).toString() === "#!"))
       continue;
-    for (const match of body.toString("utf8").matchAll(SPECIFIER))
-      if (match[1] !== undefined) visit(match[1], name);
+    const source = body.toString("utf8");
+    for (const match of source.matchAll(SPECIFIER))
+      if (match[1] !== undefined) visit(match[1], name, source, match.index);
   }
 
   const findings: Finding[] = [];

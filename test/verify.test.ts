@@ -193,6 +193,23 @@ it.concurrent("refuses an import only a case-folding filesystem can resolve", as
   ]);
   expect(exact.status).toBe(0);
 
+  // The specifier pattern deliberately matches inside comments, which is safe for the dead-weight
+  // rule because a spurious match only suppresses a report. This finding reverses that direction,
+  // so the same match would invent one and refuse a publish that is perfectly correct. Prose
+  // naming a path must therefore be read as prose.
+  const mentioned = await check(
+    pkg,
+    // The prose must carry a specifier TRIGGER (`from "`), or the pattern never matches and the
+    // case tests nothing at all. A documentation example of an import is the measured
+    // false-positive population for the sibling scan in this same file.
+    {
+      ...helper,
+      "index.js": '// previously re-exported from "./Helper.js"\nexport const ok = true;\n',
+    },
+    ["--dry-run"],
+  );
+  expect(mentioned.stderr).not.toContain("import-case-mismatch");
+
   // A specifier naming nothing at all must NOT be claimed as a misspelling: no folded name matches
   // it, so it stays an unresolved import and the file it never reaches stays dead weight.
   const absent = await check(pkg, { ...helper, "index.js": 'export * from "./missing.js";\n' }, [
