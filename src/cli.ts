@@ -10,18 +10,14 @@ import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  assertDeclaredFiles,
-  assertSameEntries,
-  reviewPackedNames,
-  validatePackedFiles,
-} from "./artifact";
+import { assertDeclaredFiles, assertSameEntries, validatePackedFiles } from "./artifact";
 import { requireTool, run } from "./command";
 import { allowedUnreferenced, customDevFields, keptFields, packageConfig } from "./config";
 import { reviewExports } from "./exports";
 import { decide, formatFindings, isFatal } from "./finding";
 import { reviewSelfReferences, reviewShippedFiles, reviewUnreferencedFiles } from "./shipped";
 import { HELP, parseOptions } from "./options";
+import { reviewPackedNames } from "./packed-names";
 import { PublishCleanError } from "./error";
 import { isObject, stringifyJson } from "./json";
 import type { JsonObject } from "./json";

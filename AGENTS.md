@@ -100,7 +100,7 @@
   folded name hitting a file that really ships is independent evidence that the specifier is a
   static path to a real file. Specimens in `docs/exports.md`.
 - A packed NAME that two filesystems read as one file, or that a target filesystem cannot create,
-  aborts (`reviewPackedNames`, `src/artifact.ts`). Judge names from the ARCHIVE, never from a
+  aborts (`reviewPackedNames`, `src/packed-names.ts`). Judge names from the ARCHIVE, never from a
   directory listing: two names differing only in case cannot coexist in a directory on a folding
   filesystem, so a disk-based check measures the filesystem and reports a zero about nothing. The
   Windows half is waived by the manifest's `os` field, and the waiver is per REASON rather than per

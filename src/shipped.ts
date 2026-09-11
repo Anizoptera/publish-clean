@@ -10,12 +10,13 @@
  */
 import { Script } from "node:vm";
 
-import { collectDeclaredPaths, foldName, normalizeDeclaredPath } from "./artifact";
+import { collectDeclaredPaths, normalizeDeclaredPath } from "./artifact";
 import { rowsOf } from "./conditions";
 import type { Finding } from "./finding";
 import { isObject } from "./json";
 import type { JsonObject } from "./json";
 import { lexicalZones, zoneAt } from "./lexical";
+import { foldName } from "./packed-names";
 
 const DECLARATION = /\.d\.[cm]?ts$/;
 const SCRIPT = /\.[cm]?[jt]sx?$/;
