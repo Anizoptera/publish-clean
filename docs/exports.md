@@ -22,6 +22,12 @@ winner is chosen by the order in the package, not by any preference the consumer
 So there is no such thing as a cosmetic reorder here, and a rule of thumb about "correct"
 ordering cannot justify one.
 
+**Only CONDITION keys are ordered. The subpath keys around them are not**, and the natural mistake
+is to assume both maps behave alike. Node matches a subpath pattern by longest base first
+(`PATTERN_KEY_COMPARE`), so `"./*"` written above `"./feature/*"` still loses to it. Reporting
+subpath key order, or tidying it, would be pure noise — and reordering them cannot even change
+resolution, so nothing here would catch the mistake.
+
 ## The proof that does justify one
 
 Resolution of a condition object depends only on which of its own keys are active, so
@@ -156,12 +162,36 @@ Measured 2026-09-11 on macOS with Node 24.20.0, each case beside a control:
 ## A check that was measured and dropped
 
 An unexecutable `bin` file in the tarball looked like an obvious defect. It is not: installed with
-bun, a `0644` member came out `0755` and ran. Installers have to restore the bit because
-Windows-authored tarballs routinely lack it. Measured on bun only — if pnpm, npm or yarn turn out
-not to, this check comes back.
+bun, a `0644` member came out `0755` and ran; pnpm 11 does the same. Installers have to restore the
+bit because Windows-authored tarballs routinely lack it. npm and yarn unmeasured — if either turns
+out not to, this check comes back.
 
 Recorded because the next person will have the same idea, and re-deriving the answer costs an
 afternoon.
+
+## How often each rule fires
+
+Measured over the local corpus of packages with an `exports` field, per package, so one manifest
+with 200 subpaths counts once. The corpus is this machine's dependency closure rather than the
+registry, so it over-represents modern tooling — read these as the order of magnitude that justifies
+a rule existing, not as registry shares.
+
+| shape | packages |
+| --- | --- |
+| `types` not first among its siblings | 6.1% |
+| a condition provably inert | 5.9% |
+| unknown or private condition present | 2.5% |
+| no root `.` entry | 2.6% |
+| fallback array used | 2.1% |
+| `{"default": X}` collapsible | 1.5% |
+| deprecated trailing-slash key | 0.6% |
+| `default` not last | 0.1% |
+| `module` after `require` | one package |
+
+Two things follow. Every waste rule here fires on single-digit percentages, so none of them can
+justify risk — which is why each is gated by the equivalence proof rather than by a style argument.
+And dropping a redundant condition saves roughly thirty bytes: the manifest is not where the waste
+is, the shipped files are, by three orders of magnitude.
 
 ## Copying a condition map
 
