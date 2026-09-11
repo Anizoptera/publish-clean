@@ -27,7 +27,7 @@ import { foldName } from "./packed-names";
  * exact-name form deliberately does not match `id_rsa.pub`, which is public by design and
  * legitimate to ship.
  */
-export const CRITICAL_PATTERNS = [
+const CRITICAL_PATTERNS = [
   /(?:^|\/)node_modules(?:\/|$)/i,
   /(?:^|\/)\.git(?:\/|$)/i,
   /(?:^|\/)\.env(?:\.|$)/i,
@@ -36,7 +36,7 @@ export const CRITICAL_PATTERNS = [
   /(?:^|\/)id_(?:rsa|dsa|ecdsa|ed25519)$/i,
 ];
 
-export const SUSPICIOUS_PATTERNS = [
+const SUSPICIOUS_PATTERNS = [
   /(?:^|\/)(?:test|tests|__tests__|__snapshots__|coverage)(?:\/|$)/,
   /(?:^|\/)\.github(?:\/|$)/,
   /(?:^|\/)tsconfig[^/]*\.json$/,

@@ -59,7 +59,7 @@ export function wantsTrustedPublish(
   return undefined;
 }
 
-export function repositoryUrl(pkg: JsonObject): null | string {
+function repositoryUrl(pkg: JsonObject): null | string {
   if (typeof pkg.repository === "string") return pkg.repository;
   if (isObject(pkg.repository) && typeof pkg.repository.url === "string") return pkg.repository.url;
   return null;

@@ -10,7 +10,7 @@ import { normalizeDeclaredPath } from "./artifact";
 import { isObject } from "./json";
 import type { JsonObject } from "./json";
 
-export const DEV_FIELDS = new Set([
+const DEV_FIELDS = new Set([
   // Editor and schema hints, root-only install directives, and tool config blocks. Each
   // is either read exclusively from a workspace root, where an installed dependency is
   // never consulted, or by a tool the consumer does not run.
@@ -65,15 +65,9 @@ export const DEV_FIELDS = new Set([
   "turbo",
 ]);
 
-export const CONSUMER_SCRIPTS = new Set([
-  "preinstall",
-  "install",
-  "postinstall",
-  "prepare",
-  "uninstall",
-]);
+const CONSUMER_SCRIPTS = new Set(["preinstall", "install", "postinstall", "prepare", "uninstall"]);
 
-export const DEP_FIELDS = [
+const DEP_FIELDS = [
   "dependencies",
   "devDependencies",
   "optionalDependencies",
@@ -82,7 +76,7 @@ export const DEP_FIELDS = [
   "resolutions",
 ] as const;
 
-export const MONOREPO_PROTOCOLS = ["catalog:", "workspace:", "link:", "portal:"];
+const MONOREPO_PROTOCOLS = ["catalog:", "workspace:", "link:", "portal:"];
 
 /**
  * Fields a consumer's toolchain resolves. Stripping one breaks installs, imports or
@@ -126,7 +120,7 @@ export const RUNTIME_MANIFEST_FIELDS = new Set([
 ]);
 
 /** Registry metadata is recognised; consumer-resolved fields are protected separately. */
-export const REGISTRY_MANIFEST_FIELDS = new Set([
+const REGISTRY_MANIFEST_FIELDS = new Set([
   "author",
   "bugs",
   "contributors",
