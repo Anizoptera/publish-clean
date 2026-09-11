@@ -91,6 +91,21 @@
   that scanner's end-of-file check — it carries no grammar, a regex holding a quote or `/*`
   desyncs it, and a file it reports untrusted MUST yield no finding. Evidence, the measured
   false-positive population and why the rule has no override: `docs/exports.md`.
+- NEVER generalise `import-case-mismatch` to report a specifier that resolves to NOTHING, however
+  obviously that reads as the same defect — the scan already computes it and deliberately discards
+  it. Measured: reporting it refuses 9.1% of packages carrying `exports`, and 6.5% after excluding
+  interpolated specifiers, `.node` bindings and declaration sources, all of them packages that work
+  (platform-specific bindings, template literals, directory specifiers, unshipped source paths).
+  The near match is not a narrowing of that rule, it is the CORROBORATION that makes it sound: a
+  folded name hitting a file that really ships is independent evidence that the specifier is a
+  static path to a real file. Specimens in `docs/exports.md`.
+- A packed NAME that two filesystems read as one file, or that a target filesystem cannot create,
+  aborts (`reviewPackedNames`, `src/artifact.ts`). Judge names from the ARCHIVE, never from a
+  directory listing: two names differing only in case cannot coexist in a directory on a folding
+  filesystem, so a disk-based check measures the filesystem and reports a zero about nothing. The
+  Windows half is waived by the manifest's `os` field, and the waiver is per REASON rather than per
+  rule — a path component over 255 bytes fails on ext4 and APFS too, so no platform claim excuses
+  it. Doubt about `os` suppresses, because that gate exists only to prevent a fabricated refusal.
 - Verification is the same pipeline minus the publish, and `verify` skips exactly ONE guard:
   `assertPublicPackage`. A package checked before it goes public must be checked by the rules it will
   actually face, so never let a second exemption in. Every check reports through `src/finding.ts`

@@ -187,6 +187,28 @@ a package loses its executable bit unless it is a `bin` target. Nothing here can
 manifest is the only surface this tool may alter — and it is pnpm's behaviour for every package
 published with it, not a defect in any one of them.
 
+Reporting a relative import that resolves to NOTHING looks like the obvious generalisation of the
+case-mismatch rule, and it is the one thing in this area that must not be built. The scan already
+computes it: the same guard that finds a near match first establishes that the specifier selects no
+shipped file. Reporting that directly refuses 135 of 1482 packages with `exports` — 9.1%, 4239
+imports — and the hits are packages that work. Excluding interpolated specifiers, `.node` bindings
+and declaration sources still leaves 97 packages, 6.5%, and the remainder does not converge:
+
+- `rolldown` names a `.node` binding per platform and ships one; `@napi-rs/lzma` and `oxlint` name a
+  `.wasi.cjs` fallback the same way.
+- `@loaderkit/resolve` and `lightningcss` write `"../${link}"` — a template literal, where the
+  pattern captures a fragment of an expression that was never a path.
+- `vitest` and `three` import `"./"` and `"../"`, directory forms that resolve to a package root.
+- `vite` ships dist chunks naming `../../../src/node/constants.ts`, a source path it does not pack.
+
+The lesson is about what the near match is FOR. It is not a narrowing of the rule, it is the
+CORROBORATION that makes it sound: a folded name hitting a file that really ships is independent
+evidence that the specifier is a static path to a file that exists. "Resolves to nothing" never
+establishes that, because the scanner is a pattern over source with an approximate resolver, and
+every class above is a case where the specifier was not what it looked like. A rule without that
+corroboration fires on packages that work, which is the same reason the browser-field rule below
+was dropped.
+
 The legacy `browser` FIELD contradicting an `exports` browser target is publint's
 `EXPORTS_VALUE_CONFLICTS_WITH_BROWSER`, and it is real: a bundler honouring the field substitutes a
 file `exports` never chose, with nothing raised anywhere. Measured over 3490 installed packages,
@@ -224,14 +246,26 @@ a rule existing, not as registry shares.
 | `default` not last | 0.1% |
 | `module` after `require` | one package |
 | relative import resolving only after folding case or Unicode form | none |
+| two packed names differing only in case or Unicode form | none |
+| a packed name a target filesystem cannot create | none |
 
-The last row is not a reason to drop that rule, and the distinction decides whether any check here
-is worth its bytes. The others are candidate rules judged on how often they would fire. That one
-describes a shape the tool ALREADY reacted to and reacted wrongly: the target went unreached, so
-the dead-weight rule called it unreachable and advised deleting a file the code imports. The
-measurement — 300 packages, 21451 relative specifiers, sampled evenly across the corpus, verified
-against a planted positive so the zero is not an unexercised branch — bounds how often an author
-meets it, not whether the advice they get should be correct.
+The last three rows are not reasons to drop those rules, and the distinction decides whether any
+check here is worth its bytes. The rows above them are candidate rules judged on how often they
+would fire, which is the right question for a rule that only saves bytes. The last three describe
+defects that cannot be taken back, so what decides them is whether they can fire WRONGLY, and none
+of them can: two names that fold together do become one file, a name Windows refuses is refused,
+and the case-mismatch rule fires only when a folded name hits a file that really ships.
+
+The first of the three also describes a shape the tool ALREADY reacted to and reacted wrongly: the
+target went unreached, so the dead-weight rule called it unreachable and advised deleting a file the
+code imports. Its measurement — 300 packages, 21451 relative specifiers, sampled evenly across the
+corpus, verified against a planted positive so the zero is not an unexercised branch — bounds how
+often an author meets it, not whether the advice they get should be correct. The other two were
+measured over 319 published tarballs (15844 members) and, for the unportable one, another 3490
+installed packages (187187 files). Installed directories cannot measure a COLLISION at all: two
+names differing only in case cannot coexist in a directory on a folding filesystem, so a zero from
+them describes the filesystem rather than any package. Tarball members have no such limit, which is
+what makes them the instrument for it.
 
 Two things follow. Every waste rule here fires on single-digit percentages, so none of them can
 justify risk — which is why each is gated by the equivalence proof rather than by a style argument.
