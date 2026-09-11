@@ -94,11 +94,14 @@ afternoon.
 ## Copying a condition map
 
 Never copy one with `Object.assign`. A condition may legally be named `__proto__`, and `JSON.parse`
-keeps it as an ordinary own property — but `Object.assign` silently drops it, so the rewritten
-manifest would ship missing a branch with nothing raised anywhere. Measured: spread and an explicit
-null-prototype loop both preserve it, and neither pollutes `Object.prototype`.
+keeps it as an ordinary own property — but `Object.assign` turns it into the copy's prototype
+instead. Measured: the branch disappears from `Object.keys` and from `JSON.stringify`, so the
+rewritten manifest ships missing a condition, while the copy simultaneously answers to every key
+that branch contained as an inherited property. Nothing is raised at any point.
 
-The hazard is loss, not pollution. Any fixture for this needs a `__proto__` key in it.
+`Object.prototype` is not touched, so this is not the usual prototype-pollution bug — it is silent
+loss on the way out plus phantom keys on the way in. Spread round-trips it correctly, as does an
+explicit null-prototype loop. Any fixture for this needs a `__proto__` key in it.
 
 ## Condition sets, measured
 
