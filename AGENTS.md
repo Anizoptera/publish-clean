@@ -159,6 +159,10 @@
   2026-08-11, `git-cliff --bumped-version` answers `v1.0.0` for a `feat!` commit on 0.4.0.
 - Tags must be annotated. A lightweight `git tag v0.5.0` fails outright under `tag.gpgSign = true`
   ("fatal: no tag message?"); `bun run release` annotates, which is the reason to use it over `git tag`.
+- A green suite proves nothing about a test that restates its implementation. `bun scripts/mutate.ts`
+  deletes each guarded rule in turn and requires the suite to go red; `--dry-run` reports in
+  milliseconds which rows still match their source, so pattern rot is loud rather than a silent
+  pass. Add a row when you add a guard. Nothing runs it automatically — it is one suite run per row.
 - Run `bun run check` before committing. `.githooks/pre-commit` runs it again on every commit and
   `prepare` wires `core.hooksPath`, so a fresh clone gates itself; NEVER `--no-verify`, fix the
   finding. The hook validates the WORKING TREE and must never stash to isolate the staged bytes —
