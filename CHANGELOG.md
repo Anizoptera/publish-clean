@@ -3,6 +3,36 @@
 Notable changes per release, newest first. This file is the source of the GitHub Release
 notes: the section for a version is published verbatim when its tag is pushed.
 
+## Unreleased
+
+### Added
+
+- **`publish-clean verify` checks a package without publishing it.** It runs every rule the
+  publish path runs and skips exactly one guard, so it works on a `private: true` package that
+  publishing still refuses. `--verify-only` is the same operation for scripts that can only pass
+  flags; `--guard-only` keeps working as a deprecated alias and now says so.
+- **`exports` and `imports` are verified and repaired.** The map is flattened into the resolution
+  it produces for every possible consumer, and rewritten only when the result is provably
+  identical: a condition that repeats what a later key already yields is dropped,
+  `{"default": "./x.js"}` collapses, and keys whose order a measured constraint forces are
+  ordered. Every repair is reported, applies only to the published manifest, and never touches
+  your source. A repair never stops the run. `--no-heal`, or `"publish-clean": { "heal": false }`,
+  reports without rewriting.
+- **Defects that cannot be repaired without guessing are reported.** A `types` condition
+  resolving to something that is not a declaration file, a `require` condition resolving to an ES
+  module, a branch no consumer can reach, a consumer no branch serves, a condition no measured
+  consumer activates, a fallback array, and a `bin` shebang ending in CR.
+- **`--strict` treats warnings as errors.** It never makes an already-applied repair fatal.
+
+### Changed
+
+- **Publication stops when the tarball holds a file nothing in the package reaches** — no entry
+  point, no import from a reached file, no script. Documentation, licences, declarations, source
+  maps, native binaries, assets and nested `package.json` files are exempt by nature. Declare the
+  rest with `"publish-clean": { "allowUnreferenced": ["assets"] }`, which the error message prints
+  for you; prefixes match whole subtrees. The check runs only when `exports` closes the package,
+  because without that field every shipped path is importable and nothing is dead.
+
 ## [0.9.1] - 2026-09-08
 
 ### Added
