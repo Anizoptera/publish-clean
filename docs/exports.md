@@ -117,7 +117,7 @@ Measured 2026-09-11 on macOS with Node 24.20.0, each case beside a control:
   up as a string or block comment still open at the end of a file, which valid JavaScript cannot
   produce, and such a file is dropped entirely.
 
-  Two further distinctions the corpus forced, each a false positive before it was made. A subpath
+  Two further distinctions the corpus forced, each one a false positive without it. A subpath
   exposed through a fallback array IS exposed: this tool refuses to rewrite an array because the
   resolvers disagree about them, and that is not a claim that nobody resolves it. `yargs` and
   `generator-function` both publish their root that way. And only `import(…)` is load-bearing

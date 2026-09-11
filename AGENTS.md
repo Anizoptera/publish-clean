@@ -61,7 +61,9 @@
   sets, the runtimes that disagree with each other, and why Node's published array algorithm does not
   match real Node belong in `docs/exports.md`; update it and this bullet together. That proof is
   relative to a resolver and the resolvers disagree on fallback arrays — Bun fails where Node and
-  Deno succeed — so never modify an object containing one.
+  Deno succeed — so never modify an object containing one. Refusing to REWRITE an array is not a
+  claim that nobody resolves it: an array flattens to an `opaque` row, so `kind === "file"` is the
+  wrong test for "can anybody reach this" and silently calls published packages broken.
 - Copy a condition map by spread or an explicit null-prototype loop, NEVER `Object.assign`. A
   condition may legally be named `__proto__`; `JSON.parse` keeps it as an ordinary own property and
   `Object.assign` silently drops it, which publishes a manifest missing a branch with nothing raised
@@ -73,19 +75,15 @@
   never make a healed finding fatal. The one waste finding that still aborts — a shipped file nothing
   reaches and nobody declared — says so through `rulesAbort` on the finding itself, never through its
   rule name, so the divergence stays visible as data instead of becoming a branch somebody tidies away.
-- The self-import scan READS comments and skips prose inside them, and both halves are load-bearing:
-  `{import("pkg/sub").T}` in a JSDoc block is a type a checker resolves, so stripping comments loses
-  real defects, while a documentation example of an import was the entire measured false-positive
-  population. A specifier inside a template literal is generated text, not this file's import.
-  Suppression is the safe direction ONLY here, where the finding stops a publish — the opposite of
-  the dead-file scan in the same file, where over-matching merely hides a report. Do not unify them.
-- Decide that scan from `src/lexical.ts`, never from the matched line. Where a specifier sits is a
-  lexical question, and a line-shaped test answers three real shapes wrongly — a block comment whose
-  line does not open it, a template literal spanning lines, a trailing `//` after code — each one a
-  refused publish over a sound package. The scanner carries no grammar, so keep its end-of-file
-  check: a regular expression may hold a quote or the bytes `/*`, and the desync that follows shows
-  up as a string or block comment still open where valid JavaScript cannot leave one. Never make it
-  answer from a position it reports as untrusted.
+- `src/shipped.ts` runs two source scans with OPPOSITE safe directions. NEVER unify them. The
+  dead-file scan over-matches deliberately — a false positive only hides a report. The self-import
+  scan STOPS a publish, so doubt must SUPPRESS: it reads comments (`{import("pkg/sub").T}` in JSDoc
+  is a type a checker resolves, so stripping them loses real defects) but skips prose, generated
+  text in template literals, and commented-out `require`. Decide where a specifier sits from
+  `src/lexical.ts`, NEVER from the matched line; a line-shaped test refuses sound packages. Keep
+  that scanner's end-of-file check — it carries no grammar, a regex holding a quote or `/*`
+  desyncs it, and a file it reports untrusted MUST yield no finding. Evidence, the measured
+  false-positive population and why the rule has no override: `docs/exports.md`.
 - Verification is the same pipeline minus the publish, and `verify` skips exactly ONE guard:
   `assertPublicPackage`. A package checked before it goes public must be checked by the rules it will
   actually face, so never let a second exemption in. Every check reports through `src/finding.ts`
