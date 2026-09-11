@@ -401,6 +401,12 @@ export interface ExportsReview {
  * defect in any transformation above fails HERE, naming itself as this tool's bug, rather than in
  * a stranger's build.
  *
+ * This is the ONLY funnel a rewrite passes through, and `cli.ts` then proves the archive's manifest
+ * is byte-identical to the cleaned one — so re-resolving every subpath after the rewrite would
+ * re-derive this same verdict from this same code on these same values, which is one piece of
+ * evidence counted twice. What that would genuinely add, a check on the row algebra itself, comes
+ * from an oracle that cannot share a mistake with it: real Node, in `test/conditions.test.ts`.
+ *
  * `heal: false` keeps every finding and withholds only the rewrite, which is why those findings
  * are corrected to stop claiming a repair the published artifact does not carry.
  */
