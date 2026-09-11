@@ -7,6 +7,9 @@
  * stripping comments loses real defects; and a template literal may carry generated text that only
  * looks like an import, so reading it invents one. Every case below fails if either is confused,
  * and the pairs are placed together so a "fix" to one that breaks the other cannot pass.
+ *
+ * Both asymmetries are questions about a specifier's POSITION, so the cases that wrap a comment or
+ * a template across lines are the ones that separate a real answer from a line-shaped guess.
  */
 import { expect, it } from "vitest";
 import type { JsonObject } from "../src/json";
@@ -114,4 +117,66 @@ it.concurrent("reports each distinct specifier once, however many files repeat i
     "c.d.ts": 'import type { V } from "pkg/parser";\n',
   });
   expect(found).toHaveLength(2);
+});
+
+it.concurrent("treats a subpath exposed through a fallback array as exposed", () => {
+  // `yargs` and `generator-function` both publish their root as `[{…}, "./index.js"]`. The row
+  // algebra cannot say what an array resolves to, because the resolvers disagree about it — but
+  // every resolver that accepts one resolves the subpath, so refusing to rewrite an array must not
+  // become a claim that it reaches nobody.
+  expect(
+    review(
+      { ".": [{ import: "./index.mjs" }, "./index.js"] },
+      {
+        "test.js": 'var x = require("pkg");\n',
+      },
+    ),
+  ).toEqual([]);
+
+  // The control: the same import against a root that genuinely resolves to nothing.
+  expect(
+    review({ "./helpers": "./helpers.js" }, { "test.js": 'var x = require("pkg");\n' }),
+  ).toHaveLength(1);
+});
+
+it.concurrent("ignores a commented-out require, which no checker resolves", () => {
+  // `yargs` documents its own usage as `// require('yargs')(…)`. Only `import(...)` is a module
+  // reference inside a comment; a commented-out call is dead code.
+  expect(review(ONLY_ROOT, { "index.cjs": "// require('pkg/yargs')(process.argv)\n" })).toEqual([]);
+
+  // The control, one character apart in the same position: the form a checker DOES resolve.
+  expect(review(ONLY_ROOT, { "index.cjs": '// @typedef {import("pkg/yargs").T}\n' })).toHaveLength(
+    1,
+  );
+});
+
+it.concurrent("reads the position of a specifier, not the shape of its line", () => {
+  // Three arrangements the same text takes once a comment or a template wraps across lines. Each
+  // one is a false report for any rule that decides from the matched line alone: the first two
+  // lines are not the start of their comment, the third line is not the start of its template.
+  expect(
+    review(ONLY_ROOT, {
+      "a.js": '/* Usage:\nimport { x } from "pkg/gone";\n*/\nmodule.exports = {};\n',
+      "b.js": 'const port = 1; // see import { x } from "pkg/gone";\n',
+      "c.js": 'const code = `\nimport { x } from "pkg/gone";\n`;\n',
+    }),
+  ).toEqual([]);
+
+  // The control, in the position all three imitate: the identical statement as code.
+  expect(review(ONLY_ROOT, { "d.js": 'import { x } from "pkg/gone";\n' })).toHaveLength(1);
+});
+
+it.concurrent("stays silent on a file whose scan cannot find its own way out", () => {
+  // Telling a regular expression from a division needs a grammar this scanner does not have, so
+  // `/a\/*b/` reads as the start of a block comment and swallows the rest of the file. Everything
+  // after it then looks like a comment, which is the ONE zone the call form is reported in — so
+  // without the end-of-file check this desync refuses a publish over a package that is fine.
+  expect(
+    review(ONLY_ROOT, {
+      "a.js": 'const re = /a\\/*b/;\n// @typedef {import("pkg/gone").T}\n',
+    }),
+  ).toEqual([]);
+
+  // The control: the same type import in a file the scanner tracks to the end IS reported.
+  expect(review(ONLY_ROOT, { "b.js": '// @typedef {import("pkg/gone").T}\n' })).toHaveLength(1);
 });

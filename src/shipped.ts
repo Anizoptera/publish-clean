@@ -15,6 +15,7 @@ import { rowsOf } from "./conditions";
 import type { Finding } from "./finding";
 import { isObject } from "./json";
 import type { JsonObject } from "./json";
+import { lexicalZones, zoneAt } from "./lexical";
 
 const DECLARATION = /\.d\.[cm]?ts$/;
 const SCRIPT = /\.[cm]?[jt]sx?$/;
@@ -83,9 +84,11 @@ function targetsUnder(node: unknown, condition: string, inside: boolean, out: st
 }
 
 /**
- * The two positions that actually load a module. A template literal is legal only in the CALL
- * forms — `import x from \`y\`` is a syntax error — and allowing a backtick after `from` matched
- * English prose in the corpus ("filters out internal stacks from `vitest/dist`").
+ * The two positions that load a module: the statement form, and the call form.
+ *
+ * A template literal is legal only in the CALL forms — `import x from \`y\`` is a syntax error —
+ * and accepting a backtick after `from` matched English prose in the corpus ("filters out internal
+ * stacks from `vitest/dist`").
  */
 function selfSpecifiers(name: string): readonly RegExp[] {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -118,7 +121,14 @@ function exposes(exports: unknown, subpath: string): boolean {
           subpath.endsWith(key.slice(star + 1));
     if (!matched) continue;
     const rows = rowsOf(exports[key]);
-    return rows === null || rows.some((row) => row.target.kind === "file");
+    // A fallback array is opaque to the row algebra — the resolvers disagree about it — but every
+    // resolver that accepts one resolves the subpath, so it is exposed. `yargs` and
+    // `generator-function` both expose their root that way, and calling that unexposed would
+    // refuse their publish over a map that works.
+    return (
+      rows === null ||
+      rows.some((row) => row.target.kind === "file" || row.target.kind === "opaque")
+    );
   }
   return false;
 }
@@ -156,26 +166,30 @@ export function reviewSelfReferences(
     if (!SCRIPT.test(file)) continue;
     const source = body.toString("utf8");
     if (!source.includes(name)) continue;
+    const zones = lexicalZones(source);
+    // A scan that lost its place reports nothing from this file: see `lexicalZones`.
+    if (zones === null) continue;
     for (const pattern of patterns)
       for (const match of source.matchAll(pattern)) {
-        const start = source.lastIndexOf("\n", match.index) + 1;
-        const end = source.indexOf("\n", match.index);
-        const line = source.slice(start, end === -1 ? undefined : end).trim();
+        const zone = zoneAt(zones, match.index);
+
+        // A specifier inside a string or template literal is text this file GENERATES for
+        // somebody else's project, not an import this file performs — measured in `@opentui/core`,
+        // which writes an import statement into a string.
+        if (zone === "text") continue;
 
         // Comments are SCANNED, not stripped: `{import("pkg/sub").Type}` in a JSDoc block is a
         // real type import a checker resolves, and `highlight.js` is caught by exactly those.
         // What is skipped is prose — a documentation example of an import, measured as the whole
         // false-positive population (`rolldown` and `nanoid` both advertise a subpath they
-        // removed). The two are told apart by the call form, which is the only one TypeScript
-        // reads inside a comment.
-        if (/^(?:\*|\/\/|\/\*|#)/.test(line) && !/\{\s*import\s*\(/.test(line)) continue;
+        // removed). `import(...)` is the ONLY form a checker reads inside a comment: an import
+        // statement is not legal there, and a commented-out `require(...)` is dead code nothing
+        // resolves, which is how `yargs` documents its own usage.
+        if (zone === "comment" && !/^import\s*\(/.test(match[0])) continue;
 
-        // A specifier inside a template literal is text this file GENERATES for somebody else's
-        // project, not an import this file performs — measured in `@opentui/core`, which writes an
-        // import statement into a string. Suppressing is the safe direction: this finding stops a
-        // publish, so a missed defect costs less than a refused release over generated text.
-        if (source.slice(start, match.index).includes("`")) continue;
-
+        const start = source.lastIndexOf("\n", match.index) + 1;
+        const end = source.indexOf("\n", match.index);
+        const line = source.slice(start, end === -1 ? undefined : end).trim();
         const specifier = match[2] ?? "";
         const subpath = specifier === name ? "." : `.${specifier.slice(name.length)}`;
         if (exposes(pkg.exports, subpath) || seen.has(specifier)) continue;
