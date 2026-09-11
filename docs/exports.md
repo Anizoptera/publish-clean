@@ -93,9 +93,12 @@ Measured 2026-09-11 on macOS with Node 24.20.0, each case beside a control:
   APFS volume, where `Index.js` stopped resolving — so compare byte-exact against the tar entry.
 - **The same for Unicode normalisation.** A target written NFD resolved against a file stored NFC.
   `readdir` returned only the NFC form, so a byte comparison catches it and nothing else does.
-  Case and form are INDEPENDENT axes: on that same case-sensitive volume the NFD target still
-  resolved, because APFS normalises form regardless of case sensitivity. Never report either
-  difference as failing "on a case-sensitive filesystem" — only a byte comparison is sound.
+  Case-sensitivity is not the discriminator for both. Probed on exFAT, default APFS and a
+  case-sensitive APFS volume: only the case-sensitive one refused the wrong case, and all three
+  still resolved the NFD target. Do not read that as "form never matters" — every volume here is
+  mounted by macOS, which may normalise in its VFS rather than per filesystem, so this instrument
+  cannot attribute the behaviour, and a filesystem normalising nothing is unmeasured. Report
+  neither difference as failing on a named platform; a byte comparison is the only sound test.
 - **A package importing itself through an unexported subpath.** `selfref/sub.js` threw
   `ERR_PACKAGE_PATH_NOT_EXPORTED` even though the file ships and a relative import of it worked.
   Self-reference goes through `exports`, so shipping the file is not enough, and the author cannot

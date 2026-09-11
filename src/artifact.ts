@@ -260,11 +260,13 @@ function mainExists(name: string, files: ReadonlySet<string>): boolean {
  *
  * Case and Unicode form are the two ways a target can be wrong and still resolve on the machine
  * that wrote it: macOS matches `./dist/Index.js` to `dist/index.js` and a decomposed target to the
- * composed name `readdir` reports. The two are INDEPENDENT axes — measured on a case-sensitive
- * APFS volume, the wrong case stopped resolving while the wrong Unicode form still resolved — so
- * neither one may be reported as failing on "a case-sensitive filesystem". Both are reported the
- * same way because both work for their author and for consumers sharing that filesystem, which is
- * why nobody catches either. The report is the only place this is recoverable: told merely that the
+ * composed name `readdir` reports. Case-sensitivity is NOT the discriminator for both: measured
+ * across exFAT, default APFS and a case-sensitive APFS volume, only the case-sensitive one refused
+ * the wrong case, and every one of them still resolved the wrong Unicode form. That says nothing
+ * about form elsewhere — macOS may normalise in its VFS rather than per filesystem, so the
+ * instrument cannot separate them, and a filesystem that normalises nothing is unmeasured here.
+ * Hence the report names no platform: both differences are reported the same way because both work
+ * for their author, which is why nobody catches either. The report is the only place this is recoverable: told merely that the
  * file is "missing", an author looking straight at it hunts a build that is working.
  *
  * Runs only for a target already proven absent, so the usual path allocates nothing.
@@ -335,8 +337,8 @@ export function assertDeclaredFiles(pkg: JsonObject, published: readonly string[
           ? JSON.stringify(item.name)
           : `${JSON.stringify(item.name)} — the archive holds ${JSON.stringify(near)}, which ` +
               `differs only in case or Unicode form, so it resolves only where the filesystem ` +
-              `ignores that difference. It works where this was built; whether it works for a ` +
-              `consumer depends on their filesystem. Rename it to match exactly`,
+              `ignores that difference. The machine this was built on does; a consumer's may ` +
+              `not. Rename it to match the packed name exactly`,
       );
     }
   }
