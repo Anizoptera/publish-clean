@@ -274,7 +274,9 @@ export function reviewShippedFiles(pkg: JsonObject, files: ReadonlyMap<string, B
   // The neighbouring check nobody should build: a `bin` entry shipped WITHOUT the executable bit.
   // Installers restore it, because tarballs authored on Windows routinely lack it — measured by
   // installing a hand-built archive whose `bin` member is 0644, which bun and pnpm both unpack to
-  // 0755 and run. (npm and yarn unmeasured.) A check would fire on a package that works.
+  // 0755 and run. npm cannot fail to: `bin-links` 6.0.2 `lib/fix-bin.js` is an unconditional
+  // `chmod(file, 0o777 & ~umask)` called from both the symlink and the Windows-shim path, so it
+  // never consults the archive's mode. (yarn unmeasured.) A check would fire on a package that works.
   for (const [name, body] of files) {
     if (!body.subarray(0, 2).equals(Buffer.from("#!"))) continue;
     const firstLine = body.subarray(0, body.indexOf(0x0a) + 1 || body.length);

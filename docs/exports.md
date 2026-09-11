@@ -166,8 +166,11 @@ Measured 2026-09-11 on macOS with Node 24.20.0, each case beside a control:
 
 An unexecutable `bin` file in the tarball looked like an obvious defect. It is not: installed with
 bun, a `0644` member came out `0755` and ran; pnpm 11 does the same. Installers have to restore the
-bit because Windows-authored tarballs routinely lack it. npm and yarn unmeasured — if either turns
-out not to, this check comes back.
+bit because Windows-authored tarballs routinely lack it. npm cannot fail to, by construction:
+`bin-links` 6.0.2 `lib/fix-bin.js` is `chmod(file, 0o777 & ~umask)` with no test of the archive's
+mode, reached from both `link-bin.js` and `shim-bin.js`, so every platform takes it. yarn remains
+unmeasured — install a package whose `bin` member is `0644` and stat the link target; if it does
+not restore the bit, this check comes back.
 
 Recorded because the next person will have the same idea, and re-deriving the answer costs an
 afternoon.
