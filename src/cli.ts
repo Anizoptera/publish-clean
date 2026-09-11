@@ -408,7 +408,7 @@ async function main(signal: AbortSignal): Promise<void> {
     allowSuspicious: parsed.values["allow-suspicious"] === true,
     dryRun: parsed.values["dry-run"] === true,
     guardOnly: parsed.values["guard-only"] === true,
-    heal: parsed.values.heal !== false,
+    heal: parsed.values["no-heal"] !== true,
     noGitChecks: parsed.values["no-git-checks"] === true,
     publishArgs,
     registry: typeof parsed.values.registry === "string" ? parsed.values.registry : null,

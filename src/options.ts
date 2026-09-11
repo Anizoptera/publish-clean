@@ -110,9 +110,11 @@ export function parseOptions(rawArgs: readonly string[]) {
       "allow-suspicious": { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
       "guard-only": { type: "boolean", default: false },
-      heal: { type: "boolean", default: true },
       help: { type: "boolean", short: "h", default: false },
+      // Declared by its negative name, like `--no-git-checks`: `parseArgs` has no `--no-`
+      // negation of its own and rejects the flag outright as unknown.
       "no-git-checks": { type: "boolean", default: false },
+      "no-heal": { type: "boolean", default: false },
       registry: { type: "string", default: undefined },
       "skip-file-check": { type: "boolean", default: false },
       strict: { type: "boolean", default: false },
