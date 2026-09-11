@@ -149,9 +149,10 @@ describe.concurrent("declared entry points", () => {
     ).toThrow(/missing\.js[\s\S]*bin\/missing\.js/);
   });
 
-  // Both targets below resolve on the macOS filesystem that produced them and on no consumer's,
-  // so the author is looking straight at the file the report calls missing. Naming the entry it
-  // nearly matches is the difference between a one-line fix and a hunt through a working build.
+  // Both targets below resolve wherever the filesystem ignores case or Unicode form, which is
+  // where they were built, so the author is looking straight at the file the report calls missing.
+  // Naming the entry it nearly matches is the difference between a one-line fix and a hunt through
+  // a build that works.
   it("tells a wrong-case or wrong-Unicode target from an absent file", () => {
     expect(() => assertDeclaredFiles({ main: "./dist/Index.js" }, shipped)).toThrow(
       /"dist\/index\.js", which differs only in case/,

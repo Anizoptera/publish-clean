@@ -259,10 +259,11 @@ function mainExists(name: string, files: ReadonlySet<string>): boolean {
  * The archive entry a missing target almost names.
  *
  * Case and Unicode form are the two ways a target can be wrong and still resolve on the machine
- * that wrote it: macOS matches `./dist/Index.js` to `dist/index.js` and an NFD target to the NFC
- * name `readdir` reports, while Linux matches neither. Both then fail for every consumer. The
- * report is the only place this is recoverable — told merely that the file is "missing", an author
- * looking straight at it hunts a build that is working.
+ * that wrote it: macOS matches `./dist/Index.js` to `dist/index.js` and a decomposed target to the
+ * composed name `readdir` reports. A case-sensitive filesystem matches neither, so the package
+ * works for its author and for consumers who share that filesystem, and fails for the rest — which
+ * is why nobody catches it. The report is the only place this is recoverable: told merely that the
+ * file is "missing", an author looking straight at it hunts a build that is working.
  *
  * Runs only for a target already proven absent, so the usual path allocates nothing.
  */
@@ -322,7 +323,9 @@ export function assertDeclaredFiles(pkg: JsonObject, published: readonly string[
         near === undefined
           ? JSON.stringify(item.name)
           : `${JSON.stringify(item.name)} — the archive holds ${JSON.stringify(near)}, which ` +
-              `differs only in case or Unicode form, so it resolves on macOS and nowhere else`,
+              `differs only in case or Unicode form, so it resolves only where the filesystem ` +
+              `ignores that difference — it works where this was built and fails on a ` +
+              `case-sensitive one, which is where most consumers install it`,
       );
     }
   }
