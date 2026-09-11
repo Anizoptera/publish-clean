@@ -263,6 +263,40 @@ synthesised:
 Node also accepts `@`, `>` and `=` inside a condition name, so `types@>=5.2` and stranger
 keys are valid and must not be rejected as malformed.
 
+## Writing a map that resolves everywhere
+
+Environment (where it runs), module system (how it is loaded) and mode (dev or prod) are three
+INDEPENDENT axes. Flattening them into one ordered list forces precedence decisions nobody gets
+right, because the list cannot express that two keys answer different questions. Nest them and most
+ordering questions stop existing:
+
+```json
+{
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "bun":     { "import": "./dist/index.js",   "require": "./dist/index.cjs" },
+      "browser": { "import": "./dist/browser.js", "require": "./dist/browser.cjs" },
+      "node":    { "import": "./dist/node.js",    "require": "./dist/node.cjs" },
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.cjs"
+}
+```
+
+Four things that map gets right, each for a reason measured above:
+
+- **`bun` before `node`**, because Bun and Deno both activate `node`. A specific runtime placed
+  after `node` is unreachable.
+- **`default` last and present.** Edge runtimes activate neither `node` nor `browser`, so a map
+  without `default` hands them nothing — the failure mode that costs the most and shows up latest.
+- **`types` first**, but only because one declaration file serves every branch. With separate
+  `.d.mts`/`.d.cts` the correct shape is a `types` key nested INSIDE each module-system branch: the
+  invariant is that the branch a type checker lands on describes the branch the runtime lands on,
+  and "types first" is just the single-file case of it.
+- **`main` kept**, for the consumers in the next section.
+
 ## Not every consumer reads `exports`
 
 Parcel 2.16.4 ignores the field unless the consuming project opts in
