@@ -270,6 +270,11 @@ export function reviewShippedFiles(pkg: JsonObject, files: ReadonlyMap<string, B
 
   // A shebang ending in CR is invisible in an editor and fatal on every POSIX system: the kernel
   // passes `node\r` to execve as the interpreter name.
+  //
+  // The neighbouring check nobody should build: a `bin` entry shipped WITHOUT the executable bit.
+  // Installers restore it, because tarballs authored on Windows routinely lack it — measured by
+  // installing a hand-built archive whose `bin` member is 0644, which bun and pnpm both unpack to
+  // 0755 and run. (npm and yarn unmeasured.) A check would fire on a package that works.
   for (const [name, body] of files) {
     if (!body.subarray(0, 2).equals(Buffer.from("#!"))) continue;
     const firstLine = body.subarray(0, body.indexOf(0x0a) + 1 || body.length);
