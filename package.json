@@ -50,7 +50,7 @@
     "build": "tsdown",
     "changelog": "git-cliff --unreleased --prepend CHANGELOG.md --tag",
     "check": "bun run --parallel format:check claude-link:check hooks:check typecheck tracked-artifacts:check && bun run build && bun run test:built && bun run cleaned-artifact:check",
-    "claude-link:check": "test -L CLAUDE.md && test \"$(readlink CLAUDE.md)\" = AGENTS.md",
+    "claude-link:check": "test -L CLAUDE.md && test \"$(readlink CLAUDE.md)\" = AGENTS.md || { echo 'CLAUDE.md must be a symlink to AGENTS.md. Two real files drift apart in silence, and then each agent family reads different rules. Repair: ln -sf AGENTS.md CLAUDE.md' >&2; exit 1; }",
     "clean": "rm -rf ./dist ./node_modules/.cache",
     "cleaned-artifact:check": "bun scripts/check-cleaned-artifact.ts",
     "format": "oxfmt .",
@@ -63,7 +63,7 @@
     "release": "pnpm version",
     "test": "bun run build && bun run test:built",
     "test:built": "vitest run",
-    "tracked-artifacts:check": "test -z \"$(git ls-files dist)\"",
+    "tracked-artifacts:check": "test -z \"$(git ls-files dist)\" || { echo 'dist/ is build output and must never be tracked: a committed copy outlives the source it came from, and the publish checks read the freshly built CLI. Repair: git rm -r --cached dist' >&2; exit 1; }",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "version": "grep -qF \"## [$npm_package_version]\" CHANGELOG.md || { echo \"CHANGELOG.md has no ## [$npm_package_version] section. Run: bun run changelog v$npm_package_version, edit it, then COMMIT it -- the bump refuses a dirty tree.\" >&2; exit 1; }"
   },
