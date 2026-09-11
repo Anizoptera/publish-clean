@@ -271,10 +271,21 @@ function mainExists(name: string, files: ReadonlySet<string>): boolean {
  *
  * Runs only for a target already proven absent, so the usual path allocates nothing.
  */
+/**
+ * How two names are compared when asking whether a filesystem could confuse them.
+ *
+ * Shared with the import-graph scan so both halves of the tool agree on what "the same name"
+ * means. They report different defects — a manifest target that misses, an import that misses —
+ * but a disagreement here would let one half call a pair identical while the other calls it
+ * absent, which reads as a contradiction in the same report.
+ */
+export function foldName(value: string): string {
+  return value.normalize("NFC").toLowerCase();
+}
+
 function nearMatch(name: string, published: readonly string[]): string | undefined {
-  const fold = (value: string) => value.normalize("NFC").toLowerCase();
-  const folded = fold(name);
-  return published.find((file) => fold(file) === folded);
+  const folded = foldName(name);
+  return published.find((file) => foldName(file) === folded);
 }
 
 /**

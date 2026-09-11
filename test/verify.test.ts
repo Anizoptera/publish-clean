@@ -164,6 +164,44 @@ it.concurrent("refuses to publish files nothing in the package reaches", async (
   expect(imported.status).toBe(0);
 });
 
+it.concurrent("refuses an import only a case-folding filesystem can resolve", async () => {
+  // The author's machine folds case, so this package runs for them and breaks for a consumer whose
+  // filesystem does not. Before this rule the shape was not silent — it was WORSE than silent: the
+  // imported file was never reached, so the dead-weight rule called it unreachable and told the
+  // author to delete a file their own code imports, which makes the break permanent.
+  //
+  // No Unicode-form case here on purpose: the fixture's filename would be normalised by whatever
+  // filesystem the runner has, and this suite runs on Linux and Windows too. That axis is pinned
+  // in the unit lane, where the file list is constructed rather than written to a disk.
+  const pkg = { ...SOUND, files: ["index.js", "helper.js"] };
+  const helper = { "helper.js": "export const ok = true;\n" };
+
+  const folded = await check(pkg, { ...helper, "index.js": 'export * from "./Helper.js";\n' }, [
+    "--dry-run",
+  ]);
+  expect(folded.status).not.toBe(0);
+  expect(folded.stderr).toContain("import-case-mismatch");
+  expect(folded.stderr).toContain("helper.js");
+  // Referenced wrongly is not the same as unreferenced. Reporting both would hand the author two
+  // findings with opposite instructions, and the destructive one is the easier to act on.
+  expect(folded.stderr).not.toContain("allowUnreferenced");
+
+  // Control: the identical package with the spelling corrected must pass, which is what proves the
+  // rule reads the mismatch rather than the mere presence of a second file.
+  const exact = await check(pkg, { ...helper, "index.js": 'export * from "./helper.js";\n' }, [
+    "--dry-run",
+  ]);
+  expect(exact.status).toBe(0);
+
+  // A specifier naming nothing at all must NOT be claimed as a misspelling: no folded name matches
+  // it, so it stays an unresolved import and the file it never reaches stays dead weight.
+  const absent = await check(pkg, { ...helper, "index.js": 'export * from "./missing.js";\n' }, [
+    "--dry-run",
+  ]);
+  expect(absent.stderr).not.toContain("import-case-mismatch");
+  expect(absent.stderr).toContain("allowUnreferenced");
+});
+
 it.concurrent("refuses a package whose own declarations import an unexported subpath", async () => {
   // The shape `@eslint-community/regexpp` publishes. It has to be proven through a real tarball:
   // the defect exists only because resolution goes through `exports`, and in the source tree the
