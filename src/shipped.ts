@@ -11,6 +11,7 @@
 import { Script } from "node:vm";
 
 import { collectDeclaredPaths, normalizeDeclaredPath } from "./artifact";
+import { rowsOf } from "./conditions";
 import type { Finding } from "./finding";
 import { isObject } from "./json";
 import type { JsonObject } from "./json";
@@ -79,6 +80,123 @@ function targetsUnder(node: unknown, condition: string, inside: boolean, out: st
       inside || key === condition || key.startsWith(`${condition}@`),
       out,
     );
+}
+
+/**
+ * The two positions that actually load a module. A template literal is legal only in the CALL
+ * forms — `import x from \`y\`` is a syntax error — and allowing a backtick after `from` matched
+ * English prose in the corpus ("filters out internal stacks from `vitest/dist`").
+ */
+function selfSpecifiers(name: string): readonly RegExp[] {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const body = `(${escaped}(?:/[^'"\`]*)?)`;
+  return [
+    new RegExp(`(?:from|import)\\s*(['"])${body}\\1`, "g"),
+    new RegExp(`(?:require|import)\\s*\\(\\s*(['"\`])${body}\\1`, "g"),
+  ];
+}
+
+/**
+ * Whether the package's own `exports` exposes this subpath at all.
+ *
+ * A key mapping to `null` under every condition blocks the subpath deliberately, so key presence
+ * is not the question — `rowsOf` answers the real one. Which consumer gets which file is a
+ * different check; this one only asks whether anybody can reach the subpath.
+ */
+function exposes(exports: unknown, subpath: string): boolean {
+  if (typeof exports === "string" || Array.isArray(exports)) return subpath === ".";
+  if (!isObject(exports)) return false;
+  const keys = Object.keys(exports);
+  if (!keys.some((key) => key.startsWith("."))) return subpath === ".";
+  for (const key of keys) {
+    const star = key.indexOf("*");
+    const matched =
+      star === -1
+        ? key === subpath
+        : subpath.length >= key.length - 1 &&
+          subpath.startsWith(key.slice(0, star)) &&
+          subpath.endsWith(key.slice(star + 1));
+    if (!matched) continue;
+    const rows = rowsOf(exports[key]);
+    return rows === null || rows.some((row) => row.target.kind === "file");
+  }
+  return false;
+}
+
+/**
+ * Reports a package importing ITSELF by name through a subpath its own `exports` does not expose.
+ *
+ * Self-reference resolves through `exports` like any consumer's import would, so shipping the file
+ * is not enough — and the author never sees it, because inside their own repository the same
+ * import resolves through the source tree instead. Measured across 662 published packages with
+ * `exports`: 2 carry one, and both are real. `@eslint-community/regexpp` ships an `index.d.ts`
+ * importing `@eslint-community/regexpp/ast` while exporting only `.`; `highlight.js` references
+ * `highlight.js/private` from both its declarations and its JSDoc types, exporting neither.
+ *
+ * Why `breaks` rather than waste, measured on TypeScript 7.0.2 with a control subpath that is
+ * exported: under `skipLibCheck: false` the consumer gets `TS2307` inside a file they cannot edit,
+ * and under `skipLibCheck: true` — the common default — the type silently degrades to an
+ * error-suppressed `any`. A build that fails and a build that quietly types itself wrong are both
+ * this class. A runtime `require` of an unexposed subpath throws outright, though the corpus held
+ * no instance of that.
+ */
+export function reviewSelfReferences(
+  pkg: JsonObject,
+  files: ReadonlyMap<string, Buffer>,
+): Finding[] {
+  const name = pkg.name;
+  // Self-reference by name is only resolvable when `exports` exists, so without it there is no
+  // defect to find: every shipped path is importable by its relative path anyway.
+  if (typeof name !== "string" || pkg.exports === undefined) return [];
+
+  const findings: Finding[] = [];
+  const patterns = selfSpecifiers(name);
+  const seen = new Set<string>();
+  for (const [file, body] of files) {
+    if (!SCRIPT.test(file)) continue;
+    const source = body.toString("utf8");
+    if (!source.includes(name)) continue;
+    for (const pattern of patterns)
+      for (const match of source.matchAll(pattern)) {
+        const start = source.lastIndexOf("\n", match.index) + 1;
+        const end = source.indexOf("\n", match.index);
+        const line = source.slice(start, end === -1 ? undefined : end).trim();
+
+        // Comments are SCANNED, not stripped: `{import("pkg/sub").Type}` in a JSDoc block is a
+        // real type import a checker resolves, and `highlight.js` is caught by exactly those.
+        // What is skipped is prose — a documentation example of an import, measured as the whole
+        // false-positive population (`rolldown` and `nanoid` both advertise a subpath they
+        // removed). The two are told apart by the call form, which is the only one TypeScript
+        // reads inside a comment.
+        if (/^(?:\*|\/\/|\/\*|#)/.test(line) && !/\{\s*import\s*\(/.test(line)) continue;
+
+        // A specifier inside a template literal is text this file GENERATES for somebody else's
+        // project, not an import this file performs — measured in `@opentui/core`, which writes an
+        // import statement into a string. Suppressing is the safe direction: this finding stops a
+        // publish, so a missed defect costs less than a refused release over generated text.
+        if (source.slice(start, match.index).includes("`")) continue;
+
+        const specifier = match[2] ?? "";
+        const subpath = specifier === name ? "." : `.${specifier.slice(name.length)}`;
+        if (exposes(pkg.exports, subpath) || seen.has(specifier)) continue;
+        seen.add(specifier);
+        findings.push({
+          rule: "self-import-not-exported",
+          consequence: "breaks",
+          healed: false,
+          where: file,
+          message:
+            `${JSON.stringify(specifier)} is this package importing itself, and "exports" does ` +
+            `not expose ${JSON.stringify(subpath)}, so it resolves to nothing for every consumer ` +
+            `— a type checker reports TS2307 in a file they cannot edit, or silently types it as ` +
+            `any. Inside this repository the same import resolves through the source tree, which ` +
+            `is why it looks fine here. Add the subpath:\n` +
+            `  "exports": { ${JSON.stringify(subpath)}: "./<the file it means>" }\n` +
+            `or rewrite the import as a relative path. Found at: ${line.slice(0, 120)}`,
+        });
+      }
+  }
+  return findings;
 }
 
 function entry(files: ReadonlyMap<string, Buffer>, target: string): Buffer | undefined {
