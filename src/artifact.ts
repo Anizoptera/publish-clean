@@ -255,6 +255,23 @@ function mainExists(name: string, files: ReadonlySet<string>): boolean {
   return [".js", ".json", ".node"].some((extension) => files.has(`${prefix}index${extension}`));
 }
 
+/**
+ * The archive entry a missing target almost names.
+ *
+ * Case and Unicode form are the two ways a target can be wrong and still resolve on the machine
+ * that wrote it: macOS matches `./dist/Index.js` to `dist/index.js` and an NFD target to the NFC
+ * name `readdir` reports, while Linux matches neither. Both then fail for every consumer. The
+ * report is the only place this is recoverable — told merely that the file is "missing", an author
+ * looking straight at it hunts a build that is working.
+ *
+ * Runs only for a target already proven absent, so the usual path allocates nothing.
+ */
+function nearMatch(name: string, published: readonly string[]): string | undefined {
+  const fold = (value: string) => value.normalize("NFC").toLowerCase();
+  const folded = fold(name);
+  return published.find((file) => fold(file) === folded);
+}
+
 /** Validate declared files using each field's consumer semantics, without extracting the archive. */
 export function assertDeclaredFiles(pkg: JsonObject, published: readonly string[]): void {
   const declared: DeclaredFile[] = [];
@@ -299,10 +316,18 @@ export function assertDeclaredFiles(pkg: JsonObject, published: readonly string[
       found = [".d.ts", ".d.mts", ".d.cts", "/index.d.ts"].some((suffix) =>
         files.has(name + suffix),
       );
-    if (!found) missing.push(item.name);
+    if (!found) {
+      const near = nearMatch(name, published);
+      missing.push(
+        near === undefined
+          ? JSON.stringify(item.name)
+          : `${JSON.stringify(item.name)} — the archive holds ${JSON.stringify(near)}, which ` +
+              `differs only in case or Unicode form, so it resolves on macOS and nowhere else`,
+      );
+    }
   }
   if (missing.length)
     throw new PublishCleanError(
-      `Manifest declares files missing from packed artifact:\n${missing.map((name) => JSON.stringify(name)).join("\n")}`,
+      `Manifest declares files missing from packed artifact:\n${missing.join("\n")}`,
     );
 }

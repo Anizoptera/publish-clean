@@ -149,6 +149,26 @@ describe.concurrent("declared entry points", () => {
     ).toThrow(/missing\.js[\s\S]*bin\/missing\.js/);
   });
 
+  // Both targets below resolve on the macOS filesystem that produced them and on no consumer's,
+  // so the author is looking straight at the file the report calls missing. Naming the entry it
+  // nearly matches is the difference between a one-line fix and a hunt through a working build.
+  it("tells a wrong-case or wrong-Unicode target from an absent file", () => {
+    expect(() => assertDeclaredFiles({ main: "./dist/Index.js" }, shipped)).toThrow(
+      /"dist\/index\.js", which differs only in case/,
+    );
+    // Escapes, because the two forms are indistinguishable in an editor — which is exactly
+    // why this ships: a decomposed target against the composed name macOS reports from readdir.
+    expect(() => assertDeclaredFiles({ main: "./caf\u0065\u0301.js" }, ["caf\u00e9.js"])).toThrow(
+      /Unicode form/,
+    );
+
+    // The control, in the same position: a file that genuinely is not there must not be handed a
+    // near match, which would send the author renaming a file that was never built.
+    expect(() => assertDeclaredFiles({ main: "./dist/other.js" }, shipped)).toThrow(
+      /"\.\/dist\/other\.js"\s*$/,
+    );
+  });
+
   it("refuses a path that escapes the package", () => {
     expect(() => assertDeclaredFiles({ main: "../outside.js" }, shipped)).toThrow(
       "invalid package paths",
