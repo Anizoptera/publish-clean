@@ -211,6 +211,15 @@ a rule existing, not as registry shares.
 | deprecated trailing-slash key | 0.6% |
 | `default` not last | 0.1% |
 | `module` after `require` | one package |
+| relative import resolving only after folding case or Unicode form | none |
+
+The last row is not a reason to drop that rule, and the distinction decides whether any check here
+is worth its bytes. The others are candidate rules judged on how often they would fire. That one
+describes a shape the tool ALREADY reacted to and reacted wrongly: the target went unreached, so
+the dead-weight rule called it unreachable and advised deleting a file the code imports. The
+measurement — 300 packages, 21451 relative specifiers, sampled evenly across the corpus, verified
+against a planted positive so the zero is not an unexercised branch — bounds how often an author
+meets it, not whether the advice they get should be correct.
 
 Two things follow. Every waste rule here fires on single-digit percentages, so none of them can
 justify risk — which is why each is gated by the equivalence proof rather than by a style argument.

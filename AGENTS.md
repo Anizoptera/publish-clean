@@ -78,8 +78,12 @@
   never make a healed finding fatal. The one waste finding that still aborts — a shipped file nothing
   reaches and nobody declared — says so through `rulesAbort` on the finding itself, never through its
   rule name, so the divergence stays visible as data instead of becoming a branch somebody tidies away.
-- `src/shipped.ts` runs two source scans with OPPOSITE safe directions. NEVER unify them. The
-  dead-file scan over-matches deliberately — a false positive only hides a report. The self-import
+- `src/shipped.ts` mixes OPPOSITE safe directions, and one scan carries BOTH. NEVER unify them.
+  The dead-file scan over-matches deliberately — a false positive only hides a report — but its
+  closure also emits `import-case-mismatch`, which ABORTS, so that one finding must take its
+  position from `src/lexical.ts` like the self-import scan does. Over-matching is safe for
+  reachability and fabricates a refusal here: a doc comment showing an import of a shipped file
+  differing only in case would refuse a correct package. The self-import
   scan STOPS a publish, so doubt must SUPPRESS: it reads comments (`{import("pkg/sub").T}` in JSDoc
   is a type a checker resolves, so stripping them loses real defects) but skips prose, generated
   text in template literals, and commented-out `require`. Decide where a specifier sits from
