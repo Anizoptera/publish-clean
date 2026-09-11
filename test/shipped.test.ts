@@ -276,6 +276,26 @@ describe.concurrent("files the package ships but nothing reaches", () => {
       expect(rules({ "index.js": mention, ...utils })).toEqual([]);
   });
 
+  it("follows an extensionless import into the declaration file it names", () => {
+    // `import "./types"` with `types.d.ts` shipped is the classic resolution style, which predates
+    // the `.mts`/`.cts` family. A declaration is exempt from the dead-weight rule by nature, so the
+    // consequence sits one hop further out: a file reached only THROUGH that declaration stops
+    // being reachable at all, and the rule then tells the author to delete something their own
+    // types import.
+    const sources = {
+      "index.js": 'import "./types";\n',
+      "types.d.ts": 'import "./helper.js";\nexport type T = number;\n',
+      "helper.js": "export const h = 1;\n".repeat(80),
+    };
+    expect(rules(sources)).toEqual([]);
+    // The control in the same position: the identical package whose declaration imports nothing
+    // leaves `helper.js` genuinely unreached, so the silence above measures the extensionless hop
+    // rather than a helper the closure arrived at some other way.
+    expect(rules({ ...sources, "types.d.ts": "export type T = number;\n" })).toContain(
+      "unreferenced-file",
+    );
+  });
+
   it("reports a file nothing reaches, and stops the run over it", () => {
     const found = review({ "index.js": "export const a = 1;\n", "orphan.js": "dead\n".repeat(80) });
     expect(found.map((f) => f.rule)).toEqual(["unreferenced-file"]);
