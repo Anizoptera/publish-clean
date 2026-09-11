@@ -1,9 +1,9 @@
-import { customDevFields, keptFields, packageConfig } from "../src/config";
 /**
  * Exercises each manifest rule directly, one input to one output. The end-to-end suite proves
  * the CLI reaches these; what it cannot afford is breadth, because every case there costs two
  * package managers and a tarball. The evasions that matter are cheap here.
  */
+import { customDevFields, keptFields, packageConfig } from "../src/config";
 import { describe, expect, it } from "vitest";
 
 import {
