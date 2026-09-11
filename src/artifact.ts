@@ -150,9 +150,10 @@ export function reviewPackedNames(pkg: JsonObject, files: readonly string[]): Fi
 
   const byFold = new Map<string, string[]>();
   for (const file of files) {
-    const group = byFold.get(foldName(file));
+    const key = foldName(file);
+    const group = byFold.get(key);
     if (group) group.push(file);
-    else byFold.set(foldName(file), [file]);
+    else byFold.set(key, [file]);
   }
   const collisions = [...byFold.values()].filter((group) => group.length > 1);
   if (collisions.length > 0)
@@ -180,12 +181,11 @@ export function reviewPackedNames(pkg: JsonObject, files: readonly string[]): Fi
     });
 
   const windows = targetsWindows(pkg.os);
-  const unportable = files
-    .map((file) => ({ file, defect: unportableName(file) }))
-    .filter(
-      (item): item is { file: string; defect: Unportable } =>
-        item.defect !== undefined && (windows || !item.defect.windowsOnly),
-    );
+  const unportable: { file: string; defect: Unportable }[] = [];
+  for (const file of files) {
+    const defect = unportableName(file);
+    if (defect !== undefined && (windows || !defect.windowsOnly)) unportable.push({ file, defect });
+  }
   if (unportable.length > 0)
     findings.push({
       rule: "packed-name-unportable",
