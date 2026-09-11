@@ -171,9 +171,21 @@ An unexecutable `bin` file in the tarball looked like an obvious defect. It is n
 bun, a `0644` member came out `0755` and ran; pnpm 11 does the same. Installers have to restore the
 bit because Windows-authored tarballs routinely lack it. npm cannot fail to, by construction:
 `bin-links` 6.0.2 `lib/fix-bin.js` is `chmod(file, 0o777 & ~umask)` with no test of the archive's
-mode, reached from both `link-bin.js` and `shim-bin.js`, so every platform takes it. yarn remains
-unmeasured — install a package whose `bin` member is `0644` and stat the link target; if it does
-not restore the bit, this check comes back.
+mode, reached from both `link-bin.js` and `shim-bin.js`, so every platform takes it.
+
+What retires the check is upstream of every installer: this tool's artifact cannot carry an
+unexecutable `bin` member, because the one packer that produces it sets the mode from the file's
+ROLE and ignores the mode on disk. Measured, pnpm 11.21.0 packing a package whose three members
+were written at 644, 644 and 755: the `bin` target came out `0755` from a 644 source, a plain file
+stayed `0644`, and a shell script authored 755 came out `0644`. So the check would read a value
+that is `0755` by construction — and the remaining installer question is moot for this tool, since
+no tarball it writes can pose it. The last clause is what to re-run if the packer ever changes:
+pack a `bin` target authored 644 and read the member's mode, not the installed file's.
+
+That normalisation has a consequence worth knowing and NOT worth healing: a shell script shipped in
+a package loses its executable bit unless it is a `bin` target. Nothing here can repair it — the
+manifest is the only surface this tool may alter — and it is pnpm's behaviour for every package
+published with it, not a defect in any one of them.
 
 The legacy `browser` FIELD contradicting an `exports` browser target is publint's
 `EXPORTS_VALUE_CONFLICTS_WITH_BROWSER`, and it is real: a bundler honouring the field substitutes a
