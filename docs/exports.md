@@ -89,10 +89,13 @@ Measured 2026-09-11 on macOS with Node 24.20.0, each case beside a control:
 
 - **A target that differs from its tarball entry only by case.** `./dist/Index.js` resolved
   against `dist/index.js` on macOS; a genuinely absent file threw `ERR_MODULE_NOT_FOUND`. The
-  author's filesystem hides it and a case-sensitive one does not, so compare byte-exact against the
-  tar entry.
+  author's filesystem hides it and a case-sensitive one does not — observed on a case-sensitive
+  APFS volume, where `Index.js` stopped resolving — so compare byte-exact against the tar entry.
 - **The same for Unicode normalisation.** A target written NFD resolved against a file stored NFC.
   `readdir` returned only the NFC form, so a byte comparison catches it and nothing else does.
+  Case and form are INDEPENDENT axes: on that same case-sensitive volume the NFD target still
+  resolved, because APFS normalises form regardless of case sensitivity. Never report either
+  difference as failing "on a case-sensitive filesystem" — only a byte comparison is sound.
 - **A package importing itself through an unexported subpath.** `selfref/sub.js` threw
   `ERR_PACKAGE_PATH_NOT_EXPORTED` even though the file ships and a relative import of it worked.
   Self-reference goes through `exports`, so shipping the file is not enough, and the author cannot

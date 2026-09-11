@@ -260,9 +260,11 @@ function mainExists(name: string, files: ReadonlySet<string>): boolean {
  *
  * Case and Unicode form are the two ways a target can be wrong and still resolve on the machine
  * that wrote it: macOS matches `./dist/Index.js` to `dist/index.js` and a decomposed target to the
- * composed name `readdir` reports. A case-sensitive filesystem matches neither, so the package
- * works for its author and for consumers who share that filesystem, and fails for the rest — which
- * is why nobody catches it. The report is the only place this is recoverable: told merely that the
+ * composed name `readdir` reports. The two are INDEPENDENT axes — measured on a case-sensitive
+ * APFS volume, the wrong case stopped resolving while the wrong Unicode form still resolved — so
+ * neither one may be reported as failing on "a case-sensitive filesystem". Both are reported the
+ * same way because both work for their author and for consumers sharing that filesystem, which is
+ * why nobody catches either. The report is the only place this is recoverable: told merely that the
  * file is "missing", an author looking straight at it hunts a build that is working.
  *
  * Runs only for a target already proven absent, so the usual path allocates nothing.
@@ -333,8 +335,8 @@ export function assertDeclaredFiles(pkg: JsonObject, published: readonly string[
           ? JSON.stringify(item.name)
           : `${JSON.stringify(item.name)} — the archive holds ${JSON.stringify(near)}, which ` +
               `differs only in case or Unicode form, so it resolves only where the filesystem ` +
-              `ignores that difference — it works where this was built and fails on a ` +
-              `case-sensitive one, which is where most consumers install it`,
+              `ignores that difference. It works where this was built; whether it works for a ` +
+              `consumer depends on their filesystem. Rename it to match exactly`,
       );
     }
   }
