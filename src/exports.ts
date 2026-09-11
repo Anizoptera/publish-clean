@@ -1,0 +1,595 @@
+/**
+ * Proving what an `exports`/`imports` condition map does, so this tool may repair one without
+ * changing what a consumer resolves.
+ *
+ * A consumer does not activate one condition. It activates a SET — webpack activates six — and
+ * then takes the first key of the package's object that is in that set. The order written in the
+ * manifest picks the winner, so no reorder here is cosmetic and nothing may be removed on the
+ * strength of a rule of thumb. Every transformation in this file is therefore accompanied by a
+ * proof, and `heal` asserts that proof again over the value it returns.
+ *
+ * THE PROOF. Walking a map top to bottom yields a DECISION LIST: rows of
+ * `{conjunction of condition literals → target}` that are mutually exclusive and cover every
+ * possible active set. Two maps are equivalent exactly when every pair of rows whose conjunctions
+ * are jointly satisfiable carries the same target, and satisfiability of two pure conjunctions is
+ * a scan for one name bound both ways. The cost is linear in the map's STRUCTURE.
+ *
+ * The rejected alternative was enumerating the 2^n subsets of the names present. It is
+ * exponential in the names rather than the structure, so it needs a cap and answers "not proven"
+ * on real packages — a survey of this machine's dependency closure holds a condition object with
+ * 25 distinct names, which is 33 million subsets. A closed-form shortcut ("a key is inert when
+ * every later key has its target") was rejected as WRONG: in `{import: X, require: Y, default: X}`
+ * the `import` key IS inert, because `require` cannot be active alongside it, and the shortcut
+ * says otherwise.
+ *
+ * Ambient inputs arrive as parameters — no process, filesystem or argv here.
+ */
+import type { Finding } from "./finding";
+import { isObject } from "./json";
+import type { JsonObject } from "./json";
+
+/**
+ * What a branch yields. `blocked` (an explicit `null`) and `miss` (no key matched) both fail
+ * resolution, but they are kept distinct so a transformation has to prove the stronger claim:
+ * treating them as equal would let `{node: null, default: "./a.js"}` lose its `node` branch,
+ * which is a real change for a consumer that activates `node`.
+ */
+type Target =
+  | { readonly kind: "blocked" }
+  | { readonly kind: "file"; readonly file: string }
+  | { readonly kind: "miss" }
+  | { readonly kind: "opaque"; readonly key: string };
+
+/** A conjunction: each named condition is required to be active (`true`) or inactive (`false`). */
+type Literals = ReadonlyMap<string, boolean>;
+
+interface Row {
+  readonly literals: Literals;
+  readonly target: Target;
+}
+
+/**
+ * Pairs that never co-occur, folded in as the rows are built so that a contradictory branch
+ * produces no row at all.
+ *
+ * `import`/`require` is Node's own documented split and held across all 20 consumer profiles
+ * measured for this work. `development`/`production` is documented as mutually exclusive.
+ * Nothing else may be assumed: an unrecognised name is a free variable, which is what makes
+ * `{"X": "./a.js", "default": "./a.js"}` provably removable whatever X means, while
+ * `{"X": "./src/index.ts", "default": "./dist/index.js"}` is untouchable.
+ */
+const EXCLUSIVE: readonly (readonly [string, string])[] = [
+  ["import", "require"],
+  ["development", "production"],
+];
+
+/**
+ * The canonical order, most specific first. Each tier's index is its rank; `forced` marks the
+ * tiers where a measurement — not a preference — requires the position, which is what lets this
+ * tool report a bad order it cannot safely repair without inventing a rule nobody can check.
+ *
+ * The reasons, each measured for this work and recorded in `docs/exports.md`:
+ * - every type checker also activates `node`/`import`/`require`/`default`, so anything ahead of
+ *   `types` hands the checker a JavaScript file to read as declarations;
+ * - RSC builds also activate `node`/`browser`/`import`;
+ * - **Bun and Deno both activate `node`**, so a `bun` or `deno` key placed after `node` is dead;
+ * - `module` is active EVEN UNDER `require` in bundlers, so `require` first costs tree-shaking;
+ * - anything after `default` is unreachable.
+ *
+ * `browser`/`node` and `import`/`require` share a tier because their order relative to each other
+ * is free — they never co-occurred in any measured profile. A tool must not report a "wrong"
+ * order where no constraint binds.
+ */
+const TIERS: readonly { readonly forced: boolean; readonly names: readonly string[] }[] = [
+  { forced: true, names: ["types"] },
+  { forced: true, names: ["react-server"] },
+  {
+    forced: true,
+    names: [
+      "andromeda",
+      "arvancloud",
+      "azion",
+      "bun",
+      "convex",
+      "deno",
+      "edge-light",
+      "edge-routine",
+      "electron",
+      "fastly",
+      "kiesel",
+      "lagon",
+      "moddable",
+      "netlify",
+      "pythonmonkey",
+      "quickjs",
+      "quickjs-ng",
+      "react-native",
+      "rhino",
+      "wasmer",
+      "workerd",
+    ],
+  },
+  { forced: false, names: ["node-addons"] },
+  { forced: false, names: ["browser", "node"] },
+  { forced: false, names: ["development", "production"] },
+  { forced: false, names: ["module-sync"] },
+  { forced: true, names: ["module"] },
+  { forced: false, names: ["import", "require"] },
+  { forced: true, names: ["default"] },
+];
+
+const RANK = new Map(
+  TIERS.flatMap((tier, index) => tier.names.map((name) => [name, index] as const)),
+);
+
+/** Conditions this tool recognises. Anything else is legitimate and must not be touched. */
+const KNOWN = new Set([...RANK.keys(), "style", "source", "worker", "asset", "sass", "svelte"]);
+
+/**
+ * TypeScript selects a versioned `types@<selector>` key, so the name is known even though the
+ * selector is not parseable without a semver implementation this dependency-free CLI does not
+ * have. Such keys rank with `types` and are never reordered against each other.
+ */
+function conditionRank(name: string): number | undefined {
+  return RANK.get(name.startsWith("types@") ? "types" : name);
+}
+
+function isKnown(name: string): boolean {
+  return KNOWN.has(name) || name.startsWith("types@");
+}
+
+/** A map too large to reason about. Nothing is healed inside it, and the run is told why. */
+const ROW_BUDGET = 4096;
+class TooComplex extends Error {}
+
+function bind(base: Literals, name: string, value: boolean): Literals | null {
+  const existing = base.get(name);
+  if (existing !== undefined) return existing === value ? base : null;
+  const next = new Map(base);
+  next.set(name, value);
+  if (!value) return next;
+  for (const [left, right] of EXCLUSIVE) {
+    const other = left === name ? right : right === name ? left : null;
+    if (other === null) continue;
+    if (next.get(other) === true) return null;
+    next.set(other, false);
+  }
+  return next;
+}
+
+/**
+ * A fallback array becomes one opaque target keyed by its own text, so it compares equal only to
+ * an identical array. That is what makes this tool's refusal to rewrite arrays automatic rather
+ * than a rule somebody has to remember: the runtimes disagree about them — Bun fails on
+ * `[null, "./b.js"]` and `["not-relative", "./b.js"]` where Node and Deno resolve — so a proof
+ * written against Node's array semantics would be quietly wrong for exactly the packages that
+ * need the most care.
+ */
+function flatten(node: unknown, under: Literals, out: Row[]): void {
+  if (out.length > ROW_BUDGET) throw new TooComplex();
+  if (node === null) {
+    out.push({ literals: under, target: { kind: "blocked" } });
+    return;
+  }
+  if (typeof node === "string") {
+    out.push({ literals: under, target: { kind: "file", file: node } });
+    return;
+  }
+  if (Array.isArray(node)) {
+    out.push({ literals: under, target: { kind: "opaque", key: JSON.stringify(node) } });
+    return;
+  }
+  if (!isObject(node)) {
+    // A number or boolean here is an invalid target. `assertDeclaredFiles` refuses it with the
+    // message that names the offending value; this walker only has to not claim it resolves.
+    out.push({ literals: under, target: { kind: "miss" } });
+    return;
+  }
+
+  // `pending` holds the conjunctions that have fallen through every key so far. A branch whose
+  // own resolution MISSES rejoins them, which is how Node's nested fall-through works: an object
+  // that resolves nothing lets the next sibling key be tried.
+  let pending: Literals[] = [under];
+  for (const [key, value] of Object.entries(node)) {
+    const next: Literals[] = [];
+    for (const context of pending) {
+      const taken = key === "default" ? context : bind(context, key, true);
+      if (taken) {
+        const sub: Row[] = [];
+        flatten(value, taken, sub);
+        for (const row of sub) {
+          if (row.target.kind === "miss") next.push(row.literals);
+          else out.push(row);
+        }
+      }
+      if (key !== "default") {
+        const skipped = bind(context, key, false);
+        if (skipped) next.push(skipped);
+      }
+    }
+    pending = next;
+  }
+  for (const context of pending) out.push({ literals: context, target: { kind: "miss" } });
+}
+
+function rowsOf(node: unknown): Row[] | null {
+  const out: Row[] = [];
+  try {
+    flatten(node, new Map(), out);
+  } catch (error) {
+    if (error instanceof TooComplex) return null;
+    throw error;
+  }
+  return out;
+}
+
+function satisfiable(left: Literals, right: Literals): boolean {
+  for (const [name, value] of left) {
+    const other = right.get(name);
+    if (other !== undefined && other !== value) return false;
+  }
+  return true;
+}
+
+function sameTarget(left: Target, right: Target): boolean {
+  if (left.kind !== right.kind) return false;
+  if (left.kind === "file" && right.kind === "file") return left.file === right.file;
+  if (left.kind === "opaque" && right.kind === "opaque") return left.key === right.key;
+  return true;
+}
+
+/**
+ * True when two condition maps resolve identically for every possible set of active conditions.
+ *
+ * This is proved standalone, with every name free, which is STRICTLY STRONGER than what the
+ * surrounding map needs: a nested object is always evaluated under conditions its parent has
+ * already bound. Proving the stronger claim can only refuse a rewrite that would have been safe,
+ * never allow one that is not — and refusing a safe rewrite costs nothing, because preserving
+ * semantics beats saving bytes.
+ *
+ * An unprovable map (`null` rows, over budget) answers `false`, so the caller leaves it alone.
+ */
+export function equivalent(before: unknown, after: unknown): boolean {
+  const rowsBefore = rowsOf(before);
+  const rowsAfter = rowsOf(after);
+  if (!rowsBefore || !rowsAfter) return false;
+  for (const left of rowsBefore)
+    for (const right of rowsAfter)
+      if (satisfiable(left.literals, right.literals) && !sameTarget(left.target, right.target))
+        return false;
+  return true;
+}
+
+/**
+ * Every measured consumer activates exactly one of `import` and `require`, so a row that denies
+ * both describes nobody. Without this filter the commonest shape in the ecosystem —
+ * `{"import": …, "require": …}` — would be reported as unreachable for a consumer that does not
+ * exist, and a check that fires on a correct package is worse than no check.
+ */
+function reachableByAnyConsumer(literals: Literals): boolean {
+  return !(literals.get("import") === false && literals.get("require") === false);
+}
+
+/**
+ * True when two keys sit in an order a MEASUREMENT forbids — not merely one this tool would have
+ * written differently.
+ *
+ * Only forced tiers count, because a rank inversion on its own is no defect: `{import: X,
+ * node: Y}` inverts the canonical rank and is a perfectly good map, since which of the two is
+ * "more specific" is the author's call and no consumer is harmed either way. Reporting those
+ * would be noise, and a check that fires on correct packages trains everyone to ignore the one
+ * that matters.
+ *
+ * `default` is excluded: everything after it is unreachable, which `reportReachability` already
+ * says, naming the dead target rather than the ordering.
+ */
+function forcedOrderViolation(keys: readonly string[]): boolean {
+  for (let i = 0; i < keys.length; i++)
+    for (let j = i + 1; j < keys.length; j++) {
+      const earlier = conditionRank(keys[i] ?? "");
+      const later = conditionRank(keys[j] ?? "");
+      if (earlier === undefined || later === undefined || earlier <= later) continue;
+      if (keys[i] === "default" || keys[j] === "default") continue;
+      if ((TIERS[earlier]?.forced ?? false) || (TIERS[later]?.forced ?? false)) return true;
+    }
+  return false;
+}
+
+/**
+ * Reorders the recognised keys into canonical order while leaving every unrecognised key in the
+ * slot it already occupies.
+ *
+ * Pinning the unknowns is not caution about the proof — the proof handles them correctly on its
+ * own, since a free variable makes almost every move across one non-equivalent. It is about the
+ * DIFF: moving a key this tool cannot explain produces a change the author cannot review, and
+ * the whole value of an automatic rewrite is that the author can read it and agree.
+ */
+function canonicalOrder(keys: readonly string[]): string[] {
+  const sorted = keys
+    .filter((key) => conditionRank(key) !== undefined)
+    .map((key, index) => ({ key, index }))
+    .sort((a, b) => (conditionRank(a.key) ?? 0) - (conditionRank(b.key) ?? 0) || a.index - b.index)
+    .map((entry) => entry.key);
+  let next = 0;
+  return keys.map((key) => (conditionRank(key) === undefined ? key : (sorted[next++] ?? key)));
+}
+
+/**
+ * Copies a condition object key by key.
+ *
+ * NEVER `Object.assign`: a condition may legally be named `__proto__`, `JSON.parse` keeps it as
+ * an ordinary own property, and assignment hands it to `Object.prototype`'s setter instead —
+ * which publishes a manifest silently missing a branch while the copy answers to every key that
+ * branch contained. Measured on Node 24.20.0; spread and explicit definition both round-trip.
+ */
+function reorder(node: JsonObject, keys: readonly string[]): JsonObject {
+  const copy: JsonObject = {};
+  for (const key of keys) Object.defineProperty(copy, key, { ...OWN, value: node[key] });
+  return copy;
+}
+
+const OWN = { configurable: true, enumerable: true, writable: true } as const;
+
+function without(node: JsonObject, omit: string): JsonObject {
+  return reorder(
+    node,
+    Object.keys(node).filter((key) => key !== omit),
+  );
+}
+
+/**
+ * Repairs one target node, bottom up, and reports what it could not repair.
+ *
+ * Every transformation is verified with `equivalent` against the value it replaces, so the
+ * contract of this whole module is unconditional: **a healed map resolves exactly as the
+ * original did, for every consumer that could ever exist.** Nothing here is a semantic fix.
+ * That is what makes the verification at the end of `healMap` a real check rather than a
+ * restatement — there is no intended difference for it to have to excuse.
+ */
+function healNode(node: unknown, where: string, findings: Finding[]): unknown {
+  if (Array.isArray(node)) {
+    findings.push({
+      rule: "exports-fallback-array",
+      consequence: "waste",
+      healed: false,
+      where,
+      message:
+        `A fallback array resolves differently across runtimes: Bun fails on ` +
+        `[null, …] and on ["not-relative", …] where Node and Deno resolve the next entry. ` +
+        `Nothing inside this value is rewritten, and no sibling key of it is either. ` +
+        `Replace the array with the single target you mean, if you can.`,
+    });
+    return node;
+  }
+  if (!isObject(node)) return node;
+
+  // Bottom up: a child that collapses to a string can make its parent collapsible in turn.
+  let current: JsonObject = reorder(node, Object.keys(node));
+  for (const key of Object.keys(current))
+    current[key] = healNode(current[key], `${where}[${JSON.stringify(key)}]`, findings);
+
+  const keys = Object.keys(current);
+  if (keys.length === 0) return current;
+
+  // A map holding a fallback array anywhere below is frozen whole: the proof that authorises
+  // every rewrite here is relative to a resolver, and the resolvers disagree about arrays.
+  if (keys.some((key) => containsArray(current[key]))) return current;
+
+  for (const key of keys) {
+    if (!isKnown(key))
+      findings.push({
+        rule: "exports-unknown-condition",
+        consequence: "waste",
+        healed: false,
+        where: `${where}[${JSON.stringify(key)}]`,
+        message:
+          `No consumer measured for this tool activates ${JSON.stringify(key)} by default, so ` +
+          `only a project that configures it deliberately takes this branch. That is legitimate ` +
+          `— private conditions appear in 2.5% of published packages — and nothing here is ` +
+          `reordered across it or removed. Reported so a typo cannot hide as a private name.`,
+      });
+  }
+
+  // Provably inert keys. A key is inert when deleting it changes nothing for ANY consumer,
+  // which is exactly a `node` branch that repeats what `default` already gives.
+  for (const key of keys) {
+    if (Object.keys(current).length < 2) break;
+    const candidate = without(current, key);
+    if (!equivalent(current, candidate)) continue;
+    findings.push({
+      rule: "exports-inert-condition",
+      consequence: "waste",
+      healed: true,
+      where: `${where}[${JSON.stringify(key)}]`,
+      message:
+        `This condition resolves to the same target every consumer would reach without it, so ` +
+        `it changes nothing and tells nobody anything. Removed from the published manifest. ` +
+        `Delete it from your package.json to stop this report.`,
+    });
+    current = candidate;
+  }
+
+  // Canonical order, applied only when the permutation is provably neutral.
+  const ordered = canonicalOrder(Object.keys(current));
+  if (ordered.join("\0") !== Object.keys(current).join("\0")) {
+    const permuted = reorder(current, ordered);
+    if (equivalent(current, permuted)) {
+      findings.push({
+        rule: "exports-condition-order",
+        consequence: "waste",
+        healed: true,
+        where,
+        message:
+          `Reordered to ${ordered.map((key) => JSON.stringify(key)).join(", ")}, which resolves ` +
+          `identically for every possible consumer — proven, not assumed. Most specific first: ` +
+          `types, then framework and runtime names, then environment, then module system, then ` +
+          `default. Apply the same order in your package.json to stop this report.`,
+      });
+      current = permuted;
+    } else if (forcedOrderViolation(Object.keys(current))) {
+      findings.push({
+        rule: "exports-condition-order-unsafe",
+        consequence: "breaks",
+        healed: false,
+        where,
+        message:
+          `These keys are out of canonical order and reordering them would change what some ` +
+          `consumer resolves, so this tool will not do it: ` +
+          `${Object.keys(current)
+            .map((key) => JSON.stringify(key))
+            .join(", ")}. ` +
+          `The order that holds for every measured consumer is ` +
+          `${ordered.map((key) => JSON.stringify(key)).join(", ")}. ` +
+          `Because a checker also activates node/import/require, and a bundler activates ` +
+          `module even under require, and Bun and Deno both activate node, the current order ` +
+          `hands at least one of them a file meant for another. Fix it by hand: the branches ` +
+          `differ, so only you know which target each consumer should get.`,
+      });
+    }
+  }
+
+  // `{"default": X}` is X, written longer.
+  const remaining = Object.keys(current);
+  if (remaining.length === 1 && remaining[0] === "default") {
+    const inner = current.default;
+    if (equivalent(current, inner)) {
+      findings.push({
+        rule: "exports-redundant-default",
+        consequence: "waste",
+        healed: true,
+        where,
+        message:
+          `An object whose only key is "default" resolves exactly as the target it wraps. ` +
+          `Replaced with that target in the published manifest; do the same in your package.json.`,
+      });
+      return inner;
+    }
+  }
+
+  return current;
+}
+
+function containsArray(node: unknown): boolean {
+  if (Array.isArray(node)) return true;
+  if (!isObject(node)) return false;
+  return Object.values(node).some(containsArray);
+}
+
+/**
+ * Reports the branches no consumer can take and the consumers no branch serves.
+ *
+ * The two are duals and both fall out of the same rows, which is why they are computed together:
+ * a declared target that appears in no row is code nobody runs, and a satisfiable row that
+ * resolves nothing is a consumer that gets `ERR_PACKAGE_PATH_NOT_EXPORTED`. Reading one as the
+ * other is the natural mistake, so neither is stated without the other beside it.
+ */
+function reportReachability(node: unknown, where: string, findings: Finding[]): void {
+  const rows = rowsOf(node);
+  if (!rows) {
+    findings.push({
+      rule: "exports-too-complex",
+      consequence: "waste",
+      healed: false,
+      where,
+      message:
+        `This map has more distinct resolution outcomes than this tool will enumerate ` +
+        `(${ROW_BUDGET}), so nothing inside it was verified, reordered or removed. It is ` +
+        `published exactly as written.`,
+    });
+    return;
+  }
+
+  const reached = new Set(
+    rows.flatMap((row) => (row.target.kind === "file" ? [row.target.file] : [])),
+  );
+  const declared: string[] = [];
+  collectStrings(node, declared);
+  for (const target of declared)
+    if (!reached.has(target))
+      findings.push({
+        rule: "exports-unreachable-branch",
+        consequence: "waste",
+        healed: false,
+        where,
+        message:
+          `No consumer can ever resolve ${JSON.stringify(target)}: it sits after a key that ` +
+          `always matches, or behind a combination of conditions that cannot occur together. ` +
+          `It is dead code in the manifest — delete the branch, or move it ahead of the key ` +
+          `that shadows it.`,
+      });
+
+  if (rows.some((row) => row.target.kind === "miss" && reachableByAnyConsumer(row.literals)))
+    findings.push({
+      rule: "exports-unresolvable",
+      consequence: "breaks",
+      healed: false,
+      where,
+      message:
+        `Some consumer resolves nothing here and fails with ERR_PACKAGE_PATH_NOT_EXPORTED. ` +
+        `Edge runtimes (workerd, edge-light, netlify, fastly) activate neither "node" nor ` +
+        `"browser", and a bundler targeting neither activates neither, so a map built only from ` +
+        `environment names leaves them with no branch at all. Add a "default" key as the last ` +
+        `entry, pointing at the build that works anywhere.`,
+    });
+}
+
+function collectStrings(node: unknown, out: string[]): void {
+  if (typeof node === "string") out.push(node);
+  else if (Array.isArray(node)) for (const item of node) collectStrings(item, out);
+  else if (isObject(node)) for (const value of Object.values(node)) collectStrings(value, out);
+}
+
+/**
+ * Verifies and repairs the `exports` and `imports` of a manifest that is about to be published.
+ *
+ * Returns a new manifest; the input is never modified. Each repaired node is asserted equivalent
+ * to the one it replaces before it is handed back, so a defect in any transformation above fails
+ * here — loudly, naming itself as this tool's bug — rather than in a stranger's build.
+ *
+ * `heal: false` keeps every finding and withholds only the rewrite, which is why the findings
+ * are corrected to stop claiming a repair the published artifact does not carry.
+ */
+export function healExports(pkg: JsonObject, findings: Finding[], heal: boolean): JsonObject {
+  const analyse = (node: unknown, where: string): unknown => {
+    reportReachability(node, where, findings);
+    const first = findings.length;
+    const healed = healNode(node, where, findings);
+    if (!equivalent(node, healed))
+      throw new Error(
+        `publish-clean defect: repairing ${where} changed what a consumer resolves. This is a ` +
+          `bug in publish-clean, not in your package; publish with --no-heal meanwhile.`,
+      );
+    if (heal) return healed;
+    for (let index = first; index < findings.length; index++) {
+      const finding = findings[index];
+      if (finding?.healed) findings[index] = { ...finding, healed: false };
+    }
+    return node;
+  };
+
+  let result = pkg;
+  for (const field of ["exports", "imports"]) {
+    const value = pkg[field];
+    if (value === undefined || value === null) continue;
+    // `exports` is a subpath map when any key starts with `.`, and a single condition object
+    // otherwise; mixing the two is a package-configuration error `assertDeclaredFiles` refuses.
+    // `imports` is always a subpath map.
+    const subpaths =
+      isObject(value) &&
+      (field === "imports" || Object.keys(value).some((key) => key.startsWith(".")));
+    if (!subpaths) {
+      const healed = analyse(value, field);
+      if (healed !== value) result = { ...result, [field]: healed };
+      continue;
+    }
+    const rebuilt: JsonObject = {};
+    let changed = false;
+    for (const [key, node] of Object.entries(value)) {
+      const healed = analyse(node, `${field}[${JSON.stringify(key)}]`);
+      changed ||= healed !== node;
+      Object.defineProperty(rebuilt, key, { ...OWN, value: healed });
+    }
+    if (changed) result = { ...result, [field]: rebuilt };
+  }
+  return result;
+}
