@@ -1,0 +1,26 @@
+#!/bin/sh
+set -eu
+
+# Git runs hooks from the top of the worktree, so the relative paths below resolve in a linked
+# worktree too.
+if ! command -v bun > /dev/null 2>&1; then
+  echo "publish-clean commit hook: 'bun' is not on PATH, so the tree cannot be checked." >&2
+  echo "A GUI Git client often has a shorter PATH than your shell; start it from a shell, or add bun to its PATH." >&2
+  exit 1
+fi
+
+# The whole gate rather than a fast subset, because this repo's one irreversible step is a publish
+# and the check that guards it is the same one CI runs: a commit that passes here cannot be one CI
+# then refuses. Measured at 5.6s, which is above the 1s a hook should aim for and is the cost of
+# that property.
+#
+# It reads the WORKING TREE, not the staged snapshot, which is deliberate on two counts. The
+# worktree is where the real config, node_modules and dist are, so it is what the checks can
+# actually resolve against; and isolating the index means `git stash`, which has already corrupted
+# a worktree in a sibling repo of Art's — there is no safe size for a window in which the only copy
+# of someone's work lives in a tool's private state.
+#
+# What that gives up is a commit whose STAGED bytes are broken while the worktree copy is fixed.
+# What it costs far more often is the opposite: an unrelated broken file blocks an unrelated
+# commit. Fix it or stash it deliberately; never reach for --no-verify.
+exec bun run check

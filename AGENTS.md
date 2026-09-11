@@ -159,4 +159,11 @@
   2026-08-11, `git-cliff --bumped-version` answers `v1.0.0` for a `feat!` commit on 0.4.0.
 - Tags must be annotated. A lightweight `git tag v0.5.0` fails outright under `tag.gpgSign = true`
   ("fatal: no tag message?"); `bun run release` annotates, which is the reason to use it over `git tag`.
-- Run `bun run check` before committing.
+- Run `bun run check` before committing. `.githooks/pre-commit` runs it again on every commit and
+  `prepare` wires `core.hooksPath`, so a fresh clone gates itself; NEVER `--no-verify`, fix the
+  finding. The hook validates the WORKING TREE and must never stash to isolate the staged bytes —
+  that trades a rare false green for a window in which the only copy of someone's work lives in a
+  tool's private state. `hooks:check` asserts the wiring inside the lane because a gate cannot
+  detect that it is the wrong gate, and it asserts the executable bit twice: on disk, which decides
+  whether Git runs the hook here, and in the index, where a `100644` mode leaves the author gated
+  and every clone silently ungated.
