@@ -23,6 +23,12 @@ notes: the section for a version is published verbatim when its tag is pushed.
   module, a branch no consumer can reach, a consumer no branch serves, a condition no measured
   consumer activates, a fallback array, and a `bin` shebang ending in CR.
 - **`--strict` treats warnings as errors.** It never makes an already-applied repair fatal.
+- **Publication stops when the package imports itself through a subpath its own `exports` does not
+  expose.** Self-reference resolves through `exports` like anyone else's import, so shipping the
+  file is not enough — and it cannot be seen from the source tree, where the same import resolves
+  by path. A consumer's type checker reports `TS2307` inside a file they cannot edit, or, under the
+  common `skipLibCheck: true`, silently types it `any`. The fix is to export the subpath or make
+  the import relative; the message prints both.
 
 ### Changed
 

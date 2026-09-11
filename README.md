@@ -235,6 +235,8 @@ Publication stops when:
 - a `types` condition resolves to something that is not a declaration file, so a type checker
   reads JavaScript as your package's types
 - a `require` condition resolves to an ES module
+- the package imports itself by name through a subpath its `exports` does not expose, which
+  resolves for nobody — and looks fine in your own repository, where it resolves by path
 - the tarball holds a file nothing in the package reaches — no entry point, no import from a
   reached file, no script. Declare the ones that are deliberate:
   `"publish-clean": { "allowUnreferenced": ["assets"] }`, which matches whole subtrees. This

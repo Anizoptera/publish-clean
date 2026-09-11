@@ -89,7 +89,30 @@ Measured 2026-09-11 on macOS with Node 24.20.0, each case beside a control:
   `readdir` returned only the NFC form, so a byte comparison catches it and nothing else does.
 - **A package importing itself through an unexported subpath.** `selfref/sub.js` threw
   `ERR_PACKAGE_PATH_NOT_EXPORTED` even though the file ships and a relative import of it worked.
-  Self-reference goes through `exports`, so shipping the file is not enough.
+  Self-reference goes through `exports`, so shipping the file is not enough, and the author cannot
+  see it from the source tree, where the same import resolves by path.
+
+  Measured across 662 published packages carrying `exports`: two have one, and both are real —
+  `@eslint-community/regexpp` ships an `index.d.ts` importing `<name>/ast` while exporting only
+  `.`, and `highlight.js` reaches `highlight.js/private` from its declarations and its JSDoc types.
+  Every hit was in the TYPE layer, none at run time. That matters for severity, and was measured on
+  TypeScript 7.0.2 beside an exported control subpath: `skipLibCheck: false` gives the consumer
+  `TS2307` in a file they cannot edit, and `skipLibCheck: true` — the common default — silently
+  degrades the type to an error-suppressed `any`.
+
+  Finding one without a parser needs two opposite rules, and both came from the corpus rather than
+  from reasoning. Comments are READ, not stripped: `{import("pkg/sub").T}` in a JSDoc block is a
+  type a checker resolves, and stripping comments loses `highlight.js` entirely. Prose inside those
+  same comments is skipped: a documentation example of an import was the whole false-positive
+  population, `rolldown` and `nanoid` each advertising a subpath they had removed. A specifier
+  inside a template literal is skipped as text the file generates for somebody else's project
+  (`@opentui/core` writes an import statement into a string). Suppression is the safe direction
+  here, because unlike the dead-file scan this finding stops a publish.
+
+  The same defect exists for `#` specifiers a package's own `imports` never declares, and it is NOT
+  checked: 12 of those 662 packages use a `#` specifier at all, and the only undeclared one found
+  was a code generator emitting an import for its user's project. A rule whose entire measured
+  population is a false positive does not get built.
 - **A `bin` shebang ending in CR.** `env: node\r: No such file or directory`; the LF control ran.
 - **`require()` of an ESM file is no longer fatal by itself.** On Node 24.20.0 it resolved; it
   threw `ERR_REQUIRE_ASYNC_MODULE` only when the module used top-level await. Unflagged support is

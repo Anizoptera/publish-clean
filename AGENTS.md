@@ -73,6 +73,12 @@
   never make a healed finding fatal. The one waste finding that still aborts — a shipped file nothing
   reaches and nobody declared — says so through `rulesAbort` on the finding itself, never through its
   rule name, so the divergence stays visible as data instead of becoming a branch somebody tidies away.
+- The self-import scan READS comments and skips prose inside them, and both halves are load-bearing:
+  `{import("pkg/sub").T}` in a JSDoc block is a type a checker resolves, so stripping comments loses
+  real defects, while a documentation example of an import was the entire measured false-positive
+  population. A specifier inside a template literal is generated text, not this file's import.
+  Suppression is the safe direction ONLY here, where the finding stops a publish — the opposite of
+  the dead-file scan in the same file, where over-matching merely hides a report. Do not unify them.
 - Verification is the same pipeline minus the publish, and `verify` skips exactly ONE guard:
   `assertPublicPackage`. A package checked before it goes public must be checked by the rules it will
   actually face, so never let a second exemption in. Every check reports through `src/finding.ts`
