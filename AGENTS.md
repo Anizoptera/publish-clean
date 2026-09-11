@@ -56,7 +56,18 @@
   and no reorder is cosmetic. The proof is cheap because resolution reads only an object's own keys:
   enumerate the subsets of the names present and require every one to agree. The measured condition
   sets, the runtimes that disagree with each other, and why Node's published array algorithm does not
-  match real Node belong in `docs/exports.md`; update it and this bullet together.
+  match real Node belong in `docs/exports.md`; update it and this bullet together. That proof is
+  relative to a resolver and the resolvers disagree on fallback arrays — Bun fails where Node and
+  Deno succeed — so never modify an object containing one.
+- Copy a condition map by spread or an explicit null-prototype loop, NEVER `Object.assign`. A
+  condition may legally be named `__proto__`; `JSON.parse` keeps it as an ordinary own property and
+  `Object.assign` silently drops it, which publishes a manifest missing a branch with nothing raised
+  anywhere. Any fixture covering this needs that key in it.
+- Stopping the run is decided by irreversibility, not by how bad a message sounds. A published
+  version number is burned forever, so abort on an UNHEALED finding that leaks something or breaks a
+  consumer, and never on one that only wastes bytes. A healed finding never aborts — that is a rule
+  about a different case, not an exception to this one. `--strict` raises warnings to errors and must
+  never make a healed finding fatal.
 - Do not add package-manager-specific behavior unless tests prove the published tarball invariant.
 - Split CLI args at `--` before parsing; accept only the publication options in `src/options.ts`
   afterward. Reject extra operands, workspace selectors and flag-shaped values: npm reparses

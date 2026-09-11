@@ -38,6 +38,68 @@ whatever `x` means, and `{"x": "./src/index.ts", "default": "./dist/index.js"}` 
 Run the proof with the same resolver the rewrite uses. A separately written check and the
 rewrite it authorises are two pieces of code that agree today.
 
+## What stops a publish, and why that is not a severity question
+
+Publishing burns a version number forever. Blocking a good publish costs the author a re-run;
+shipping a broken package costs a release nobody can take back. So the stop decision follows that
+asymmetry, not how loud a message is:
+
+> Stop iff a finding is unhealed **and** a consumer would be harmed or broken by it.
+
+Three consequence classes, because they need opposite responses:
+
+| class | examples | stop if unhealed | rewrite it |
+| --- | --- | --- | --- |
+| harm | secret, `node_modules`, Git internals, entry outside `package/` | always | **never** — stripping a leaked token hides that it leaked, and the author still has to rotate it |
+| breaks | target missing from the tarball, wrong-case target, unexported self-import | yes | only with proof |
+| waste | dead files, redundant condition, unknown condition | never | when provable |
+
+A healed finding never stops the run. That is not in tension with the rule above: it governs
+unhealed findings, and the two cover different cases.
+
+## Defects only the final tarball can show
+
+These are the reason this tool exists. A linter reading a source directory cannot see any of them,
+because each is a property of the archive or of how a consumer's machine differs from the author's.
+Measured 2026-09-11 on macOS with Node 24.20.0, each case beside a control:
+
+- **A target that differs from its tarball entry only by case.** `./dist/Index.js` resolved
+  against `dist/index.js` on macOS; a genuinely absent file threw `ERR_MODULE_NOT_FOUND`. The
+  author's filesystem hides it and a case-sensitive one does not, so compare byte-exact against the
+  tar entry.
+- **The same for Unicode normalisation.** A target written NFD resolved against a file stored NFC.
+  `readdir` returned only the NFC form, so a byte comparison catches it and nothing else does.
+- **A package importing itself through an unexported subpath.** `selfref/sub.js` threw
+  `ERR_PACKAGE_PATH_NOT_EXPORTED` even though the file ships and a relative import of it worked.
+  Self-reference goes through `exports`, so shipping the file is not enough.
+- **A `bin` shebang ending in CR.** `env: node\r: No such file or directory`; the LF control ran.
+- **`require()` of an ESM file is no longer fatal by itself.** On Node 24.20.0 it resolved; it
+  threw `ERR_REQUIRE_ASYNC_MODULE` only when the module used top-level await. Unflagged support is
+  `^20.19.0 || >=22.12.0`, and a consumer can still opt out with
+  `--no-experimental-require-module`. So the finding is: top-level await is always broken under
+  `require`, and without it the breakage depends on the `engines.node` range the package claims.
+  The usual fix is to add a `module-sync` branch, which exists precisely so `require` and `import`
+  can load one ES module.
+
+## A check that was measured and dropped
+
+An unexecutable `bin` file in the tarball looked like an obvious defect. It is not: installed with
+bun, a `0644` member came out `0755` and ran. Installers have to restore the bit because
+Windows-authored tarballs routinely lack it. Measured on bun only — if pnpm, npm or yarn turn out
+not to, this check comes back.
+
+Recorded because the next person will have the same idea, and re-deriving the answer costs an
+afternoon.
+
+## Copying a condition map
+
+Never copy one with `Object.assign`. A condition may legally be named `__proto__`, and `JSON.parse`
+keeps it as an ordinary own property — but `Object.assign` silently drops it, so the rewritten
+manifest would ship missing a branch with nothing raised anywhere. Measured: spread and an explicit
+null-prototype loop both preserve it, and neither pollutes `Object.prototype`.
+
+The hazard is loss, not pollution. Any fixture for this needs a `__proto__` key in it.
+
 ## Condition sets, measured
 
 | consumer | activates |
