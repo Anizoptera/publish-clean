@@ -222,6 +222,21 @@ describe.concurrent("names that do not survive extraction", () => {
     expect(rules(["lib/a.js", "Lib/b.js"])).toEqual([]);
   });
 
+  it("reports a file and a directory that fold onto the same path", () => {
+    // Neither name is a duplicate of the other, so the fold-by-path check alone reports nothing —
+    // yet the installer writes the file and then cannot mkdir over it, failing the install. Only
+    // a case-sensitive filesystem can author the pair, so its author never sees it.
+    expect(rules(["lib", "Lib/x.js"])).toContain("packed-name-collision");
+    expect(message(["lib", "Lib/x.js"])).toContain("Lib/");
+    // The same shape with no case difference at all: a crafted archive can carry both, and the
+    // tarball reader's duplicate-NAME check does not see it either.
+    expect(rules(["lib", "lib/x.js"])).toContain("packed-name-collision");
+    // Deeper than the first component, and the control beside it: a directory that is only ever a
+    // directory must stay silent however many files sit under it.
+    expect(rules(["a/b", "a/B/c.js"])).toContain("packed-name-collision");
+    expect(rules(["a/b/c.js", "a/b/d.js", "a/b.txt"])).toEqual([]);
+  });
+
   it("reports a name a consumer's filesystem cannot create", () => {
     expect(rules(["aux.js"])).toContain("packed-name-unportable");
     // In ANY component, not just the basename — Windows reserves the device names throughout a

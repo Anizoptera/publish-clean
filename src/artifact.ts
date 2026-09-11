@@ -74,7 +74,13 @@ const RESERVED_DEVICE = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
 const WINDOWS_ILLEGAL = /[<>:"|?*\\\u0000-\u001f]/;
 /** Win32 strips a trailing dot or space silently, landing the file under a name nothing imports. */
 const WINDOWS_TRAILING = /[. ]$/;
-/** ext4, APFS and NTFS all stop at 255 per component; UTF-8 bytes is the strictest reading. */
+/**
+ * ext4, APFS and NTFS all stop at 255 per component, but they COUNT differently: NTFS counts
+ * UTF-16 units and the others count bytes. That gap is what makes this reachable rather than
+ * theoretical — a name of non-ASCII characters can sit well inside Windows' limit and exceed the
+ * byte limit everywhere else, so a Windows author can create and pack a file that no Linux or
+ * macOS consumer can unpack. Bytes is the strict reading, and the only one safe for all three.
+ */
 const MAX_COMPONENT_BYTES = 255;
 
 interface Unportable {
@@ -148,14 +154,29 @@ function targetsWindows(os: unknown): boolean {
 export function reviewPackedNames(pkg: JsonObject, files: readonly string[]): Finding[] {
   const findings: Finding[] = [];
 
+  // Files grouped by folded name, and beside them every DIRECTORY the archive implies. A path
+  // carried as a file by one entry and as a directory by another survives only while the two
+  // spellings stay distinct: fold them together and the installer writes one, then cannot create
+  // the other, so the install fails outright rather than quietly losing a file. Only a
+  // case-sensitive filesystem can author that pair, which is why its author never sees it. Two
+  // DIRECTORIES differing in case are not a defect — both spellings lead to one directory and
+  // every file inside it still arrives.
   const byFold = new Map<string, string[]>();
+  const directories = new Map<string, string>();
   for (const file of files) {
     const key = foldName(file);
     const group = byFold.get(key);
     if (group) group.push(file);
     else byFold.set(key, [file]);
+    for (let cut = file.indexOf("/"); cut !== -1; cut = file.indexOf("/", cut + 1))
+      directories.set(foldName(file.slice(0, cut)), file.slice(0, cut));
   }
-  const collisions = [...byFold.values()].filter((group) => group.length > 1);
+
+  const collisions = [...byFold.entries()].flatMap(([folded, group]) => {
+    const directory = directories.get(folded);
+    const clashing = directory === undefined ? group : [...group, `${directory}/`];
+    return clashing.length > 1 ? [clashing] : [];
+  });
   if (collisions.length > 0)
     findings.push({
       rule: "packed-name-collision",
@@ -163,9 +184,10 @@ export function reviewPackedNames(pkg: JsonObject, files: readonly string[]): Fi
       healed: false,
       where: `${collisions.length} colliding names`,
       message:
-        `These files become ONE file wherever the filesystem ignores letter case or Unicode ` +
-        `form, which is macOS and Windows by default. One silently replaces the other, the ` +
-        `install reports success, and the package is missing a file:\n` +
+        `These entries collapse onto one path wherever the filesystem ignores letter case or ` +
+        `Unicode form, which is macOS and Windows by default. Two files means one silently ` +
+        `replaces the other and the install still reports success; a file against a directory ` +
+        `means the install fails outright:\n` +
         collisions
           .map((group) => {
             // NFC collapses form, so an equal NFC form leaves case as the only difference and an
