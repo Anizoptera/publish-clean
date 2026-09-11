@@ -19,7 +19,7 @@ import path from "node:path";
 import { expect, it } from "vitest";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { rowsOf } from "../src/conditions";
+import { ROW_BUDGET, rowsOf } from "../src/conditions";
 
 const run = promisify(execFile);
 
@@ -165,4 +165,60 @@ it("resolves every shape the way Node does, under every measured condition set",
   } finally {
     await rm(root, { force: true, recursive: true });
   }
+});
+
+/**
+ * Builds a map whose outcomes double at every level while its object graph stays linear in depth,
+ * by letting both branches of each new independent condition recurse into the level below.
+ */
+function doubling(depth: number): unknown {
+  let left: unknown = "./a.js";
+  let right: unknown = "./b.js";
+  for (let level = 0; level < depth; level++) {
+    const [a, b] = [left, right];
+    left = { [`vendor-${level}`]: a, default: b };
+    right = { [`vendor-${level}`]: b, default: a };
+  }
+  return left;
+}
+
+it("refuses a map whose outcomes outgrow the budget, instead of enumerating them", () => {
+  // The budget is the only thing standing between this walk and unbounded memory, and it used to
+  // measure the wrong quantity: the length test sat on each recursive call's OWN array, so a map
+  // flattened into fresh arrays and merged upward was never charged for its total. Measured with
+  // that bug: 20 levels produced 1,048,576 rows and a 2.6 GB heap and was still not refused, with
+  // the level above it an out-of-memory crash rather than a report.
+  expect(rowsOf(doubling(12))).toHaveLength(ROW_BUDGET);
+  expect(rowsOf(doubling(13))).toBeNull();
+
+  // The depth that proved the old check useless. It must now cost no more than the boundary above,
+  // which is what "refused" has to mean for a guard whose purpose is bounding work.
+  expect(rowsOf(doubling(20))).toBeNull();
+  expect(rowsOf(doubling(40))).toBeNull();
+});
+
+it("refuses a map that grows by falling through rather than by resolving", () => {
+  // The same explosion with nothing to count. A branch that MISSES does not become an output row,
+  // it rejoins the frontier of conjunctions still being tried — so a budget charging only rows
+  // watches a number that never moves while the memory doubles at every level. Leaves here are
+  // empty objects, which is exactly the shape `{"node": {"browser": …}}` takes for a consumer
+  // activating neither.
+  let left: unknown = {};
+  let right: unknown = {};
+  for (let level = 0; level < 20; level++) {
+    const [a, b] = [left, right];
+    left = { [`vendor-${level}`]: a, default: b };
+    right = { [`vendor-${level}`]: b, default: a };
+  }
+  expect(rowsOf(left)).toBeNull();
+});
+
+it("keeps enumerating the wide maps that real packages actually ship", () => {
+  // The shape the budget must NOT refuse, and the reason the cost claim is about STRUCTURE rather
+  // than about the number of names: a key whose target is a string cannot miss, so it never splits
+  // the frontier. The corpus's largest condition object carries 25 names and costs 26 rows.
+  const wide: Record<string, unknown> = {};
+  for (let index = 0; index < 40; index++) wide[`vendor-${index}`] = `./t${index}.js`;
+  wide.default = "./default.js";
+  expect(rowsOf(wide)).toHaveLength(41);
 });

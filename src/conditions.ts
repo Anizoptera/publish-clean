@@ -65,6 +65,28 @@ const EXCLUSIVE: readonly (readonly [string, string])[] = [
 export const ROW_BUDGET = 4096;
 class TooComplex extends Error {}
 
+/**
+ * What is left of the budget, shared by the whole walk.
+ *
+ * It has to be shared because a nested object is flattened into a FRESH array whose rows are then
+ * moved into the caller's: a per-array length test therefore measures one subtree and never the
+ * total, so the budget it enforces is no budget at all. Measured before this counter existed: a map
+ * nesting two independent conditions at each of 20 levels produced 1,048,576 rows and a 2.6 GB heap
+ * without ever being refused, and the next level up is an out-of-memory crash instead of a report.
+ *
+ * Both growth axes are charged against it. Rows are the output; `pending` is the frontier of
+ * conjunctions that have fallen through every key so far, and it doubles at each independent
+ * condition whose branch can MISS — so it can hold the memory long before a single row is emitted.
+ */
+interface Budget {
+  left: number;
+}
+
+function spend(budget: Budget, count = 1): void {
+  budget.left -= count;
+  if (budget.left < 0) throw new TooComplex();
+}
+
 function bind(base: Literals, name: string, value: boolean): Literals | null {
   const existing = base.get(name);
   if (existing !== undefined) return existing === value ? base : null;
@@ -88,21 +110,24 @@ function bind(base: Literals, name: string, value: boolean): Literals | null {
  * written against Node's array semantics would be quietly wrong for exactly the packages that
  * need the most care.
  */
-function flatten(node: unknown, under: Literals, out: Row[]): void {
-  if (out.length > ROW_BUDGET) throw new TooComplex();
+function flatten(node: unknown, under: Literals, out: Row[], budget: Budget): void {
   if (node === null) {
+    spend(budget);
     out.push({ literals: under, target: { kind: "blocked" } });
     return;
   }
   if (typeof node === "string") {
+    spend(budget);
     out.push({ literals: under, target: { kind: "file", file: node } });
     return;
   }
   if (Array.isArray(node)) {
+    spend(budget);
     out.push({ literals: under, target: { kind: "opaque", key: JSON.stringify(node) } });
     return;
   }
   if (!isObject(node)) {
+    spend(budget);
     // A number or boolean here is an invalid target. `assertDeclaredFiles` refuses it with the
     // message that names the offending value; this walker only has to not claim it resolves.
     out.push({ literals: under, target: { kind: "miss" } });
@@ -119,7 +144,7 @@ function flatten(node: unknown, under: Literals, out: Row[]): void {
       const taken = key === "default" ? context : bind(context, key, true);
       if (taken) {
         const sub: Row[] = [];
-        flatten(value, taken, sub);
+        flatten(value, taken, sub, budget);
         for (const row of sub) {
           if (row.target.kind === "miss") next.push(row.literals);
           else out.push(row);
@@ -130,6 +155,12 @@ function flatten(node: unknown, under: Literals, out: Row[]): void {
         if (skipped) next.push(skipped);
       }
     }
+    // The frontier is charged for what it GREW BY, which is the second growth axis and the one no
+    // row count can see: a branch that misses produces no output row, it rejoins `pending` to be
+    // tried against the next key. So a map whose branches all fall through doubles this list at
+    // every independent condition while the row total never moves. Measured without this line, a
+    // 20-level map of missing branches allocated until the process died; with it, refused in 10ms.
+    if (next.length > pending.length) spend(budget, next.length - pending.length);
     pending = next;
   }
   for (const context of pending) out.push({ literals: context, target: { kind: "miss" } });
@@ -139,7 +170,7 @@ function flatten(node: unknown, under: Literals, out: Row[]): void {
 export function rowsOf(node: unknown): Row[] | null {
   const out: Row[] = [];
   try {
-    flatten(node, new Map(), out);
+    flatten(node, new Map(), out, { left: ROW_BUDGET });
   } catch (error) {
     if (error instanceof TooComplex) return null;
     throw error;

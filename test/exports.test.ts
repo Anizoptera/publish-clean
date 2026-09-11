@@ -230,3 +230,71 @@ it("freezes every sibling of a fallback array, not only the array itself", () =>
     ".": { node: "./x.js", default: "./x.js", browser: ["./a.js", "./b.js"] },
   });
 });
+
+it("names a condition no measured consumer activates, without touching it", () => {
+  // Private conditions are legitimate and appear in 2.5% of published packages, so this reports
+  // rather than repairs. Its value is that a TYPO cannot hide among them: `improt` and a genuine
+  // private name are indistinguishable to this tool, and only the author can tell them apart.
+  const unknown = heal({ exports: { ".": { "my-bundler": "./b.js", default: "./d.js" } } });
+  expect(unknown.rules).toContain("exports-unknown-condition");
+  expect(unknown.findings.find((f) => f.rule === "exports-unknown-condition")?.healed).toBe(false);
+  // Nothing is reordered across or removed around an unknown key: a name this tool cannot rank is
+  // a name whose position it cannot prove neutral.
+  expect(unknown.result.exports).toEqual({ ".": { "my-bundler": "./b.js", default: "./d.js" } });
+
+  // The control: every name the tool does rank must stay silent, or the report is noise on
+  // ordinary manifests rather than a signal about an unrecognised one.
+  expect(
+    heal({ exports: { ".": { types: "./d.ts", import: "./m.js", require: "./c.js" } } }).rules,
+  ).not.toContain("exports-unknown-condition");
+});
+
+it("unwraps an object whose only key is default", () => {
+  // `{"default": X}` resolves exactly as X for every consumer, so the wrapper is bytes that teach
+  // nobody anything. It heals, which means this case asserts what SHIPS, not just what is said.
+  const wrapped = heal({ exports: { ".": { default: "./index.js" } } });
+  expect(wrapped.rules).toContain("exports-redundant-default");
+  expect(wrapped.findings.find((f) => f.rule === "exports-redundant-default")?.healed).toBe(true);
+  expect(wrapped.result.exports).toEqual({ ".": "./index.js" });
+
+  // A repair withheld is still reported, and the manifest must come through untouched — the two
+  // halves are separable and a flag that silenced the finding too would hide a real defect.
+  const held = heal({ exports: { ".": { default: "./index.js" } } }, false);
+  expect(held.rules).toContain("exports-redundant-default");
+  expect(held.result.exports).toEqual({ ".": { default: "./index.js" } });
+
+  // The control: a sibling makes the wrapper load-bearing, so unwrapping would drop a branch.
+  expect(heal({ exports: { ".": { node: "./n.js", default: "./d.js" } } }).result.exports).toEqual({
+    ".": { node: "./n.js", default: "./d.js" },
+  });
+});
+
+it("publishes a map it cannot enumerate exactly as written", () => {
+  // Beyond the row budget the equivalence proof is unavailable, and this tool's whole licence to
+  // rewrite is that proof. So the map must come through byte-identical — including the inert key
+  // and the misordering it would otherwise have repaired, which is what makes this case falsifying
+  // rather than a restatement of the budget.
+  // Both branches recurse, so each level's independent condition DOUBLES the outcomes while the
+  // object graph stays linear in depth. 13 levels is 8192 rows against a 4096 budget — the cheapest
+  // input that exceeds it, and small enough that the case costs milliseconds.
+  let left: unknown = "./a.js";
+  let right: unknown = "./b.js";
+  for (let level = 0; level < 13; level++) {
+    const [a, b] = [left, right];
+    left = { [`vendor-${level}`]: a, default: b };
+    right = { [`vendor-${level}`]: b, default: a };
+  }
+  const nested = left as Record<string, unknown>;
+  const original = structuredClone(nested);
+
+  const huge = heal({ exports: { ".": nested } });
+  expect(huge.rules).toContain("exports-too-complex");
+  expect(huge.result.exports).toEqual({ ".": original });
+  expect(huge.rules).not.toContain("exports-inert-condition");
+
+  // The control, one nesting level shallower than whatever the budget allows: a map the tool CAN
+  // enumerate is repaired, so the silence above measures the budget and not a broken reviewer.
+  expect(heal({ exports: { ".": { node: "./d.js", default: "./d.js" } } }).rules).toContain(
+    "exports-inert-condition",
+  );
+});

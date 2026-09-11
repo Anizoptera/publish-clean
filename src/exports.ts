@@ -316,8 +316,11 @@ function containsArray(node: unknown): boolean {
  * a declared target that appears in no row is code nobody runs, and a satisfiable row that
  * resolves nothing is a consumer that gets `ERR_PACKAGE_PATH_NOT_EXPORTED`. Reading one as the
  * other is the natural mistake, so neither is stated without the other beside it.
+ *
+ * Returns whether the map could be enumerated at all, so the caller can freeze an unenumerable one
+ * without paying for a second walk to discover the same thing.
  */
-function reportReachability(node: unknown, where: string, findings: Finding[]): void {
+function reportReachability(node: unknown, where: string, findings: Finding[]): boolean {
   const rows = rowsOf(node);
   if (!rows) {
     findings.push({
@@ -330,7 +333,7 @@ function reportReachability(node: unknown, where: string, findings: Finding[]): 
         `(${ROW_BUDGET}), so nothing inside it was verified, reordered or removed. It is ` +
         `published exactly as written.`,
     });
-    return;
+    return false;
   }
 
   const reached = new Set(
@@ -372,6 +375,7 @@ function reportReachability(node: unknown, where: string, findings: Finding[]): 
         `last entry, pointing at the build that works anywhere. Ignore this if excluding those ` +
         `consumers is deliberate — a types-only package resolves nothing at run time by design.`,
     });
+  return true;
 }
 
 /**
@@ -418,7 +422,12 @@ export function reviewExports(pkg: JsonObject, options: { readonly heal: boolean
   const { heal } = options;
   const findings: Finding[] = [];
   const analyse = (node: unknown, where: string): unknown => {
-    reportReachability(node, where, findings);
+    // A map whose outcomes cannot be enumerated is frozen whole, exactly as one containing a
+    // fallback array is: every rewrite below is authorised by that enumeration, so without it
+    // there is no proof to rewrite under. `exports-too-complex` has already told the author the
+    // map ships as written, and healing it anyway would then fail the equivalence assert below —
+    // reporting a defect in this tool for a package that is merely large.
+    if (!reportReachability(node, where, findings)) return node;
     const first = findings.length;
     const healed = healNode(node, where, findings);
     if (!equivalent(node, healed))
