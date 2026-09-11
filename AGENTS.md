@@ -54,7 +54,10 @@
   unchanged. A consumer activates many conditions at once — webpack activates six — and takes the
   first key of the package's object that is in its set, so the order written here picks the winner
   and no reorder is cosmetic. The proof is cheap because resolution reads only an object's own keys:
-  enumerate the subsets of the names present and require every one to agree. The measured condition
+  `src/conditions.ts` flattens a map into a decision list — mutually exclusive rows of
+  `condition literals → target` — and two maps agree iff every jointly satisfiable row pair carries
+  the same target. Cost is linear in the map's STRUCTURE, so never reintroduce a proof that
+  enumerates the subsets of the NAMES: the corpus holds an object with 25 of them. The measured condition
   sets, the runtimes that disagree with each other, and why Node's published array algorithm does not
   match real Node belong in `docs/exports.md`; update it and this bullet together. That proof is
   relative to a resolver and the resolvers disagree on fallback arrays — Bun fails where Node and
@@ -67,7 +70,14 @@
   version number is burned forever, so abort on an UNHEALED finding that leaks something or breaks a
   consumer, and never on one that only wastes bytes. A healed finding never aborts — that is a rule
   about a different case, not an exception to this one. `--strict` raises warnings to errors and must
-  never make a healed finding fatal.
+  never make a healed finding fatal. The one waste finding that still aborts — a shipped file nothing
+  reaches and nobody declared — says so through `rulesAbort` on the finding itself, never through its
+  rule name, so the divergence stays visible as data instead of becoming a branch somebody tidies away.
+- Verification is the same pipeline minus the publish, and `verify` skips exactly ONE guard:
+  `assertPublicPackage`. A package checked before it goes public must be checked by the rules it will
+  actually face, so never let a second exemption in. Every check reports through `src/finding.ts`
+  rather than throwing; a thrown `PublishCleanError` is for what the run cannot continue past, not for
+  a defect in the package being examined.
 - Do not add package-manager-specific behavior unless tests prove the published tarball invariant.
 - Split CLI args at `--` before parsing; accept only the publication options in `src/options.ts`
   afterward. Reject extra operands, workspace selectors and flag-shaped values: npm reparses

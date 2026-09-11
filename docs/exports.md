@@ -24,18 +24,30 @@ ordering cannot justify one.
 
 ## The proof that does justify one
 
-Resolution of a condition object depends only on which of its own keys are active; a
-condition the object does not mention cannot change what it returns. Objects carry a
-handful of names, so the possible inputs are the subsets of those names — enumerable in
-full.
+Resolution of a condition object depends only on which of its own keys are active, so
+flattening the map top to bottom yields a **decision list**: a sequence of rows, each one
+a conjunction of `name is active` / `name is not active` literals plus the target reached
+when that conjunction holds. The rows are mutually exclusive and cover every consumer
+there can be, measured or not. `src/conditions.ts` owns this.
 
-That makes redundancy and reorder-safety provable rather than estimated: resolve both
-versions under every subset and compare. A key may be dropped, or two keys swapped, only
-when every subset agrees. An unrecognised condition name enters the enumeration as a free
-variable, which is sound — `{"x": "./a.js", "default": "./a.js"}` is provably removable
-whatever `x` means, and `{"x": "./src/index.ts", "default": "./dist/index.js"}` is not.
+Two maps are equivalent iff every pair of rows whose conjunctions can hold together
+carries the same target — and whether two conjunctions can hold together is a scan for one
+name bound both ways, plus the pairs that exclude each other (`import`/`require`,
+`development`/`production`). No search, no enumeration.
 
-Run the proof with the same resolver the rewrite uses. A separately written check and the
+That makes redundancy and reorder-safety provable rather than estimated. A key may be
+dropped, or two keys swapped, only when the flattened lists agree. An unrecognised
+condition name is just another literal that nothing binds, which is sound in both
+directions — `{"x": "./a.js", "default": "./a.js"}` is provably removable whatever `x`
+means, and `{"x": "./src/index.ts", "default": "./dist/index.js"}` is not.
+
+Enumerating the subsets of the names instead was rejected: it costs `2ⁿ` in the NAMES, and
+a real package in the measured corpus carries a condition object with 25 distinct names —
+33 million subsets, which forces a cap and a third "could not prove" verdict that then has
+to be handled everywhere. A decision list is linear in the STRUCTURE, which is a few dozen
+rows at worst, so the cap, the memo table and the third verdict all disappear.
+
+Run the proof with the same `flatten` the rewrite runs. A separately written check and the
 rewrite it authorises are two pieces of code that agree today.
 
 ## What stops a publish, and why that is not a severity question
@@ -56,6 +68,12 @@ Three consequence classes, because they need opposite responses:
 
 A healed finding never stops the run. That is not in tension with the rule above: it governs
 unhealed findings, and the two cover different cases.
+
+One waste finding stops the run anyway — a shipped file nothing in the package reaches and the
+author has not declared. It is carried on the finding as `rulesAbort`, not as a special case on
+the rule name, so the single divergence is data the table shows rather than a branch someone
+deletes while tidying. `--strict` promotes the remaining waste findings to fatal and can never
+promote a healed one.
 
 ## Defects only the final tarball can show
 
@@ -170,5 +188,22 @@ path, a native loader reading `prebuilds/`, a manifest field outside the seed li
 `man`, a source map's `sources` array, and a data directory read with `fs`. Measured across
 655 packages, flagging any file unreachable through `exports` fires on 97.1% of them.
 
-The reachable form of the check is the one with no false positives: a path the manifest
-declares that the archive does not contain. `assertDeclaredFiles` owns it.
+That 97.1% is the instrument, not the waste: README, LICENCE, declarations, source maps and
+native binaries are all unreachable by an import and all tell somebody something. So
+unreachability is EVIDENCE that a file may be useless, never the verdict, and `src/shipped.ts`
+subtracts the categories that are unreachable by nature before reporting. What survives that is
+an error the author clears with one config line the message prints
+(`"publish-clean": { "allowUnreferenced": [...] }`), because a file genuinely loaded in a way no
+import records — a binary a loader finds by path, a directory read at run time — must not cost
+its author a publish.
+
+The specifier scan behind it is deliberately over-inclusive: it matches inside comments and
+strings, and it must, because the finding is "nothing references this file". Over-matching can
+only suppress a report, never invent one — the usual objection to a regex over syntax assumes a
+false negative is the safe direction, and here it is the false positive that would hurt.
+
+Reachability is only meaningful when `exports` closes the package. Without that field every
+shipped path is importable by a consumer, so nothing is dead and the check does not run.
+
+The strictest form of the check needs none of this: a path the manifest declares that the archive
+does not contain. `assertDeclaredFiles` owns it and has no false positives at all.
