@@ -207,6 +207,13 @@ Three consequences this tool has to encode rather than infer:
 Nothing measured activates `types`, `deno`, `workerd`, `edge-light`, `react-server`,
 `worker`, `style` or `source` by default; those depend on consumer configuration.
 
+What the edge runtimes activate when they DO run is not measured here, and neither is Vite's SSR
+profile — only the consumers in the table were. So the rule putting a named runtime ahead of `node`
+generalises the one case that was measured, Bun and Deno activating `node`, to every runtime in the
+registry. That generalisation can only ever produce ADVICE: `src/exports.ts` reorders nothing it
+cannot prove neutral, so a tier claim that turns out too broad costs a suggestion, never a consumer.
+Measure a runtime's own set before treating its row as fact.
+
 ## Node's published algorithm is wrong about fallback arrays
 
 `PACKAGE_TARGET_RESOLVE` as documented stops at the first non-`undefined` result. Real
