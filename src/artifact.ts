@@ -273,7 +273,16 @@ function nearMatch(name: string, published: readonly string[]): string | undefin
   return published.find((file) => fold(file) === folded);
 }
 
-/** Validate declared files using each field's consumer semantics, without extracting the archive. */
+/**
+ * Validate declared files using each field's consumer semantics, without extracting the archive.
+ *
+ * THROWS rather than reporting a finding, which is the deliberate exception to this project's
+ * "every defect in the examined package is a finding" rule. A missing declared file means the file
+ * set itself is incomplete, so every later check reasons from a set it cannot trust and starts
+ * producing advice that is wrong: with `dist` unpacked, the reachability scan sees the remaining
+ * shipped sources reaching nothing and tells the author to declare them unreferenced, when the fix
+ * is to pack `dist`. Stopping here is what makes the rest of the report trustworthy.
+ */
 export function assertDeclaredFiles(pkg: JsonObject, published: readonly string[]): void {
   const declared: DeclaredFile[] = [];
   const collect = (
