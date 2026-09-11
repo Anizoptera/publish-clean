@@ -63,7 +63,10 @@
   relative to a resolver and the resolvers disagree on fallback arrays — Bun fails where Node and
   Deno succeed — so never modify an object containing one. Refusing to REWRITE an array is not a
   claim that nobody resolves it: an array flattens to an `opaque` row, so `kind === "file"` is the
-  wrong test for "can anybody reach this" and silently calls published packages broken.
+  wrong test for "can anybody reach this" and silently calls published packages broken. The
+  flattening is pinned to real Node under real condition sets (`test/conditions.test.ts`), never to
+  hand-written expectations — those restate the same reading of the spec the code has, and Node
+  departs from its own published algorithm. Keep that oracle.
 - Copy a condition map by spread or an explicit null-prototype loop, NEVER `Object.assign`. A
   condition may legally be named `__proto__`; `JSON.parse` keeps it as an ordinary own property and
   `Object.assign` silently drops it, which publishes a manifest missing a branch with nothing raised
