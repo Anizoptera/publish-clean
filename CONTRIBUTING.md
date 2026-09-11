@@ -10,7 +10,8 @@ bun run check
 ```
 
 `bun run check` is the required gate. It checks formatting, typechecks, builds, runs the
-Vitest suite against that build, rejects a tracked `dist/`, and runs the
+Vitest suite against that build, rejects a tracked `dist/`, asserts that Git will actually
+run this repository's commit hook, and runs the
 freshly built CLI on this package itself — asserting the cleaned artifact has no runtime
 dependencies and passing it to `publint` and `@arethetypeswrong/cli`.
 
@@ -18,6 +19,11 @@ Run self-application after the CLI tests: packing this repository runs its `prep
 script and rebuilds `dist`. Running both together races the tests against deletion and
 replacement of the executable they are testing. Formatting, types and repository checks
 can run in parallel because they do not write that build.
+
+`bun install` points `core.hooksPath` at `.githooks`, so from then on every commit runs that
+same gate and a failing tree cannot enter history. Fix what it reports; never pass
+`--no-verify`. It validates the working tree rather than the staged snapshot, so an unrelated
+broken file blocks an unrelated commit — stash it deliberately if that is what you want.
 
 ## Design rules
 
