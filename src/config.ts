@@ -11,7 +11,9 @@ import { RUNTIME_MANIFEST_FIELDS, assertRegistry } from "./manifest";
  */
 const CONFIG_KEYS = new Set([
   "allowSuspicious",
+  "allowUnreferenced",
   "devFields",
+  "heal",
   "keepFields",
   "noGitChecks",
   "registry",
@@ -29,12 +31,13 @@ export function packageConfig(pkg: JsonObject): JsonObject {
       `Unknown "publish-clean" manifest options:\n${unknown.join("\n")}\n` +
         `Valid options: ${[...CONFIG_KEYS].join(", ")}`,
     );
-  for (const key of ["allowSuspicious", "noGitChecks", "skipFileCheck"])
+  for (const key of ["allowSuspicious", "heal", "noGitChecks", "skipFileCheck"])
     if (config[key] !== undefined && typeof config[key] !== "boolean")
       throw new PublishCleanError(`publish-clean.${key} must be a boolean.`);
   if (config.registry !== undefined) assertRegistry(config.registry);
   stringList(config, "devFields");
   stringList(config, "keepFields");
+  stringList(config, "allowUnreferenced");
   if (config.validateArtifact !== undefined) {
     const argv = stringList(config, "validateArtifact");
     if (!argv[0]?.trim() || argv.some((argument) => argument.includes("\0")))
@@ -87,4 +90,17 @@ export function customDevFields(config: JsonObject): readonly string[] {
  */
 export function keptFields(config: JsonObject): readonly string[] {
   return stringList(config, "keepFields");
+}
+
+/**
+ * Shipped files the author has confirmed are used in a way no import records — a binary a native
+ * loader finds by path, a directory read at run time, a UI asset served over HTTP.
+ *
+ * The reachability check is an error, so without this an author whose package is legitimately
+ * shaped that way could never publish. A prefix matches a whole subtree, because these arrive in
+ * directories: `lib/vite/` is one line where naming each of 63 generated asset files is not a
+ * list anyone will maintain.
+ */
+export function allowedUnreferenced(config: JsonObject): readonly string[] {
+  return stringList(config, "allowUnreferenced");
 }

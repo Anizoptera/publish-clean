@@ -12,7 +12,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertDeclaredFiles, assertSameEntries, validatePackedFiles } from "./artifact";
 import { requireTool, run } from "./command";
-import { customDevFields, keptFields, packageConfig } from "./config";
+import { allowedUnreferenced, customDevFields, keptFields, packageConfig } from "./config";
+import { reviewExports } from "./exports";
+import { decide, formatFindings, isFatal } from "./finding";
+import { reviewShippedFiles, reviewUnreferencedFiles } from "./shipped";
 import { HELP, parseOptions } from "./options";
 import { PublishCleanError } from "./error";
 import { isObject, stringifyJson } from "./json";
@@ -32,6 +35,7 @@ import {
 import {
   assertPreservedArchive,
   manifestText,
+  packageContents,
   packageFiles,
   readArchive,
   replaceManifest,
@@ -187,11 +191,22 @@ async function packAndClean(
     allowSuspicious: boolean;
     dryRun: boolean;
     guardOnly: boolean;
+    /** Apply the exports/imports repairs this tool can prove neutral, rather than only report them. */
+    heal: boolean;
     noGitChecks: boolean;
     publishArgs: readonly string[];
     registry: null | string;
     /** Publish a package whose manifest declares no `files` array. */
     skipFileCheck: boolean;
+    /** Raise warnings to errors. Never promotes a finding this run already repaired. */
+    strict: boolean;
+    /**
+     * Check only, never publish — and skip the `private: true` refusal, which is the ONE guard
+     * that must not apply here. Verification is meant to work on packages that will never be
+     * published; every other rule is identical, so a private package is checked by exactly the
+     * rules it would face if it ever did go out.
+     */
+    verify: boolean;
     /**
      * Directory to copy the final tarball into before publishing, so callers can
      * keep the exact published bytes. Everything else here lives in a temp tree
@@ -220,8 +235,9 @@ async function packAndClean(
   const registry = opts.registry ?? (typeof config.registry === "string" ? config.registry : null);
   const extraDevFields = customDevFields(config);
   const keepFields = keptFields(config);
+  const allowUnreferenced = allowedUnreferenced(config);
 
-  assertPublicPackage(sourcePkg);
+  if (!opts.verify) assertPublicPackage(sourcePkg);
   await assertCleanGit(packageDir, noGitChecks, signal);
   assertFilesField(sourcePkg, skipFileCheck);
 
@@ -234,10 +250,16 @@ async function packAndClean(
     // Keep the original archive in memory for comparison, then rewrite its owned temporary
     // file. A second packer could re-decide the file set from the `files` field this strips.
     const packedPkg = manifestOf(packed, "the packed tarball");
-    assertPublicPackage(packedPkg);
-    const cleanedPkg = withRegistry(stripManifest(packedPkg, extraDevFields), registry);
-    const cleanedText = stringifyJson(cleanedPkg);
-    const unrecognized = unrecognizedFieldsReport(cleanedPkg, keepFields);
+    if (!opts.verify) assertPublicPackage(packedPkg);
+    // The packed manifest is what every check judges, because pnpm has already applied any
+    // `publishConfig.exports` override by this point — so this value, not the source one, is
+    // what consumers will resolve against.
+    const review = reviewExports(withRegistry(stripManifest(packedPkg, extraDevFields), registry), {
+      heal: opts.heal && config.heal !== false,
+    });
+    const findings = [...review.findings];
+    const cleanedText = stringifyJson(review.manifest);
+    const unrecognized = unrecognizedFieldsReport(review.manifest, keepFields);
     if (unrecognized) console.warn(unrecognized);
 
     await writeFile(finalTarball, replaceManifest(packed, cleanedText));
@@ -265,6 +287,23 @@ async function packAndClean(
     // that the rewrite produced the bytes the guards approved, not merely bytes that parse.
     if (manifestText(published) !== cleanedText)
       throw new PublishCleanError("Rewritten tarball manifest differs from the cleaned manifest.");
+
+    // Read from the artifact that ships, like every other guard here. These checks need the file
+    // BODIES — what a branch resolves to, and what nothing reaches — and the bytes are already
+    // decoded, so this costs a map rather than a second decompression.
+    const contents = packageContents(published);
+    findings.push(
+      ...reviewShippedFiles(shippedPkg, contents),
+      ...reviewUnreferencedFiles(shippedPkg, contents, allowUnreferenced),
+    );
+    if (findings.length > 0) console.warn(formatFindings(findings, opts.strict));
+    // Reported first, then decided: an author whose run is about to stop still gets every other
+    // finding in the same output, rather than one per re-run.
+    if (decide(findings, opts.strict))
+      throw new PublishCleanError(
+        `Refusing to publish: ${findings.filter((finding) => isFatal(finding, opts.strict)).length} ` +
+          `unrepaired finding(s) above would reach consumers. A published version cannot be taken back.`,
+      );
 
     // Configuration was validated before packing. Append the owned artifact, never a shell string.
     const validator = config.validateArtifact as readonly [string, ...string[]] | undefined;
@@ -304,7 +343,7 @@ async function packAndClean(
       console.log(`[dry-run] cleaned package.json:\n${cleanedText}`);
       return;
     }
-    if (opts.guardOnly) return;
+    if (opts.guardOnly || opts.verify) return;
 
     const env = publishEnv();
     let trusted = wantsTrustedPublish(shippedPkg, opts.publishArgs, env);
@@ -356,15 +395,26 @@ async function main(signal: AbortSignal): Promise<void> {
       `Unexpected positional arguments before --:\n${parsed.positionals.slice(1).join("\n")}`,
     );
 
+  // Kept working rather than removed: it is in this repository's own `prepublishOnly` and in
+  // everyone else's CI, and a flag that stops existing scripts is a migration nobody asked for.
+  if (parsed.values["guard-only"] === true)
+    console.warn(
+      "publish-clean: --guard-only is deprecated; use `publish-clean verify` (or --verify-only), " +
+        "which additionally works on a package marked private.",
+    );
+
   const packageDir = path.resolve(String(parsed.positionals[0] ?? "."));
   await packAndClean(packageDir, signal, {
     allowSuspicious: parsed.values["allow-suspicious"] === true,
     dryRun: parsed.values["dry-run"] === true,
     guardOnly: parsed.values["guard-only"] === true,
+    heal: parsed.values.heal !== false,
     noGitChecks: parsed.values["no-git-checks"] === true,
     publishArgs,
     registry: typeof parsed.values.registry === "string" ? parsed.values.registry : null,
     skipFileCheck: parsed.values["skip-file-check"] === true,
+    strict: parsed.values.strict === true,
+    verify: parsed.verify,
     tarballOut:
       typeof parsed.values["tarball-out"] === "string" ? parsed.values["tarball-out"] : null,
   });

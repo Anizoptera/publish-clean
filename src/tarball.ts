@@ -234,11 +234,37 @@ export function assertPreservedArchive(before: TarArchive, after: TarArchive): v
  * imports, and a pax header's own name (`PaxHeader`) names no file at all.
  */
 export function packageFiles(archive: TarArchive): string[] {
+  return installedEntries(archive)
+    .map((entry) => entry.name)
+    .sort();
+}
+
+/**
+ * The one definition of "a file this package installs". Every guard that judges names and every
+ * check that reads bytes must agree about that population, or one of them is judging a different
+ * archive than the other believes it is.
+ */
+function installedEntries(archive: TarArchive): { name: string; body: Buffer }[] {
   return archive.entries
     .filter((entry) => entry.type !== DIRECTORY_TYPE && !PAX_TYPES.has(entry.type))
-    .map((entry) => (entry.name.startsWith("package/") ? entry.name.slice(8) : entry.name))
-    .filter((name) => name.length > 0 && !name.endsWith("/"))
-    .sort();
+    .map((entry) => ({
+      name: entry.name.startsWith("package/") ? entry.name.slice(8) : entry.name,
+      body: entry.body,
+    }))
+    .filter((entry) => entry.name.length > 0 && !entry.name.endsWith("/"));
+}
+
+/**
+ * The installed files keyed by name, for the checks that read what a file SAYS rather than only
+ * that it is present. The bytes are already in memory — the archive was decompressed once to be
+ * read at all — so this costs a map, not a decode.
+ *
+ * A duplicate name resolves to the last entry, which is what an installer writing entries in
+ * order leaves on disk. `packageFiles` keeps every occurrence, so a guard counting names still
+ * sees a duplicate this view would hide.
+ */
+export function packageContents(archive: TarArchive): Map<string, Buffer> {
+  return new Map(installedEntries(archive).map((entry) => [entry.name, entry.body]));
 }
 
 function manifestEntry(archive: TarArchive): TarEntry {

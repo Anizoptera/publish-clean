@@ -1,0 +1,332 @@
+/**
+ * What the shipped files themselves say, and which of them nothing reaches.
+ *
+ * Every check here needs the tarball's BYTES, not only its file list, which is why they live
+ * together and why none of them exists in a linter that reads a source directory: the archive is
+ * the only place where what a branch promises and what the package actually ships can be compared.
+ *
+ * Ambient inputs arrive as parameters — no process, filesystem or argv here. `cli.ts` owns the
+ * effects.
+ */
+import { Script } from "node:vm";
+
+import { collectDeclaredPaths, normalizeDeclaredPath } from "./artifact";
+import type { Finding } from "./finding";
+import { isObject } from "./json";
+import type { JsonObject } from "./json";
+
+const DECLARATION = /\.d\.[cm]?ts$/;
+const SCRIPT = /\.[cm]?[jt]sx?$/;
+
+/**
+ * Files that are unreachable by nature and still earn their bytes. Documentation is read by a
+ * human, declarations by a type checker, a source map by a debugger, a native binary by a loader
+ * that builds its path at run time — none of them is imported by anything, and a reachability
+ * rule that does not know this fires on essentially every package ever published.
+ *
+ * Measured across 655 packages: flagging any file unreachable through `exports` fires on 97.1% of
+ * them. That figure is an instrument error, not a threshold to tune — "useless" means changes no
+ * behaviour AND tells nobody anything, and reachability tests a proxy for the first clause while
+ * saying nothing at all about the second.
+ */
+const UNREACHABLE_BY_NATURE = [
+  // A legal or documentation file, anywhere in the tree and under any casing. The `\.` branch
+  // catches the `bundle.js.LICENSE` form that webpack and terser emit beside a bundle.
+  /(?:^|\/|\.)(?:readme|licen[cs]e|copying|notice|changelog|history|authors|contributors)/i,
+  // A nested `package.json` is READ BY NODE, not imported: `dist/cjs/package.json` holding
+  // `{"type":"commonjs"}` is what makes that directory load as CommonJS at all. Deleting it on
+  // this rule's advice would break the package.
+  /(?:^|\/)package\.json$/,
+  /\.(?:md|markdown|txt|map|node|wasm|flow)$/i,
+  // Assets a browser or a bundler consumes. The closure models the JavaScript import graph and
+  // has no standing over a stylesheet a consumer links by path or a font a CSS rule names.
+  /\.(?:css|s[ac]ss|less|html?|svg|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|eot|otf)$/i,
+  /^(?:prebuilds|native|build|man|bin)\//i,
+  DECLARATION,
+];
+
+/**
+ * Specifiers a file mentions, deliberately over-matched: this pattern also fires inside comments
+ * and string literals.
+ *
+ * That direction is the safe one and it is the whole reason a pattern is acceptable here where a
+ * parser would normally be required. The finding is "NOTHING references this file", so a spurious
+ * match can only SUPPRESS a report, never invent one. The usual objection to matching syntax with
+ * a pattern assumes a false negative is the safe direction; here it is the false POSITIVE that
+ * would cost an author a failed publish for a file that is genuinely used.
+ *
+ * A parser would buy precision this check must not spend, because precision here means reporting
+ * more files as dead.
+ */
+const SPECIFIER =
+  /(?:from\s*|require\s*\(\s*|import\s*\(?\s*|URL\s*\(\s*|sourceMappingURL=)['"`]?(\.[^'"`\s)]+)/g;
+
+/** Targets written under a condition key, for the checks that ask what one consumer receives. */
+function targetsUnder(node: unknown, condition: string, inside: boolean, out: string[]): void {
+  if (typeof node === "string") {
+    if (inside) out.push(node);
+    return;
+  }
+  if (Array.isArray(node)) {
+    for (const item of node) targetsUnder(item, condition, inside, out);
+    return;
+  }
+  if (!isObject(node)) return;
+  for (const [key, value] of Object.entries(node))
+    targetsUnder(
+      value,
+      condition,
+      inside || key === condition || key.startsWith(`${condition}@`),
+      out,
+    );
+}
+
+function entry(files: ReadonlyMap<string, Buffer>, target: string): Buffer | undefined {
+  const name = normalizeDeclaredPath(target);
+  return name === null ? undefined : files.get(name);
+}
+
+/**
+ * Reports what the files an `exports` branch names turn out to be.
+ *
+ * These are the defects a source-directory linter cannot see, because each is a disagreement
+ * between what the manifest promises and what the archive actually carries.
+ */
+export function reviewShippedFiles(pkg: JsonObject, files: ReadonlyMap<string, Buffer>): Finding[] {
+  const findings: Finding[] = [];
+  const maps = [pkg.exports, pkg.imports];
+
+  // A `types` branch that does not name a declaration file hands the checker something else to
+  // read as declarations — usually the JavaScript beside it, which types the whole package `any`.
+  const typeTargets: string[] = [];
+  for (const map of maps) targetsUnder(map, "types", false, typeTargets);
+  for (const target of new Set(typeTargets))
+    if (!DECLARATION.test(target) && SCRIPT.test(target))
+      findings.push({
+        rule: "types-branch-not-declarations",
+        consequence: "breaks",
+        healed: false,
+        where: `exports "types" -> ${target}`,
+        message:
+          `A "types" condition must resolve to a declaration file (.d.ts, .d.mts or .d.cts); ` +
+          `this one resolves to ${JSON.stringify(target)}. A type checker takes this branch and ` +
+          `reads that file as the package's declarations, so every consumer sees the wrong API ` +
+          `or none. Point the branch at the declaration file built beside it.`,
+      });
+
+  // A `require` branch must name a file `require()` can actually load.
+  const requireTargets: string[] = [];
+  for (const map of maps) targetsUnder(map, "require", false, requireTargets);
+  for (const target of new Set(requireTargets)) {
+    if (DECLARATION.test(target) || !SCRIPT.test(target)) continue;
+    const body = entry(files, target);
+    if (!body || isCommonJs(body.toString("utf8"))) continue;
+    findings.push({
+      rule: "require-branch-is-esm",
+      consequence: "breaks",
+      healed: false,
+      where: `exports "require" -> ${target}`,
+      message:
+        `A "require" condition resolves to ${JSON.stringify(target)}, which uses ES module ` +
+        `syntax. Node can require an ES module only from ^20.19.0 || >=22.12.0, a consumer can ` +
+        `still refuse with --no-experimental-require-module, and top-level await fails on every ` +
+        `version with ERR_REQUIRE_ASYNC_MODULE. Point "require" at a CommonJS build, or add a ` +
+        `"module-sync" branch — that condition exists so require() and import can load one ES ` +
+        `module.`,
+    });
+  }
+
+  // A shebang ending in CR is invisible in an editor and fatal on every POSIX system: the kernel
+  // passes `node\r` to execve as the interpreter name.
+  for (const [name, body] of files) {
+    if (!body.subarray(0, 2).equals(Buffer.from("#!"))) continue;
+    const firstLine = body.subarray(0, body.indexOf(0x0a) + 1 || body.length);
+    if (!firstLine.includes(0x0d)) continue;
+    findings.push({
+      rule: "shebang-carriage-return",
+      consequence: "breaks",
+      healed: false,
+      where: name,
+      message:
+        `The shebang line ends with a carriage return, so running this file fails with ` +
+        `"env: node\\r: No such file or directory" on Linux and macOS. Nothing here rewrites it ` +
+        `— this tool alters the manifest and no other file's contents — so fix the line endings ` +
+        `at the source: add a .gitattributes entry marking it "text eol=lf", or set your ` +
+        `bundler to emit LF.`,
+    });
+  }
+
+  return findings;
+}
+
+/**
+ * True when `require()` can load this source.
+ *
+ * `new Script(source)` IS Node's CommonJS parser, so this asks the question with the instrument
+ * that decides it rather than with a pattern that approximates it: `import`, `export`,
+ * `import.meta` and top-level await all throw, and every CommonJS form compiles. No vendored
+ * parser, no subprocess, no dependency — which matters for a CLI that ships none.
+ */
+function isCommonJs(source: string): boolean {
+  try {
+    new Script(source);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Files nothing in the package reaches, ranked by the bytes they cost.
+ *
+ * Reachability is EVIDENCE that a file may be useless, never the verdict. The closure below
+ * starts from every path the manifest declares and follows relative specifiers out of each file
+ * it reaches, so what remains is genuinely referenced by nothing — but a file can still be used
+ * in ways no import graph records: a child process spawned by path, a native loader reading
+ * `prebuilds/`, a data directory read with `fs`. `UNREACHABLE_BY_NATURE` covers every category
+ * measured across 655 real packages; `allowUnreferenced` covers the rest, and the message names
+ * the exact line to paste, so switching this on costs an affected author one edit rather than an
+ * investigation.
+ *
+ * Size-ranked, because a name-based rule misses precisely the biggest finds: the largest real
+ * cases measured sat in `ai-docs/` (17.7MB) and `artifacts/` (17.8MB), directories no name list
+ * anticipates, while restricting to `test`/`docs`/`examples` names caught 0.1% of wasted bytes.
+ */
+export function reviewUnreferencedFiles(
+  pkg: JsonObject,
+  files: ReadonlyMap<string, Buffer>,
+  allowUnreferenced: readonly string[],
+): Finding[] {
+  // `exports` is what makes "nothing can reach this" a true statement. Without it every shipped
+  // file is a public entry point: a consumer may `require("pkg/lib/deflate")` and many do, so an
+  // unreferenced file is not dead, it is undocumented API somebody may already depend on.
+  // Measured: gating on this field is the difference between firing on 62% of installed packages
+  // and firing on the ones where the claim actually holds.
+  if (pkg.exports === undefined) return [];
+
+  const reached = new Set<string>();
+  const queue: string[] = [];
+  const visit = (declared: string, from: string): void => {
+    // Join against the referring file BEFORE normalising: normalisation strips the leading `./`,
+    // so testing for relativity afterwards answers about the wrong string and every sibling
+    // import resolves to the package root instead. That single ordering mistake left the closure
+    // reaching nothing but its own seeds.
+    const raw = declared.replace(/[?#].*$/, "");
+    const relative = raw.startsWith("./") || raw.startsWith("../");
+    const resolved = normalizeDeclaredPath(relative ? joinFrom(from, raw) : raw);
+    if (resolved === null) return;
+    for (const candidate of expand(resolved, files))
+      if (!reached.has(candidate)) {
+        reached.add(candidate);
+        queue.push(candidate);
+      }
+  };
+
+  const seeds: string[] = [];
+  // `collectDeclaredPaths` already knows which manifest fields hold paths and which of their
+  // strings are paths at all, so the seed set cannot drift from the one `assertDeclaredFiles`
+  // validates. `bin` and `main` are commonly written bare (`dist/cli.js`, not `./dist/cli.js`) —
+  // treating those as external reported every such entry as dead and cost a 3.4x error in the
+  // measurement that produced the numbers above.
+  for (const field of ["main", "module", "types", "typings", "bin", "exports", "imports", "man"])
+    collectDeclaredPaths(pkg[field], seeds, "every-string");
+  collectDeclaredPaths(
+    pkg.browser,
+    seeds,
+    typeof pkg.browser === "string" ? "every-string" : "relative-only",
+  );
+  for (const seed of seeds) visit(seed, "");
+
+  // A lifecycle script names its helper in a shell command — `"postinstall": "node install.cjs"` —
+  // and `scripts` survives cleaning precisely when a consumer hook exists, so that file runs on
+  // every install while no import anywhere mentions it. Every script is read, not only the
+  // lifecycle ones, because hooks delegate: `postinstall: "npm run setup"` names the file one hop
+  // away. Splitting on shell punctuation over-matches, which is the harmless direction here: a
+  // token only becomes a seed if it names a file the package actually ships.
+  if (isObject(pkg.scripts))
+    for (const command of Object.values(pkg.scripts))
+      if (typeof command === "string")
+        for (const token of command.split(/[\s'"=;&|()<>]+/)) visit(token, "");
+
+  while (queue.length > 0) {
+    const name = queue.pop();
+    if (name === undefined) continue;
+    const body = files.get(name);
+    // An executable is usually extensionless — TypeScript's `bin/tsc` is two lines whose second
+    // is `require('../lib/tsc.js')` — so a suffix test alone stops the closure at the shim and
+    // calls the entire compiler unreferenced. The shebang identifies the rest.
+    if (body === undefined || !(SCRIPT.test(name) || body.subarray(0, 2).toString() === "#!"))
+      continue;
+    for (const match of body.toString("utf8").matchAll(SPECIFIER))
+      if (match[1] !== undefined) visit(match[1], name);
+  }
+
+  const orphans = [...files]
+    .filter(([name]) => !reached.has(name))
+    .filter(([name]) => !UNREACHABLE_BY_NATURE.some((pattern) => pattern.test(name)))
+    .filter(
+      ([name]) =>
+        !allowUnreferenced.some((allowed) => name === allowed || name.startsWith(allowed)),
+    )
+    .sort((left, right) => right[1].length - left[1].length);
+  if (orphans.length === 0) return [];
+
+  const total = orphans.reduce((sum, [, body]) => sum + body.length, 0);
+  const listed = orphans.map(([name, body]) => `  ${name} (${Math.ceil(body.length / 1024)} KB)`);
+  return [
+    {
+      rule: "unreferenced-file",
+      consequence: "waste",
+      // Ruled an error outright by the maintainer, despite costing only bytes: every consumer
+      // downloads these forever. Carried as a flag rather than a branch on the rule id so the one
+      // divergence from the consequence model stays visible in the findings table.
+      rulesAbort: true,
+      healed: false,
+      where: `${orphans.length} files, ${Math.ceil(total / 1024)} KB`,
+      message:
+        `Nothing in this package reaches these files — no manifest field names them and no ` +
+        `shipped file imports them — so every consumer downloads them forever for nothing:\n` +
+        `${listed.join("\n")}\n` +
+        `Remove them from the "files" array in your package.json. If one is genuinely used in a ` +
+        `way no import records — spawned as a child process, loaded by a native addon, read at ` +
+        `run time — declare it instead:\n` +
+        `  "publish-clean": { "allowUnreferenced": [${orphans.map(([name]) => JSON.stringify(name)).join(", ")}] }`,
+    },
+  ];
+}
+
+/** Resolve a relative specifier against the file that wrote it. */
+function joinFrom(from: string, specifier: string): string {
+  const base = from.includes("/") ? from.slice(0, from.lastIndexOf("/") + 1) : "";
+  return `${base}${specifier}`;
+}
+
+/**
+ * The names one specifier can select: an extensionless import, a directory index, a pattern, and
+ * the source map a file points at all name real files through a written form that is not one.
+ */
+function expand(name: string, files: ReadonlyMap<string, Buffer>): string[] {
+  if (name.includes("*")) {
+    const parts = name.split("*");
+    return [...files.keys()].filter(
+      (file) =>
+        file.length >= name.length - 1 &&
+        file.startsWith(parts[0] ?? "") &&
+        file.endsWith(parts.at(-1) ?? ""),
+    );
+  }
+  if (files.has(name)) return [name];
+  // A TypeScript source imports its sibling as `./schemas.js` even though the file shipped is
+  // `schemas.ts`; that is the convention for ESM TypeScript, not a mistake. Without this the
+  // closure stops at the first source file and reports a package's whole `src` tree as dead —
+  // measured on zod, where it mislabelled 4 MB, most of it genuinely reachable.
+  const swapped = name.replace(/\.([cm]?)js$/, ".$1ts");
+  const bases = swapped === name ? [name] : [name, swapped, swapped.replace(/ts$/, "tsx")];
+  return bases
+    .flatMap((base) =>
+      ["", ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".tsx", ".json", ".node"]
+        .flatMap((suffix) => [base + suffix, `${base}/index${suffix}`])
+        .concat(base),
+    )
+    .filter((candidate) => files.has(candidate));
+}

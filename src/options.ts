@@ -60,6 +60,7 @@ function publicationArgs(args: readonly string[]): string[] {
  * installed next to the binary.
  */
 export const HELP = `publish-clean [options] [package-dir] [-- npm publish args]
+       publish-clean verify [package-dir]
 
 Packs with pnpm, strips developer-only fields from the packed manifest, validates the
 artifact, and publishes that exact tarball with npm. Arguments after \`--\` go to
@@ -68,8 +69,12 @@ Allowed: ${[...PUBLISH_OPTIONS.keys()].map((name) => `--${name}`).join(", ")}.
 Additional package operands and workspace selectors are rejected.
 
 Options:
+  verify [dir]           Pack, clean and check; publish nothing. Works on private packages.
+  --verify-only          The same as the verify subcommand, for scripts that take flags only.
+  --strict               Treat warnings as errors. Never makes an already-repaired finding fatal.
+  --no-heal              Report repairable exports/imports defects without repairing them.
   --dry-run              Pack, clean and validate; print the file list and manifest, publish nothing.
-  --guard-only           Validate a preview artifact; no file-list output or publish.
+  --guard-only           Deprecated alias for verify, on a public package.
   --tarball-out DIR      Also write the validated tarball into DIR, for attestation or release upload.
   --registry URL         Publish to URL, and record it in the artifact's publishConfig.
   --no-git-checks        Publish from a working tree with uncommitted changes.
@@ -83,6 +88,9 @@ Manifest configuration, under a "publish-clean" key in package.json:
   devFields    string[]  Extra fields to strip. Refused for fields consumers resolve.
   keepFields   string[]  Fields to acknowledge, so they stop being reported as unrecognised.
   registry     string    Default for --registry.
+  heal         boolean   Set false to report exports/imports repairs without applying them.
+  allowUnreferenced string[] Shipped files nothing imports on purpose: a binary a loader finds by
+                        path, a directory read at run time. Prefixes match whole subtrees.
   noGitChecks  boolean   Default for --no-git-checks.
   skipFileCheck boolean  Default for --skip-file-check.
   allowSuspicious boolean Default for --allow-suspicious.
@@ -102,15 +110,25 @@ export function parseOptions(rawArgs: readonly string[]) {
       "allow-suspicious": { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
       "guard-only": { type: "boolean", default: false },
+      heal: { type: "boolean", default: true },
       help: { type: "boolean", short: "h", default: false },
       "no-git-checks": { type: "boolean", default: false },
       registry: { type: "string", default: undefined },
       "skip-file-check": { type: "boolean", default: false },
+      strict: { type: "boolean", default: false },
       "tarball-out": { type: "string", default: undefined },
+      "verify-only": { type: "boolean", default: false },
       version: { type: "boolean", short: "v", default: false },
     },
     strict: true,
   });
 
-  return { ...parsed, publishArgs };
+  // `verify` is a subcommand as well as a flag, because a script that cannot change shape needs
+  // the flag while a person typing the command reads the verb. A directory actually named
+  // `verify` is still reachable as `./verify`.
+  const positionals =
+    parsed.positionals[0] === "verify" ? parsed.positionals.slice(1) : parsed.positionals;
+  const verify = positionals !== parsed.positionals || parsed.values["verify-only"] === true;
+
+  return { ...parsed, positionals, publishArgs, verify };
 }

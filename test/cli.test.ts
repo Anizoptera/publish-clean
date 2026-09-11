@@ -188,7 +188,10 @@ describe.concurrent("publish-clean", () => {
         // `contributes` in the artifact to work at all — so keepFields must silence the
         // report while leaving the field in place.
         contributes: { commands: [] },
-        "publish-clean": { keepFields: ["contributes"] },
+        // `.gitignore` really is bytes no consumer reads, so the reachability rule is right to
+        // refuse it — and it must ship anyway, for the reason above. This is what the escape
+        // hatch is for, and declaring it here proves the hatch works end to end.
+        "publish-clean": { allowUnreferenced: [".gitignore"], keepFields: ["contributes"] },
         ...consumerFacing,
         main: "./src/index",
         publishConfig: { main: consumerFacing.main },
