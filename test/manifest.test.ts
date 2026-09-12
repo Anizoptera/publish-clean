@@ -6,13 +6,15 @@
 import { customDevFields, keptFields, packageConfig } from "../src/config";
 import { describe, expect, it } from "vitest";
 
+import { isFatal } from "../src/finding";
+import type { JsonObject } from "../src/json";
 import {
-  assertFilesField,
+  filesFieldRefusal,
   assertNoLostConsumerFields,
-  assertNoMonorepoProtocols,
-  assertPublicPackage,
+  privatePackageRefusal,
   assertRegistry,
-  assertRegistryDestinations,
+  reviewMonorepoProtocols,
+  reviewRegistryDestinations,
   stripManifest,
   unrecognizedFieldsReport,
   withRegistry,
@@ -127,24 +129,34 @@ describe.concurrent("author configuration", () => {
 });
 
 describe.concurrent("monorepo-only dependency specs", () => {
+  /**
+   * The rule reports rather than throws, so the rest of the run still happens. What must not
+   * change is the verdict, so every case here asserts the refusal as well as the message: a
+   * finding this rule emits is unhealed and `breaks`, which stops the publish with no flag able
+   * to reach it.
+   */
+  const refusal = (pkg: JsonObject, files?: string[]): string => {
+    const found = reviewMonorepoProtocols(pkg, files);
+    expect(found.every((finding) => isFatal(finding, false))).toBe(true);
+    return found.map((finding) => finding.message).join("\n");
+  };
+
   for (const spec of ["link:../bad", "workspace:*", "catalog:default", "portal:../bad"]) {
     it(`refuses ${spec}, which no consumer can resolve`, () => {
-      expect(() => assertNoMonorepoProtocols({ dependencies: { bad: spec } })).toThrow(
+      expect(refusal({ dependencies: { bad: spec } })).toContain(
         "unresolved monorepo-only dependency specs",
       );
     });
   }
 
   it("names the field and the offending spec so the author can find it", () => {
-    expect(() => assertNoMonorepoProtocols({ peerDependencies: { bad: "workspace:^1" } })).toThrow(
+    expect(refusal({ peerDependencies: { bad: "workspace:^1" } })).toContain(
       "peerDependencies.bad: workspace:^1",
     );
   });
 
   it("passes ordinary version ranges", () => {
-    expect(() =>
-      assertNoMonorepoProtocols({ dependencies: { a: "^1.0.0", b: "npm:c@2" } }),
-    ).not.toThrow();
+    expect(refusal({ dependencies: { a: "^1.0.0", b: "npm:c@2" } })).toBe("");
   });
 
   it("rejects local references absent from the artifact while permitting shipped vendor packages", () => {
@@ -157,25 +169,14 @@ describe.concurrent("monorepo-only dependency specs", () => {
       "git+file:///repo",
       "file:%zz",
     ])
-      expect(() =>
-        assertNoMonorepoProtocols({ dependencies: { local: spec } }, [
-          "index.js",
-          "C:/vendor/package.json",
-        ]),
-      ).toThrow(/local target/);
-    expect(() =>
-      assertNoMonorepoProtocols({ dependencies: { local: "file:vendor" } }, [
-        "vendor/package.json",
-      ]),
-    ).not.toThrow();
-    expect(() =>
-      assertNoMonorepoProtocols({ dependencies: { local: "file:vendor.tgz" } }, ["vendor.tgz"]),
-    ).not.toThrow();
-    expect(() =>
-      assertNoMonorepoProtocols({
-        dependencies: { remote: "https://example.test/catalog:fixture.tgz" },
-      }),
-    ).not.toThrow();
+      expect(
+        refusal({ dependencies: { local: spec } }, ["index.js", "C:/vendor/package.json"]),
+      ).toMatch(/local target/);
+    expect(refusal({ dependencies: { local: "file:vendor" } }, ["vendor/package.json"])).toBe("");
+    expect(refusal({ dependencies: { local: "file:vendor.tgz" } }, ["vendor.tgz"])).toBe("");
+    expect(refusal({ dependencies: { remote: "https://example.test/catalog:fixture.tgz" } })).toBe(
+      "",
+    );
   });
 });
 
@@ -201,14 +202,22 @@ describe.concurrent("lost consumer fields", () => {
 });
 
 describe.concurrent("publishable manifest", () => {
-  it("refuses a private package", () => {
-    expect(() => assertPublicPackage({ private: true })).toThrow("private: true");
+  it("refuses a private package and nothing else", () => {
+    expect(privatePackageRefusal({ private: true })).toContain("private: true");
+    // `private` is a boolean field and the check is an identity test, so every other value it
+    // can legally hold — including the string npm itself ignores — must let the publish through.
+    for (const value of [false, undefined, "true", 1])
+      expect(privatePackageRefusal({ private: value })).toBeNull();
   });
 
-  it("requires a non-empty files array unless the check is skipped", () => {
-    expect(() => assertFilesField({ name: "x" }, false)).toThrow('non-empty "files" array');
-    expect(() => assertFilesField({ name: "x", files: [] }, false)).toThrow('non-empty "files"');
-    expect(() => assertFilesField({ name: "x" }, true)).not.toThrow();
+  it("requires a files array with usable entries unless the check is skipped", () => {
+    // Each of these produces a file set nobody declared: the packer falls back to ignore files.
+    // The blank and non-string entries are the ones a hand-edited manifest actually contains,
+    // and an array that is merely PRESENT is what a length check alone would accept.
+    for (const files of [undefined, [], ["   "], [""], [1], ["index.js", "  "], "index.js"])
+      expect(filesFieldRefusal({ name: "x", files }, false)).toContain('"files"');
+    expect(filesFieldRefusal({ name: "x", files: ["index.js"] }, false)).toBeNull();
+    expect(filesFieldRefusal({ name: "x" }, true)).toBeNull();
   });
 });
 
@@ -289,19 +298,26 @@ it.each([
   "https://:fixture-secret@registry.example/",
   "https://fixture-secret@[invalid/",
 ])("rejects registry credentials without retaining the URL: %s", (registry) => {
-  for (const check of [
-    () => assertRegistry(registry),
-    () => assertRegistryDestinations({ publishConfig: { registry } }),
-    () => assertRegistryDestinations({ publishConfig: { "@scope:registry": registry } }),
-  ]) {
-    try {
-      check();
-      expect.fail("credential-bearing registry accepted");
-    } catch (error) {
-      expect(String(error)).toMatch(/Registry/);
-      expect(String(error)).not.toContain("fixture-secret");
-      expect(error).not.toHaveProperty("cause");
-    }
+  // The two routes differ in form and must not differ in verdict: a registry named on the command
+  // line throws, one found in the manifest is reported alongside every other defect — and both
+  // refuse. Whichever route, the text must not carry the credential, because an error message is
+  // what an author pastes into an issue. The `cause` check is the subtle half: the URL parser's
+  // exception retains its input, so chaining one would leak the secret through a property nobody
+  // reads on purpose.
+  try {
+    assertRegistry(registry);
+    expect.fail("credential-bearing registry accepted");
+  } catch (error) {
+    expect(String(error)).toMatch(/Registry/);
+    expect(String(error)).not.toContain("fixture-secret");
+    expect(error).not.toHaveProperty("cause");
+  }
+  for (const publishConfig of [{ registry }, { "@scope:registry": registry }]) {
+    const [finding, ...rest] = reviewRegistryDestinations({ publishConfig });
+    expect(rest).toEqual([]);
+    expect(finding && isFatal(finding, false)).toBe(true);
+    expect(JSON.stringify(finding)).toMatch(/Registry/);
+    expect(JSON.stringify(finding)).not.toContain("fixture-secret");
   }
 });
 

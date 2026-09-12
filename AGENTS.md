@@ -87,7 +87,9 @@
      is a defect here, not a virtue. A thrown `PublishCleanError` is reserved for what the run
      cannot CONTINUE past — unreadable bytes, a file set too incomplete to reason about — never for
      a defect in the package being examined. Where something still throws mid-pipeline, wrap the
-     section in `try`/`finally` so the findings gathered before it are still printed.
+     section in `try`/`finally` so the findings gathered before it are still printed. The checks
+     that run BEFORE the pack have no artifact to report about, so they return their reason as a
+     string and `cli.ts` refuses once with all of them — never one `throw` each.
   3. ABORT at the end when anything error-severity was left unrepaired. Publishing burns a version
      number forever, so what this tool could not heal, recover or clean must stop the run.
   4. NEVER abort on a repaired defect. The artifact being published is correct.

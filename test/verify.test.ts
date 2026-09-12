@@ -82,6 +82,17 @@ it.concurrent("checks a private package that publishing refuses outright", async
   expect(refused.stderr).toContain("private: true");
 });
 
+it.concurrent("gives every reason the source cannot be packed, not the first one", async () => {
+  // These run before anything is packed, so they cannot travel with the findings — there is no
+  // artifact for a finding to be about. They are still independent reasons, each costing a full
+  // re-run to discover, so an author must not have to fix them one per run to find the next.
+  const { files: _declared, ...undeclared } = SOUND;
+  const refused = await check({ ...undeclared, private: true }, INDEX, ["--dry-run"]);
+  expect(refused.status).not.toBe(0);
+  expect(refused.stderr).toContain("private: true");
+  expect(refused.stderr).toContain('"files"');
+});
+
 it.concurrent("keeps --guard-only working and says what replaces it", async () => {
   // Deprecating a flag that stops existing scripts is a migration nobody asked for; this one is
   // in this repository's own prepublishOnly.

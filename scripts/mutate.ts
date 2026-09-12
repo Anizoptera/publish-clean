@@ -213,26 +213,54 @@ const MUTATIONS: readonly Mutation[] = [
   {
     name: "verdict forgets that a repair is not a defect",
     file: "src/finding.ts",
-    from: /if \(finding\.healed\) return false;/,
-    to: "",
+    from: /!finding\.healed && severityOf/,
+    to: "severityOf",
   },
   {
     name: "verdict ignores the rule that carries its own abort",
     file: "src/finding.ts",
-    from: /return finding\.rulesAbort === true \|\| strict;/,
-    to: "return strict;",
+    from: /finding\.rulesAbort === true \|\| strict \?/,
+    to: "strict ?",
   },
   {
     name: "verdict lets --strict promote a repair",
     file: "src/finding.ts",
-    from: /if \(finding\.healed\) return false;/,
-    to: "if (finding.healed) return strict;",
+    from: /return !finding\.healed && severityOf\(finding, strict\) === "error";/,
+    to: 'return (!finding.healed || strict) && severityOf(finding, strict) === "error";',
   },
   {
-    name: "report labels an aborting finding a warning",
+    // The two axes collapsed back into one: severity read from what the run DID rather than from
+    // the defect. It is the exact regression the split was for, and the whole table's precedent
+    // is that a plausible-looking merge is what someone reaches for while tidying.
+    name: "severity softens for a finding this run repaired",
     file: "src/finding.ts",
-    from: /isFatal\(finding, strict\) \? "error" : "warning"/,
-    to: '"warning"',
+    from: /if \(finding\.consequence !== "waste"\) return "error";/,
+    to: 'if (finding.consequence !== "waste") return finding.healed ? "warning" : "error";',
+  },
+  {
+    name: "report labels every finding a warning",
+    file: "src/finding.ts",
+    from: /\$\{severityOf\(finding, strict\)\}/,
+    to: "warning",
+  },
+  {
+    // Converted from a throw so the rest of the run still reports. The risk the conversion adds
+    // is that the refusal itself goes missing — a finding nobody made fatal is a warning nobody
+    // acts on, and the package publishes with a live credential in its manifest.
+    name: "a registry credential becomes a warning",
+    file: "src/manifest.ts",
+    // Anchored on the neighbouring `where`, not on the consequence alone: a bare
+    // `consequence: "harm"` would retarget itself to whichever harm rule lands in this file
+    // next, still get killed by that rule's own case, and report green for a row testing
+    // nothing. The dry run cannot see that — the pattern still matches.
+    from: /consequence: "harm" as const,\n( +)healed: false,\n +where: `publishConfig/,
+    to: 'consequence: "waste" as const,\n$1healed: false,\n$1where: `publishConfig',
+  },
+  {
+    name: "a workspace-only dependency spec becomes a warning",
+    file: "src/manifest.ts",
+    from: /rule: "monorepo-only-spec",\n( +)consequence: "breaks" as const,/,
+    to: 'rule: "monorepo-only-spec",\n$1consequence: "waste" as const,',
   },
   {
     name: "decide stops at the first finding",

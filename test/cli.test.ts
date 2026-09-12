@@ -651,6 +651,37 @@ exit 1
       await cleanup(fx.root);
     }
   });
+
+  // Both defects below refuse the publish on their own, and neither makes the other's answer
+  // wrong. A run that stopped at the first would hand the author one defect per re-run — and the
+  // manifest ones sit BEFORE the artifact scan, so stopping there hides the whole second half of
+  // the report rather than one line of it.
+  it("reports a credential and a workspace spec alongside the artifact scan, not instead of it", async () => {
+    const fx = await fixture(
+      {
+        name: "fixture-manifest-defects",
+        version: "1.0.0",
+        files: ["index.js", "orphan.js"],
+        exports: { ".": "./index.js" },
+        dependencies: { bad: "link:../bad" },
+        publishConfig: { registry: "https://user:fixture-secret@registry.example.com/" },
+      },
+      { "index.js": "module.exports = 1;\n", "orphan.js": "module.exports = 2;\n" },
+    );
+    try {
+      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("registry-credentials");
+      expect(result.stderr).toContain("unresolved monorepo-only dependency specs");
+      expect(result.stderr).toContain("unreferenced-file");
+      expect(result.stderr).toContain("orphan.js");
+      // The whole point of hiding the value: a report an author pastes into an issue must not
+      // carry the token that made it fail.
+      expect(result.stderr).not.toContain("fixture-secret");
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
 });
 
 it.concurrent("scans and preserves the effective names pnpm emits for long USTAR and PAX paths", async () => {

@@ -40,6 +40,14 @@ notes: the section for a version is published verbatim when its tag is pushed.
 
 ### Changed
 
+- **One run now tells you everything wrong with your package.** Four checks used to stop at the
+  first thing they found, so a package with several defects cost one run per defect: a
+  credential in a `publishConfig` registry URL and a `workspace:` dependency spec now report as
+  findings (`registry-credentials`, `registry-not-a-url`, `monorepo-only-spec`) alongside the
+  whole artifact scan, and `private: true`, uncommitted changes and a missing `files` array are
+  refused together before packing. Every one still refuses the publish; none is waivable that was
+  not waivable before.
+
 - **A report now says how bad a defect is and whether it was repaired as two separate facts.**
   There was a third severity, `[healed]`, which made a repaired breakage and a harmless stray file
   read alike. A repair corrects the published artifact and never your source, so the defect keeps

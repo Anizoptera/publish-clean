@@ -7,6 +7,7 @@
  */
 import { PublishCleanError } from "./error";
 import { normalizeDeclaredPath } from "./declared";
+import type { Finding } from "./finding";
 import { isObject } from "./json";
 import type { JsonObject } from "./json";
 
@@ -173,25 +174,72 @@ export function packageScope(pkg: JsonObject): string | null {
   return slash > 1 ? pkg.name.slice(0, slash) : null;
 }
 
-/** A misspelled registry must fail locally rather than fall back to a public destination. */
-export function assertRegistry(value: unknown): asserts value is string {
-  // URL parser exceptions retain their input, which may contain a password.
-  if (typeof value !== "string" || !URL.canParse(value))
-    throw new PublishCleanError("Registry must be an absolute HTTP(S) URL.");
+/**
+ * Why a registry destination is unusable, or null when it is fine.
+ *
+ * Never returns, quotes or embeds the value. A registry URL is the one manifest string that
+ * routinely carries a password, and an error message is the thing an author pastes into an issue
+ * — so the fault is named and the value stays here. That is also why the URL parser's own
+ * exception is discarded rather than chained: it retains its input.
+ */
+function registryFault(value: unknown): null | { readonly rule: string; readonly message: string } {
+  const malformed = {
+    rule: "registry-not-a-url",
+    // A destination npm cannot parse is not a local typo it reports back: npm falls through to
+    // its default, so the package lands on the public registry nobody chose.
+    message:
+      `Registry must be an absolute HTTP(S) URL. The value is withheld here because a registry ` +
+      `URL commonly carries a password; read it from your own package.json.`,
+  };
+  if (typeof value !== "string" || !URL.canParse(value)) return malformed;
   const url = new URL(value);
-  if (url.protocol !== "http:" && url.protocol !== "https:")
-    throw new PublishCleanError("Registry must be an absolute HTTP(S) URL.");
+  if (url.protocol !== "http:" && url.protocol !== "https:") return malformed;
   if (url.username || url.password)
-    throw new PublishCleanError(
-      "Registry URLs must not contain credentials. Configure npm authentication separately.",
-    );
+    return {
+      rule: "registry-credentials",
+      message:
+        `Registry URLs must not contain credentials. Configure npm authentication separately ` +
+        `— an .npmrc auth token, or a CI secret — and leave the URL bare. Treat the credential ` +
+        `in this one as compromised: it is in your package.json and was about to be published ` +
+        `inside the tarball's manifest.`,
+    };
+  return null;
 }
 
-/** Check every registry destination in the artifact without disclosing its credentials. */
-export function assertRegistryDestinations(pkg: JsonObject): void {
-  if (!isObject(pkg.publishConfig)) return;
-  for (const [key, value] of Object.entries(pkg.publishConfig))
-    if (key === "registry" || key.endsWith(":registry")) assertRegistry(value);
+/**
+ * A registry chosen on the COMMAND LINE. Throws, because a bad argument is not a defect in the
+ * package being examined: there is nothing to accumulate it with, and every later answer would
+ * be about a destination the author did not ask for.
+ */
+export function assertRegistry(value: unknown): asserts value is string {
+  const fault = registryFault(value);
+  if (fault) throw new PublishCleanError(fault.message);
+}
+
+/**
+ * Every registry destination the ARTIFACT carries, reported rather than thrown.
+ *
+ * `harm` and never healed, so it still refuses the publish — stripping the key would hide that
+ * the credential leaked into a file the author shares, and they still have to rotate it. What
+ * reporting buys is the rest of the run: this sits before the whole artifact scan, so stopping
+ * here used to hide every finding about the tarball instead of one line of it.
+ */
+export function reviewRegistryDestinations(pkg: JsonObject): Finding[] {
+  if (!isObject(pkg.publishConfig)) return [];
+  return Object.entries(pkg.publishConfig).flatMap(([key, value]) => {
+    if (key !== "registry" && !key.endsWith(":registry")) return [];
+    const fault = registryFault(value);
+    if (!fault) return [];
+    return [
+      {
+        rule: fault.rule,
+        consequence: "harm" as const,
+        healed: false,
+        where: `publishConfig[${JSON.stringify(key)}]`,
+        message: fault.message,
+      },
+    ];
+  });
 }
 
 /**
@@ -289,15 +337,16 @@ export function unrecognizedFieldsReport(pkg: JsonObject, kept: readonly string[
 }
 
 /**
- * Refuses a manifest that still carries a spec only a workspace can resolve. Published
- * with one, the package is uninstallable for everyone, and the version cannot be taken
- * back.
+ * Reports a manifest that still carries a spec only a workspace can resolve. Published with one,
+ * the package is uninstallable for everyone, and the version cannot be taken back — so `breaks`
+ * and never healed, which refuses the publish. Guessing a replacement version is exactly the
+ * repair this tool must not attempt.
  *
  * The caller passes an already-stripped manifest, so the dev-only members of DEP_FIELDS are
  * absent by construction. They are still checked, because a guard whose correctness depends on
  * the order it happens to be called in fails silently the day someone reorders it.
  */
-export function assertNoMonorepoProtocols(pkg: JsonObject, files: readonly string[] = []): void {
+export function reviewMonorepoProtocols(pkg: JsonObject, files: readonly string[] = []): Finding[] {
   const failures: string[] = [];
   const shipped = new Set(files);
   for (const field of DEP_FIELDS) {
@@ -330,27 +379,41 @@ export function assertNoMonorepoProtocols(pkg: JsonObject, files: readonly strin
       }
     }
   }
-  if (failures.length > 0) {
-    throw new PublishCleanError(
-      `Packed manifest contains unresolved monorepo-only dependency specs:\n${failures.join("\n")}\n${PUBLISH_ADVISORY}`,
-    );
-  }
+  if (failures.length === 0) return [];
+  return [
+    {
+      rule: "monorepo-only-spec",
+      consequence: "breaks" as const,
+      healed: false,
+      where: `${failures.length} dependency spec(s)`,
+      message: `Packed manifest contains unresolved monorepo-only dependency specs:\n${failures.join("\n")}\n${PUBLISH_ADVISORY}`,
+    },
+  ];
 }
 
-export function assertPublicPackage(pkg: JsonObject): void {
-  if (pkg.private === true)
-    throw new PublishCleanError("Refusing to publish a package with private: true.");
+/**
+ * Why this source package cannot be packed at all, or null.
+ *
+ * These two return their reason rather than throwing it so the caller can state EVERY independent
+ * reason in one run. Each costs the author a full re-run to discover and neither depends on the
+ * other, so throwing at the first would teach one fact per run — the fail-fast this project's
+ * policy forbids.
+ *
+ * They stay outside the finding model deliberately: both are judged before anything is packed, so
+ * there is no artifact for a finding to describe, nothing to heal, and no warning for `--strict`
+ * to raise. A finding here would carry three axes that all have one legal value.
+ */
+export function privatePackageRefusal(pkg: JsonObject): null | string {
+  return pkg.private === true ? "Refusing to publish a package with private: true." : null;
 }
 
-export function assertFilesField(pkg: JsonObject, skip: boolean): void {
-  if (skip) return;
-  if (
-    !Array.isArray(pkg.files) ||
+export function filesFieldRefusal(pkg: JsonObject, skip: boolean): null | string {
+  if (skip) return null;
+  return !Array.isArray(pkg.files) ||
     pkg.files.length === 0 ||
     pkg.files.some((file) => typeof file !== "string" || !file.trim())
-  ) {
-    throw new PublishCleanError(
-      'Package manifest must define a non-empty "files" array of non-empty strings.',
-    );
-  }
+    ? 'Package manifest must define a non-empty "files" array of non-empty strings. ' +
+        "Without it the packer falls back to .gitignore/.npmignore, which selects a file set " +
+        "nobody wrote down. Waive the convention with --skip-file-check if that is deliberate."
+    : null;
 }

@@ -24,11 +24,11 @@ import { isObject, stringifyJson } from "./json";
 import type { JsonObject } from "./json";
 import {
   PUBLISH_ADVISORY,
-  assertFilesField,
+  filesFieldRefusal,
   assertNoLostConsumerFields,
-  assertNoMonorepoProtocols,
-  assertPublicPackage,
-  assertRegistryDestinations,
+  reviewMonorepoProtocols,
+  privatePackageRefusal,
+  reviewRegistryDestinations,
   packageScope,
   stripManifest,
   unrecognizedFieldsReport,
@@ -129,12 +129,13 @@ function warnIfNonPnpmLifecycle(): void {
   console.warn(`${PUBLISH_ADVISORY} Detected lifecycle user agent: ${userAgent}`);
 }
 
-async function assertCleanGit(
+/** Why the source tree cannot be trusted as a release, or null. See `privatePackageRefusal`. */
+async function uncommittedChangesRefusal(
   packageDir: string,
   skip: boolean,
   signal: AbortSignal,
-): Promise<void> {
-  if (skip) return;
+): Promise<null | string> {
+  if (skip) return null;
   let output: string;
   try {
     output = (
@@ -158,9 +159,9 @@ async function assertCleanGit(
       `publish-clean: skipping the uncommitted-changes check — ${error instanceof Error ? error.message : String(error)}\n` +
         `Expected a Git checkout at ${packageDir}? Then this publishes source that was never compared against a commit.`,
     );
-    return;
+    return null;
   }
-  if (output) throw new PublishCleanError(`Source package has uncommitted changes:\n${output}`);
+  return output ? `Source package has uncommitted changes:\n${output}` : null;
 }
 
 /**
@@ -269,9 +270,15 @@ async function packAndClean(
   const keepFields = keptFields(config);
   const allowUnreferenced = allowedUnreferenced(config);
 
-  if (!opts.verify) assertPublicPackage(sourcePkg);
-  await assertCleanGit(packageDir, noGitChecks, signal);
-  assertFilesField(sourcePkg, skipFileCheck);
+  // Gathered, then refused once. Three independent reasons the source cannot be packed, and a
+  // package that is private AND dirty AND declares no `files` is the ordinary first run of this
+  // tool — refusing at the first would hand its author one fact per run.
+  const blockers = [
+    opts.verify ? null : privatePackageRefusal(sourcePkg),
+    await uncommittedChangesRefusal(packageDir, noGitChecks, signal),
+    filesFieldRefusal(sourcePkg, skipFileCheck),
+  ].filter((reason) => reason !== null);
+  if (blockers.length > 0) throw new PublishCleanError(blockers.join("\n\n"));
 
   const root = await mkdtemp(path.join(tmpdir(), "publish-clean-"));
   try {
@@ -282,7 +289,10 @@ async function packAndClean(
     // Keep the original archive in memory for comparison, then rewrite its owned temporary
     // file. A second packer could re-decide the file set from the `files` field this strips.
     const packedPkg = manifestOf(packed, "the packed tarball");
-    if (!opts.verify) assertPublicPackage(packedPkg);
+    // Asked again of the PACKED manifest: a pack hook can set `private`, and stripping the field
+    // happens after this point. Alone rather than gathered, because nothing else has run yet.
+    const hookedPrivate = opts.verify ? null : privatePackageRefusal(packedPkg);
+    if (hookedPrivate) throw new PublishCleanError(hookedPrivate);
     // The packed manifest is what every check judges, because pnpm has already applied any
     // `publishConfig.exports` override by this point — so this value, not the source one, is
     // what consumers will resolve against.
@@ -311,12 +321,14 @@ async function packAndClean(
     // below it throws past the one line that would have printed it.
     const shippedPkg = manifestOf(published, "the published tarball");
     try {
-      findings.push(...reviewPackedContent(finalFiles, allowSuspicious));
-      assertRegistryDestinations(shippedPkg);
+      findings.push(
+        ...reviewPackedContent(finalFiles, allowSuspicious),
+        ...reviewRegistryDestinations(shippedPkg),
+        ...reviewMonorepoProtocols(shippedPkg, finalFiles),
+      );
       // Stops rather than reports, deliberately: an incomplete file set makes every reachability
       // answer below it wrong, so continuing would produce a confident report about nothing.
       assertDeclaredFiles(shippedPkg, finalFiles);
-      assertNoMonorepoProtocols(shippedPkg, finalFiles);
       // A tripwire for this tool's own bugs: every field it would catch is either kept by design
       // or removed on request, and a removal on request is excluded from the comparison. Its
       // decision is exercised directly in the rules suite.
