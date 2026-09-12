@@ -469,6 +469,12 @@ for (const [signal, code] of [
 
 main(cancellation.signal).catch((error: unknown) => {
   console.error("publish-clean:", error instanceof PublishCleanError ? error.message : error);
-  if (error instanceof PublishCleanError && error.cause) console.error("Caused by:", error.cause);
+  // A `PublishCleanError` is a condition this tool has already explained, so its cause is printed
+  // for the one detail the message cannot carry — a JSON syntax position, an errno — and never for
+  // the frames that produced it, which are this file's own internals and bury the actionable line
+  // in a CI log or an agent's context. An unexpected throw is a defect rather than a condition, so
+  // the branch above keeps its stack intact.
+  if (error instanceof PublishCleanError && error.cause)
+    console.error("Caused by:", error.cause instanceof Error ? error.cause.message : error.cause);
   if (!interrupted) process.exitCode = 1;
 });

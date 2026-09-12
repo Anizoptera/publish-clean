@@ -567,6 +567,24 @@ exit 1
     }
   });
 
+  it("explains a failure without burying it in this tool's own stack frames", async () => {
+    const fx = await fixture({ name: "fixture-cause", version: "1.0.0" }, {});
+    try {
+      await writeFile(path.join(fx.dir, "package.json"), '{"name":"x", oops}');
+      const result = await runCli(["verify", fx.dir], process.cwd());
+      expect(result.status).not.toBe(0);
+      // Both halves, because either alone passes for the wrong implementation: dropping the cause
+      // loses the only thing that says WHERE the syntax broke, and printing the cause object drags
+      // in frames from this file that push the actionable line out of a CI log and send an agent
+      // reading it into node internals instead of the fix. The cause's own wording is Node's and
+      // changes between releases, so the assertion is on shape rather than on its text.
+      expect(result.stderr).toContain("Caused by:");
+      expect(result.stderr).not.toMatch(/^\s+at /m);
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
+
   // End-to-end because the claim is about pnpm, not about the rule: pnpm rewrites some
   // workspace specs while packing and leaves `link:` verbatim, and only a real pack says
   // which. Published with one, the package is uninstallable for everyone and the version
