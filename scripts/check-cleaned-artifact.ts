@@ -3,6 +3,14 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+/** Read once, from the artifact rather than the source, and passed to every assertion below. */
+interface CleanedManifest {
+  readonly license: string;
+  readonly name: string;
+  readonly version: string;
+  readonly [field: string]: unknown;
+}
+
 /**
  * This package promises consumers that installing it pulls in nothing else, and that
  * promise is load-bearing: it sits on the publish path and handles registry credentials,
@@ -12,10 +20,7 @@ import path from "node:path";
  * that is the manifest consumers resolve. A dependency added to the source and stripped
  * by the cleaner would be invisible here, and correctly so.
  */
-function assertNoRuntimeDependencies(cleanedPackageDir: string): void {
-  const manifest = JSON.parse(
-    readFileSync(path.join(cleanedPackageDir, "package.json"), "utf8"),
-  ) as Record<string, unknown>;
+function assertNoRuntimeDependencies(manifest: CleanedManifest): void {
   const declared = ["dependencies", "peerDependencies", "optionalDependencies"]
     .filter((field) => Object.keys((manifest[field] as object | undefined) ?? {}).length > 0)
     .map((field) => `${field}: ${Object.keys(manifest[field] as object).join(", ")}`);
@@ -39,17 +44,17 @@ function assertNoRuntimeDependencies(cleanedPackageDir: string): void {
  * from a different tree than the manifest beside it — the stale-artifact case every other check in
  * this pipeline assumes away, because each of them reads whatever `dist/cli.js` happens to hold.
  *
- * No shebang assertion: publint below reports `BIN_FILE_NOT_EXECUTABLE` for a bin entry that lacks
- * one, and it runs at error level. A second copy here would be weaker evidence of the same fact.
+ * No shebang assertion, because the tool itself refuses one now (`bin-no-shebang`, src/shipped.ts)
+ * and the CLI invoked below IS this package applied to itself. Asserting it again here would be a
+ * second, weaker copy — and it would check only this repository, where the rule covers everyone.
+ * publint also reports it, which is not the reason: publint is an additional instrument, never a
+ * guarantee this project is allowed to lean on.
  */
-function assertBannerDeclaresTheArtifact(cleanedPackageDir: string): void {
-  const { license, name, version } = JSON.parse(
-    readFileSync(path.join(cleanedPackageDir, "package.json"), "utf8"),
-  ) as { license: string; name: string; version: string };
-  const [, spdx = "", identity = ""] = readFileSync(
-    path.join(cleanedPackageDir, "dist", "cli.js"),
-    "utf8",
-  ).split("\n", 3);
+function assertBannerDeclaresTheArtifact(
+  shipped: string,
+  { license, name, version }: CleanedManifest,
+): void {
+  const [, spdx = "", identity = ""] = shipped.split("\n", 3);
 
   const tag = `// SPDX-License-Identifier: ${license}`;
   if (spdx !== tag)
@@ -65,6 +70,29 @@ function assertBannerDeclaresTheArtifact(cleanedPackageDir: string): void {
     );
 }
 
+/**
+ * The file the suite ran against and the file the tarball carries must be the same bytes.
+ *
+ * They are two different builds. The lane builds `dist/cli.js` and `vitest` spawns THAT one; then
+ * the CLI below packs with `pnpm`, which runs this package's `prepare` — `tsdown` — so the tarball,
+ * publint and attw all read a SECOND build. Measured by planting an old mtime on `dist/cli.js` and
+ * watching the tool's own run replace it. They agree today only because the build is reproducible,
+ * and nothing else here would notice if it stopped being: the published artifact would simply be one
+ * no test ever executed, with every check still green.
+ *
+ * This is the reproducibility claim in tsdown.config.ts, measured on the axis that matters rather
+ * than as a property — which is also why it costs no extra build: the second one already happens.
+ */
+function assertTestedBytesAreShipped(tested: Buffer, shipped: Buffer): void {
+  if (tested.equals(shipped)) return;
+  throw new Error(
+    `dist/cli.js in the tarball is not the file the tests ran against: ${tested.length} bytes tested, ${shipped.length} shipped.\n` +
+      `The pack re-ran the build through \`prepare\` and got different output, so this build is not reproducible ` +
+      `and the artifact about to be published is one nothing tested. Find what varies between two \`bun run build\` ` +
+      `runs — an embedded timestamp, path, or hash — and remove it.`,
+  );
+}
+
 function run(command: string, args: readonly string[]): string {
   const result = spawnSync(command, [...args], {
     encoding: "utf8",
@@ -76,6 +104,9 @@ function run(command: string, args: readonly string[]): string {
   }
   return result.stdout;
 }
+
+// Read BEFORE the CLI runs: its `pnpm pack` re-runs `prepare`, which overwrites this file.
+const tested = readFileSync("dist/cli.js");
 
 // The CLI keeps no temp tree, so this script names its own and deletes it.
 // publint reads the extracted package; @arethetypeswrong/cli reads the tarball.
@@ -91,8 +122,14 @@ try {
   run("tar", ["xzf", tarball, "-C", root]);
   const artifact = path.join(root, "package");
 
-  assertNoRuntimeDependencies(artifact);
-  assertBannerDeclaresTheArtifact(artifact);
+  const manifest = JSON.parse(
+    readFileSync(path.join(artifact, "package.json"), "utf8"),
+  ) as CleanedManifest;
+  const shipped = readFileSync(path.join(artifact, "dist", "cli.js"));
+
+  assertNoRuntimeDependencies(manifest);
+  assertTestedBytesAreShipped(tested, shipped);
+  assertBannerDeclaresTheArtifact(shipped.toString("utf8"), manifest);
   run("bunx", ["publint", "run", artifact, "--pack", "false"]);
   run("bunx", ["@arethetypeswrong/cli", tarball]);
 } finally {
