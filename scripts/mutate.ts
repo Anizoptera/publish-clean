@@ -375,6 +375,63 @@ const MUTATIONS: readonly Mutation[] = [
     to: 'collectDeclaredPaths(pkg.bin, commands, "relative-only");',
   },
 
+  // --- src/declared.ts: the two directions a declared path can be read wrong --------------------
+  //
+  // This guard is the tool's hardest stop — it THROWS, ahead of every report — and it had no rows
+  // at all while it refused 373 of 5192 real published packages. Both directions need a row: the
+  // tolerances below each exist because their absence fabricated a refusal, and the fatality beside
+  // them exists because its absence would wave a genuinely unusable package through. A reader
+  // tidying one cannot tell which kind they are holding, which is what these rows answer.
+  {
+    name: "declared: an empty main is treated as a path rather than an unset field",
+    file: "src/declared.ts",
+    from: /if \(value === ""\) return;/,
+    to: "",
+  },
+  {
+    name: "declared: module loses the index and extension resolution a bundler gives it",
+    file: "src/declared.ts",
+    from: /collect\(pkg\.module, "main"\);/,
+    to: 'collect(pkg.module, "file");',
+  },
+  {
+    // The opposite direction in one row: `bin` must NOT gain that tolerance, because npm symlinks
+    // the exact path and nothing fills a gap in it.
+    name: "declared: bin gains a tolerance npm does not give it",
+    file: "src/declared.ts",
+    from: /collect\(pkg\.bin, "file"\);/,
+    to: 'collect(pkg.bin, "main");',
+  },
+  {
+    name: "declared: a directory target is read as a file name again",
+    file: "src/declared.ts",
+    from: /if \(!found && name\.endsWith\("\/"\)\) found = published\.some\(\(file\) => file\.startsWith\(name\)\);/,
+    to: "",
+  },
+  {
+    // The same branch in the permissive direction, which no accept-side case can see: a prefix that
+    // matches nothing must still refuse, or a package whose directory moved reads as correct.
+    name: "declared: a directory target is accepted without anything under it",
+    file: "src/declared.ts",
+    from: /found = published\.some\(\(file\) => file\.startsWith\(name\)\);/,
+    to: "found = true;",
+  },
+  {
+    name: "declared: a stale bundler hint aborts the publish again",
+    file: "src/declared.ts",
+    from: /else if \(item\.inert \|\| item\.pattern\) \{/,
+    to: "else if (false) {",
+  },
+  {
+    // The row that matters most. Reporting an unreachable declaration instead of aborting is only
+    // sound while the archive carrying NOTHING the manifest declares is still caught, and that
+    // case looks exactly like the harmless one from inside the loop.
+    name: "declared: an archive carrying nothing the manifest declares is waved through",
+    file: "src/declared.ts",
+    from: /if \(resolved === 0\) missing\.push/,
+    to: "if (false) missing.push",
+  },
+
   // --- src/command.ts: what reaches cmd.exe -----------------------------------------------------
   // 0.7.0 shipped with this hole open, found by a hostile argument rather than by packing a benign
   // repository, so these rows exist to keep the cases that found it attached to the guard. Both
