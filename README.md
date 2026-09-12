@@ -28,7 +28,7 @@ pnpm exec publish-clean -- --access public --tag latest --provenance
 `verify` runs every check and publishes nothing. It works on a `private: true` package, so
 a package that never goes to a registry can still be checked by the rules it would face.
 
-Requires Node.js 22+, pnpm and npm. The CLI has no runtime dependencies. The publish
+Requires Node.js 22+ and pnpm, plus npm to publish. The CLI has no runtime dependencies. The publish
 command above needs [CI provenance setup](#publishing-a-public-package-from-ci).
 
 pnpm 12 installs its native binary from its own install script, so install it with build

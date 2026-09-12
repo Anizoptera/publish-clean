@@ -96,8 +96,9 @@ Manifest configuration, under a "publish-clean" key in package.json:
   allowSuspicious boolean Default for --allow-suspicious.
 
 Preview modes do not test registry access, credentials or provenance eligibility.
-Requires pnpm and npm on PATH. npm provenance additionally requires Node.js 22.14+ and
-npm 11.5.1+, and only a cloud CI runner can produce it.`;
+Requires pnpm on PATH; npm as well to publish, since only the upload uses it. npm
+provenance additionally requires Node.js 22.14+ and npm 11.5.1+, and only a cloud CI
+runner can produce it.`;
 
 export function parseOptions(rawArgs: readonly string[]) {
   const separator = rawArgs.indexOf("--");
