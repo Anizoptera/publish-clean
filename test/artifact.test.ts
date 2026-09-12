@@ -5,9 +5,12 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { validatePackedFiles } from "../src/artifact";
+import { reviewPackedContent } from "../src/artifact";
 import { isFatal } from "../src/finding";
-import { PublishCleanError } from "../src/error";
+
+/** Every assertion here pins the verdict, never the wording: `--strict` off is the weakest case. */
+const refuses = (files: string[], allowSuspicious = false): boolean =>
+  reviewPackedContent(files, allowSuspicious).some((finding) => isFatal(finding, false));
 
 describe.concurrent("critical file patterns", () => {
   // The package's headline promise is that a private key cannot reach the registry, so the
@@ -28,26 +31,24 @@ describe.concurrent("critical file patterns", () => {
 
   for (const secret of secrets) {
     it(`refuses to publish ${secret}`, () => {
-      expect(() => validatePackedFiles(["index.js", secret], false)).toThrow(PublishCleanError);
+      expect(refuses(["index.js", secret])).toBe(true);
     });
   }
 
   // A guard that stopped at the first offender passed every single-file case above, and an
   // author who deletes the one name it printed would publish the rest.
   it("names every offender at once, not just the first", () => {
-    let message = "";
-    try {
-      validatePackedFiles(["index.js", ...secrets], false);
-    } catch (error) {
-      message = (error as Error).message;
-    }
-    for (const secret of secrets) expect(message).toContain(secret);
+    const report = reviewPackedContent(["index.js", ...secrets], false)
+      .map((finding) => finding.message)
+      .join("\n");
+    for (const secret of secrets) expect(report).toContain(secret);
   });
 
-  it("keeps refusing critical files when suspicious checks are skipped", () => {
-    expect(() => validatePackedFiles(["index.js", ".env"], true)).toThrow(
-      "Critical files must not be published",
-    );
+  // The one waiver this tool has must not reach content nobody may waive. `--allow-suspicious`
+  // is a judgement about development files; an author setting it is not consenting to publish a
+  // key, and a shared opt-out is how they would.
+  it("keeps refusing them when the suspicious-file judgement is waived", () => {
+    expect(refuses(["index.js", ".env"], true)).toBe(true);
   });
 
   // The refusal is the cheap half. A packed key is already outside the author's repository, so
@@ -56,28 +57,32 @@ describe.concurrent("critical file patterns", () => {
   // The control is the same refusal over content that carries no credential: advising rotation
   // there is noise that teaches readers to skim the paragraph that matters.
   it("says to rotate a packed credential, and says it only for credentials", () => {
-    expect(() => validatePackedFiles(["index.js", "deploy/id_ed25519"], false)).toThrow(/rotate/i);
-    expect(() =>
-      validatePackedFiles(["index.js", "node_modules/left-pad/index.js"], false),
-    ).toThrow(/files/);
-    expect(() =>
-      validatePackedFiles(["index.js", "node_modules/left-pad/index.js"], false),
-    ).not.toThrow(/rotate/i);
+    const [key] = reviewPackedContent(["index.js", "deploy/id_ed25519"], false);
+    expect(key?.message).toMatch(/rotate/i);
+    const [internals] = reviewPackedContent(["index.js", "node_modules/left-pad/index.js"], false);
+    expect(internals?.message).toMatch(/files/);
+    expect(internals?.message).not.toMatch(/rotate/i);
+  });
+
+  // A name matching both must take the reading whose advice expires: the author has to rotate
+  // the key whatever they do to the tarball, and a run that filed it under the packed directory
+  // would tell them only to fix `files`.
+  it("reads a credential inside a packed directory as the credential", () => {
+    const [finding] = reviewPackedContent(["index.js", "node_modules/pkg/.npmrc"], false);
+    expect(finding?.rule).toBe("secret-file");
   });
 
   it("passes a package that carries none of them", () => {
-    expect(() =>
-      validatePackedFiles(["index.js", "index.d.ts", "README.md", "src/env.js"], false),
-    ).not.toThrow();
+    expect(
+      reviewPackedContent(["index.js", "index.d.ts", "README.md", "src/env.js"], false),
+    ).toEqual([]);
   });
 });
 
 // The default hygiene check, and the one an author meets most often: a package shipping its own
-// test tree or lockfile cannot publish until someone decides. It reports rather than throwing, so
-// the run goes on to collect every other defect, and still refuses — the assertions below pin both
-// halves, because a finding that stopped being fatal would look like a passing test.
-// `--allow-suspicious` exists precisely because that verdict is a judgement call, unlike a leaked
-// key, which is never one and therefore still throws.
+// test tree or lockfile cannot publish until someone decides. The assertions below pin BOTH
+// halves — that it reports, and that it still refuses — because a finding that quietly stopped
+// being fatal would look exactly like a passing test.
 describe.concurrent("suspicious file patterns", () => {
   const junk = [
     "test/index.test.js",
@@ -97,7 +102,7 @@ describe.concurrent("suspicious file patterns", () => {
 
   for (const file of junk) {
     it(`refuses to publish ${file}`, () => {
-      const [finding] = validatePackedFiles(["index.js", file], false);
+      const [finding] = reviewPackedContent(["index.js", file], false);
       expect(finding?.rule).toBe("suspicious-file");
       expect(finding?.message).toContain(file);
       // Reporting rather than throwing must not turn the refusal into a warning: this is the
@@ -107,7 +112,7 @@ describe.concurrent("suspicious file patterns", () => {
   }
 
   it("lets the author overrule the whole judgement at once", () => {
-    expect(validatePackedFiles(["index.js", ...junk], true)).toEqual([]);
+    expect(reviewPackedContent(["index.js", ...junk], true)).toEqual([]);
   });
 
   // The patterns are anchored at a path segment, so a file that merely CONTAINS one of these
@@ -115,7 +120,7 @@ describe.concurrent("suspicious file patterns", () => {
   // default unusable and push every author to the escape hatch.
   it("does not refuse ordinary source that merely reads like it", () => {
     expect(
-      validatePackedFiles(
+      reviewPackedContent(
         ["latest/index.js", "src/contest.js", "protests.js", "my-tsconfig.json.js", "testing.js"],
         false,
       ),

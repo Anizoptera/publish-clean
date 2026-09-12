@@ -10,7 +10,7 @@ import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertSameEntries, validatePackedFiles } from "./artifact";
+import { assertSameEntries, reviewPackedContent } from "./artifact";
 import { assertDeclaredFiles } from "./declared";
 import { requireTool, run } from "./command";
 import { allowedUnreferenced, customDevFields, keptFields, packageConfig } from "./config";
@@ -305,33 +305,44 @@ async function packAndClean(
     const finalFiles = packageFiles(published);
     assertSameEntries(packageFiles(packed), finalFiles);
     assertPreservedArchive(packed, published);
-    findings.push(...validatePackedFiles(finalFiles, allowSuspicious));
+    // Everything that collects findings runs inside the `finally`, so a guard that STOPS the run
+    // cannot also silence what was already found. Without it, a package carrying a leaked key and
+    // a broken entry point reports only the entry point: the key is found first and the abort
+    // below it throws past the one line that would have printed it.
     const shippedPkg = manifestOf(published, "the published tarball");
-    assertRegistryDestinations(shippedPkg);
-    assertDeclaredFiles(shippedPkg, finalFiles);
-    assertNoMonorepoProtocols(shippedPkg, finalFiles);
-    // A tripwire for this tool's own bugs: every field it would catch is either kept by design
-    // or removed on request, and a removal on request is excluded from the comparison. Its
-    // decision is exercised directly in the rules suite.
-    // pnpm may consume publishConfig overrides; preserve its resolved consumer manifest.
-    assertNoLostConsumerFields(packedPkg, shippedPkg, extraDevFields);
-    // The manifest is the one member this tool authors rather than copies, so this is the check
-    // that the rewrite produced the bytes the guards approved, not merely bytes that parse.
-    if (manifestText(published) !== cleanedText)
-      throw new PublishCleanError("Rewritten tarball manifest differs from the cleaned manifest.");
+    try {
+      findings.push(...reviewPackedContent(finalFiles, allowSuspicious));
+      assertRegistryDestinations(shippedPkg);
+      // Stops rather than reports, deliberately: an incomplete file set makes every reachability
+      // answer below it wrong, so continuing would produce a confident report about nothing.
+      assertDeclaredFiles(shippedPkg, finalFiles);
+      assertNoMonorepoProtocols(shippedPkg, finalFiles);
+      // A tripwire for this tool's own bugs: every field it would catch is either kept by design
+      // or removed on request, and a removal on request is excluded from the comparison. Its
+      // decision is exercised directly in the rules suite.
+      // pnpm may consume publishConfig overrides; preserve its resolved consumer manifest.
+      assertNoLostConsumerFields(packedPkg, shippedPkg, extraDevFields);
+      // The manifest is the one member this tool authors rather than copies, so this is the check
+      // that the rewrite produced the bytes the guards approved, not merely bytes that parse.
+      if (manifestText(published) !== cleanedText)
+        throw new PublishCleanError(
+          "Rewritten tarball manifest differs from the cleaned manifest.",
+        );
 
-    // Read from the artifact that ships, like every other guard here. These checks need the file
-    // BODIES — what a branch resolves to, and what nothing reaches — and the bytes are already
-    // decoded, so this costs a map rather than a second decompression.
-    const contents = packageContents(published);
-    findings.push(
-      // Judges names alone, so it takes the file list rather than the bodies beside it.
-      ...reviewPackedNames(shippedPkg, finalFiles),
-      ...reviewShippedFiles(shippedPkg, contents),
-      ...reviewSelfReferences(shippedPkg, contents),
-      ...reviewUnreferencedFiles(shippedPkg, contents, allowUnreferenced),
-    );
-    if (findings.length > 0) console.warn(formatFindings(findings, opts.strict));
+      // Read from the artifact that ships, like every other guard here. These checks need the file
+      // BODIES — what a branch resolves to, and what nothing reaches — and the bytes are already
+      // decoded, so this costs a map rather than a second decompression.
+      const contents = packageContents(published);
+      findings.push(
+        // Judges names alone, so it takes the file list rather than the bodies beside it.
+        ...reviewPackedNames(shippedPkg, finalFiles),
+        ...reviewShippedFiles(shippedPkg, contents),
+        ...reviewSelfReferences(shippedPkg, contents),
+        ...reviewUnreferencedFiles(shippedPkg, contents, allowUnreferenced),
+      );
+    } finally {
+      if (findings.length > 0) console.warn(formatFindings(findings, opts.strict));
+    }
     // Reported first, then decided: an author whose run is about to stop still gets every other
     // finding in the same output, rather than one per re-run.
     if (decide(findings, opts.strict))

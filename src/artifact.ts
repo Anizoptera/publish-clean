@@ -11,16 +11,10 @@
  * argv here. `cli.ts` owns the effects.
  */
 import { PublishCleanError } from "./error";
-import type { Finding } from "./finding";
+import type { Consequence, Finding } from "./finding";
 
 /**
  * Content that carries a credential. `^` means the package root.
- *
- * Split from the merely-internal patterns below because the two need OPPOSITE advice, and a
- * message giving one of them the other's is worse than a generic one: a secret needs rotating
- * whatever you do to the tarball, and telling its owner only to fix `files` reads as a repair
- * that does not exist. Nothing here is ever stripped for the author — a stripped secret has
- * still leaked, and removing it from the artifact is how it goes unrotated.
  *
  * Case-insensitive throughout, because the filesystems most packages are built on are
  * too. On macOS and Windows `Server.PEM` and `server.pem` are the same file, so a
@@ -39,10 +33,7 @@ const SECRET_PATTERNS = [
   /(?:^|\/)id_(?:rsa|dsa|ecdsa|ed25519)$/i,
 ];
 
-/**
- * Build-machine internals. Nothing to rotate — they carry no credential of their own — so the
- * only repair is to stop packing them, which is why they are judged apart from the secrets.
- */
+/** Build-machine internals. No credential of their own, so the only repair is to stop packing. */
 const INTERNAL_PATTERNS = [/(?:^|\/)node_modules(?:\/|$)/i, /(?:^|\/)\.git(?:\/|$)/i];
 
 const SUSPICIOUS_PATTERNS = [
@@ -54,66 +45,107 @@ const SUSPICIOUS_PATTERNS = [
 ];
 
 /**
- * Judges the packed file list in two halves that must not be merged.
+ * Every kind of content the tarball must not carry, in severity order.
  *
- * A `suspicious` hit is a judgement call — hence `--allow-suspicious` — so it reports like every
- * other defect in the package being examined, and the run continues to collect the rest. It still
- * refuses to publish, through `rulesAbort`.
+ * Order is PRECEDENCE, not presentation: a name matching several rules belongs to the first, so
+ * `node_modules/x/.env` is a leaked credential rather than a packed directory. That is the
+ * reading whose advice expires if it arrives late.
  *
- * A `critical` hit THROWS instead, which ends the run at the offender: nothing after this line
- * decides whether a leaked key reaches a registry, and nothing after it gets to report either. The
- * cost of that is a leaked key arriving alone, without whatever else the same package is doing
- * wrong. `Consequence` reserves `harm` for exactly this content — a secret, `node_modules`, Git
- * internals — and this throw is why nothing emits it; that member is not dead, it is this branch
- * written in the other model.
+ * One table rather than three code paths because the three differ only in which names they match
+ * and what the author must then do. Judging them alike is what lets one run report all three; a
+ * rule that stopped the run at its own hit would hide the two below it.
  */
-export function validatePackedFiles(files: readonly string[], skipSuspicious: boolean): Finding[] {
-  // One pass, and secrets win a name matching both — `node_modules/x/.env` is a leaked
-  // credential first and a packed directory second, and the rotation instruction is the half
-  // that expires if it arrives late.
-  const secrets: string[] = [];
-  const internals: string[] = [];
-  for (const file of files) {
-    if (SECRET_PATTERNS.some((pattern) => pattern.test(file))) secrets.push(file);
-    else if (INTERNAL_PATTERNS.some((pattern) => pattern.test(file))) internals.push(file);
-  }
-  const critical = [...secrets, ...internals];
-  if (critical.length > 0)
-    throw new PublishCleanError(
-      `Critical files must not be published:\n${critical.map((file) => JSON.stringify(file)).join("\n")}\n` +
-        (secrets.length > 0
-          ? `Treat every credential above as compromised and rotate it now. Publishing was not ` +
-            `required for that — it was packed, so it exists outside your repository already. ` +
-            `This tool will not strip them for you: a stripped secret has still leaked, and an ` +
-            `artifact that looks clean is how it goes unrotated.\n`
-          : "") +
-        `Then narrow the "files" array in your package.json so the next pack cannot reach them.`,
-    );
-  if (skipSuspicious) return [];
+const PACKED_CONTENT_RULES: readonly {
+  readonly rule: string;
+  readonly patterns: readonly RegExp[];
+  readonly consequence: Consequence;
+  /** Fatal despite `waste`; see `Finding.rulesAbort`. Stated per row, never inferred from absence. */
+  readonly rulesAbort: boolean;
+  /** True only where the judgement is a call an author may overrule. */
+  readonly waivable: boolean;
+  readonly explain: (files: readonly string[]) => string;
+}[] = [
+  {
+    rule: "secret-file",
+    patterns: SECRET_PATTERNS,
+    consequence: "harm",
+    rulesAbort: false,
+    waivable: false,
+    explain: (files) =>
+      `Treat every file below as a compromised credential and rotate it now. Publishing was ` +
+      `never required for that — it was packed, so it already exists outside your repository:\n` +
+      `${files.map((file) => `  ${file}`).join("\n")}\n` +
+      `This tool will not strip them for you: a stripped secret has still leaked, and an ` +
+      `artifact that looks clean is how a leak goes unrotated. Once the credentials are dead, ` +
+      `narrow the "files" array in your package.json so the next pack cannot reach them.`,
+  },
+  {
+    rule: "internal-file",
+    patterns: INTERNAL_PATTERNS,
+    consequence: "harm",
+    rulesAbort: false,
+    waivable: false,
+    explain: (files) =>
+      `These belong to the machine that built the package, not to the package:\n` +
+      `${files.map((file) => `  ${file}`).join("\n")}\n` +
+      `A packed .git carries every committed blob and your remote URLs; a packed node_modules ` +
+      `installs a second, unresolvable copy of your dependency tree over the consumer's own. ` +
+      `Narrow the "files" array in your package.json.`,
+  },
+  {
+    rule: "suspicious-file",
+    patterns: SUSPICIOUS_PATTERNS,
+    // Bytes and noise: none of these breaks an install or leaks anything. It still stops the
+    // run, because the maintainer ruled shipped waste an error outright, as for
+    // `unreferenced-file` — and unlike the two above, that verdict is a judgement call.
+    consequence: "waste",
+    rulesAbort: true,
+    waivable: true,
+    explain: (files) =>
+      `These are development files rather than anything a consumer installs, so everyone who ` +
+      `installs this package downloads them forever for nothing:\n` +
+      `${files.map((file) => `  ${file}`).join("\n")}\n` +
+      `Remove them from the "files" array in your package.json. If this package ships them on ` +
+      `purpose — a test helper other packages import, a tsconfig consumers extend — overrule ` +
+      `the judgement with --allow-suspicious, or "publish-clean": { "allowSuspicious": true }.`,
+  },
+];
 
-  const suspicious = files.filter((file) =>
-    SUSPICIOUS_PATTERNS.some((pattern) => pattern.test(file)),
-  );
-  if (suspicious.length === 0) return [];
-  return [
-    {
-      rule: "suspicious-file",
-      // Bytes and noise: none of these breaks an install or leaks anything — a leak is the
-      // `critical` half above, which throws. It still stops the run, because the maintainer
-      // ruled shipped waste an error outright, exactly as for `unreferenced-file`.
-      consequence: "waste",
-      rulesAbort: true,
-      healed: false,
-      where: `${suspicious.length} files`,
-      message:
-        `These are development files rather than anything a consumer installs, so everyone who ` +
-        `installs this package downloads them forever for nothing:\n` +
-        `${suspicious.map((file) => `  ${file}`).join("\n")}\n` +
-        `Remove them from the "files" array in your package.json. If this package ships them on ` +
-        `purpose — a test helper other packages import, a tsconfig consumers extend — overrule ` +
-        `the judgement with --allow-suspicious, or "publish-clean": { "allowSuspicious": true }.`,
-    },
-  ];
+/**
+ * Reports every kind of content the artifact must not carry, in one pass.
+ *
+ * Reports rather than throws, including for a leaked key. The refusal is no weaker for it:
+ * `isFatal` returns true for any consequence other than `waste` after reading only `healed`, and
+ * `harm` is never healed, so no flag reaches this verdict and `--strict` has nothing to add.
+ * What it buys is that an author packing a key AND a test tree AND a dead file learns all three
+ * in one run — which is the whole reason every other check here returns findings too.
+ */
+export function reviewPackedContent(files: readonly string[], allowSuspicious: boolean): Finding[] {
+  const active = PACKED_CONTENT_RULES.filter((rule) => !rule.waivable || !allowSuspicious);
+  const hits = new Map<(typeof active)[number], string[]>();
+  for (const file of files) {
+    const rule = active.find(({ patterns }) => patterns.some((pattern) => pattern.test(file)));
+    if (!rule) continue;
+    const matched = hits.get(rule);
+    if (matched) matched.push(file);
+    else hits.set(rule, [file]);
+  }
+  // Walks the table rather than the map, so the report reads in severity order however the
+  // archive happened to be ordered.
+  return active.flatMap((rule) => {
+    const matched = hits.get(rule);
+    if (!matched) return [];
+    return [
+      {
+        rule: rule.rule,
+        consequence: rule.consequence,
+        rulesAbort: rule.rulesAbort,
+        healed: false,
+        where: `${matched.length} packed file(s)`,
+        message: rule.explain(matched),
+      },
+    ];
+  });
 }
 
 /**

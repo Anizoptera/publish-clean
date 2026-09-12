@@ -542,8 +542,12 @@ exit 1
         { TMPDIR: temp },
       );
       expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain("Critical files must not be published");
+      expect(result.stderr).toContain("secret-file");
       expect(result.stderr).toContain("config/deploy.key");
+      // `--allow-suspicious` is set above, and must not have reached this: one escape hatch
+      // relaxes exactly one policy, and nobody waiving a test-tree judgement is consenting to
+      // publish a key.
+      expect(result.stderr).toMatch(/rotate/i);
       expect(result.stdout).not.toContain("Final tarball");
       const leftovers = (await readdir(temp)).filter((name) => name.startsWith("publish-clean-"));
       expect(leftovers).toEqual([]);
@@ -668,7 +672,7 @@ it.concurrent("scans and preserves the effective names pnpm emits for long USTAR
     const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(secret);
-    expect(result.stderr).toContain("Critical files");
+    expect(result.stderr).toContain("secret-file");
   } finally {
     await cleanup(fx.root);
   }

@@ -61,23 +61,24 @@ notes: the section for a version is published verbatim when its tag is pushed.
   the warning quotes git's own explanation of which it was. Use `--no-git-checks` for what it
   says: a repository whose tree is dirty, which still stops the run.
 
-- **A packed credential is now told to rotate it.** The refusal named the files and then advised
-  only fixing the `files` array, which reads as the whole repair — it is not: the key was written
-  into a tarball on the build machine, so it is out of the repository whether or not anything was
-  published, and only rotation ends that. The message says so, and says why this tool will not
-  strip the file for you: an artifact that looks clean is how a leak goes unrotated. Content that
-  carries no credential of its own — `node_modules`, `.git` — still gets only the `files` advice,
-  since there is nothing there to rotate. Measured over 2485 published packages in this machine's
-  install cache, one fires these rules at all, so this is the message that matters when it does.
+- **Forbidden content in the tarball is reported with everything else, in one run.** Packing a
+  key, a `node_modules`, a `.git`, a test tree or a lockfile used to stop the run on the spot, so
+  the rest of the report was never produced: an author fixed one problem per round trip without
+  knowing how many were left. All of it now reports as findings — `secret-file`, `internal-file`,
+  `suspicious-file` — beside the export, reachability and packed-name rules, and a run that is
+  about to stop still prints everything it found.
 
-- **A shipped development file is reported alongside every other defect instead of ending the
-  run.** Packing a test tree, a lockfile, a `tsconfig.json` or a `.github` directory used to stop
-  the run on the spot, so the rest of the report was never produced and an author fixed one problem
-  per round trip without knowing how many were left. It now reports as the `suspicious-file`
-  finding and still refuses to publish, exactly as the shipped-file-nothing-reaches rule does;
-  `--allow-suspicious` and `"publish-clean": { "allowSuspicious": true }` still waive it. A leaked
-  key, `node_modules` or a `.git` directory continues to stop the run immediately — that verdict is
-  never a judgement call and must not be reachable past.
+  Nothing is weaker for it. `secret-file` and `internal-file` are `harm`: no flag reaches them,
+  `--strict` has nothing to add, and they are never repaired for you. `suspicious-file` is the one
+  judgement call, waived by `--allow-suspicious` or `"publish-clean": { "allowSuspicious": true }`
+  and by nothing else.
+
+  A packed credential is now also told to **rotate** it. The old message named the files and
+  advised fixing the `files` array, which reads as the whole repair and is not: the key was
+  written into a tarball on the build machine, so it left your repository whether or not anything
+  was published. `node_modules` and `.git` carry no credential of their own and still get only the
+  `files` advice. Measured over 2485 published packages in one machine's install cache, a single
+  package fires these rules at all — so the message is most of what they are worth.
 
 ### Fixed
 

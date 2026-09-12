@@ -18,9 +18,8 @@
  * re-run while shipping a broken one costs a release nobody can take back.
  *
  * - `harm` — a secret, `node_modules`, Git internals. NEVER healed: stripping a leaked token
- *   hides that it leaked, and the author still has to rotate it. No rule emits it today, because
- *   `validatePackedFiles` refuses that content by throwing instead; the member is that branch
- *   expressed here, not a spare one to delete.
+ *   hides that it leaked, and the author still has to rotate it. Nothing waives it: `isFatal`
+ *   reads only `healed` for a consequence other than `waste`, so no flag reaches this verdict.
  * - `breaks` — a consumer's build fails or silently gets the wrong file.
  * - `waste` — bytes or noise; nothing breaks.
  */

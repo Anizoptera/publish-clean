@@ -184,12 +184,21 @@ const MUTATIONS: readonly Mutation[] = [
 
   // --- src/artifact.ts: the two halves of the packed-file verdict -------------------------------
   {
-    // The headline promise. Nothing downstream re-decides it, so the only thing that can retire
-    // this refusal is the condition itself going false.
-    name: "a leaked key no longer stops the run",
+    // The headline promise, and the whole of what makes it unwaivable: `harm` is fatal in
+    // `isFatal` before any flag is read, where `waste` without `rulesAbort` is fatal only under
+    // `--strict`. Hits the first row in the table, which is the secrets one.
+    name: "a leaked key becomes a warning",
     file: "src/artifact.ts",
-    from: /if \(critical\.length > 0\)/,
-    to: "if (critical.length > 999)",
+    from: /consequence: "harm"/,
+    to: 'consequence: "waste"',
+  },
+  {
+    // Table order is precedence. Flip it and `node_modules/x/.env` files as a packed directory,
+    // so its owner is told to fix `files` and never told to rotate the key.
+    name: "a credential inside a packed directory loses to the directory",
+    file: "src/artifact.ts",
+    from: /const rule = active\.find\(/,
+    to: "const rule = active.findLast(",
   },
   {
     // Reporting rather than throwing is only sound while the finding stays fatal; drop this one

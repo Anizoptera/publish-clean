@@ -28,7 +28,13 @@
   question asked, for a job this file already does — and it answers in lines, so it cannot express
   a filename containing one. Tests may use it freely, and one case pins this reader against it on a
   real pnpm archive; that cross-check is the reason a hand-written parser is acceptable here.
-- Never weaken critical artifact checks for secrets, `node_modules`, Git internals, or broken export paths.
+- Never weaken critical artifact checks for secrets, `node_modules`, Git internals, or broken export
+  paths. They REPORT rather than throw, and that is not a weakening: `secret-file` and
+  `internal-file` carry `consequence: "harm"`, which `isFatal` returns true for after reading only
+  `healed`, so no flag reaches them and `--strict` has nothing to add. Reporting is what lets one
+  run show a leaked key AND everything else wrong with the package; a throw showed the key alone.
+  Do not "restore" the throw for safety — it buys no refusal that `harm` does not already give, and
+  it costs the rest of the report.
 - Never spawn with `{ shell: true }`, on any platform, however much simpler the Windows branch in
   `src/command.ts` would look. A shell space-joins the argument vector with NO escaping — Node
   runtime-deprecated it in v24 as injection (DEP0190) — and the arguments a caller writes after `--`
