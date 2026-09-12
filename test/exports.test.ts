@@ -147,19 +147,29 @@ it("reorders toward the canonical order only when the permutation is provably ne
   // Hoisting `types` here would CHANGE what a checker resolves — node16 ESM activates `types`
   // and `import` at once, so it takes `./m.js` today and would take `./t.d.ts` after the move.
   // That is why types-not-first is a real defect and why this tool refuses to repair it: the
-  // fix is a semantic change and only the author knows which file each consumer should get.
+  // fix is a semantic change and only the author knows which file each consumer should get. It
+  // is not fatal, because the checker reaching `./m.js` then reads the `.d.ts` beside it.
   const unsafe = heal({
     exports: { ".": { import: "./m.js", types: "./t.d.ts", default: "./m.js" } },
   });
   expect(unsafe.rules).toContain("exports-condition-order-unsafe");
   expect(
     unsafe.findings.find((f) => f.rule === "exports-condition-order-unsafe")?.consequence,
-  ).toBe("breaks");
+  ).toBe("waste");
 
-  // `module` is active even under `require` in every measured bundler, so `require` first costs
-  // tree-shaking. Same shape, also refused.
+  // `module` losing to the ESM entry point beside it costs a bundler the build tuned for it and
+  // nothing more, so this one is reported rather than refused.
+  const variant = heal({ exports: { ".": { import: "./m.mjs", module: "./m.esm.js" } } });
+  expect(
+    variant.findings.find((f) => f.rule === "exports-condition-order-unsafe")?.consequence,
+  ).toBe("waste");
+
+  // Losing it to `require` is the opposite: `module` is active even under `require` in every
+  // measured bundler, so `require` first serves CJS where ESM was available. That one aborts.
   const bundler = heal({ exports: { ".": { require: "./c.cjs", module: "./m.js" } } });
-  expect(bundler.rules).toContain("exports-condition-order-unsafe");
+  expect(
+    bundler.findings.find((f) => f.rule === "exports-condition-order-unsafe")?.consequence,
+  ).toBe("breaks");
   expect(bundler.result.exports).toEqual({ ".": { require: "./c.cjs", module: "./m.js" } });
 
   // A rank inversion binding no measured constraint is NOT a defect: which of `import` and
@@ -167,6 +177,53 @@ it("reorders toward the canonical order only when the permutation is provably ne
   expect(heal({ exports: { ".": { import: "./m.js", node: "./n.js" } } }).rules).not.toContain(
     "exports-condition-order-unsafe",
   );
+});
+
+it("refuses a shadowed condition only when a consumer can actually lose its target", () => {
+  // Every specimen below is non-neutral to reorder, so each one reaches the ordering test rather
+  // than passing through the repair above. The control at the end proves the test still bites.
+  const unsafe = (exports: unknown): boolean =>
+    heal({ exports } as Record<string, unknown>).rules.includes("exports-condition-order-unsafe");
+
+  // `module` ahead of `node` is the author ranking a bundler above a runtime. Forcedness binds a
+  // key against LOSING, so the forced key winning is that constraint being met, not broken. Every
+  // `@aws-sdk` and `@smithy` package is built this way.
+  expect(unsafe({ ".": { module: "./m.js", node: "./n.js", default: "./d.js" } })).toBe(false);
+
+  // The winner re-dispatches on the loser, so a consumer activating both meets it inside and gets
+  // the file built for it — the `@emotion/styled` shape, where the canonical order is worse.
+  expect(
+    unsafe({
+      ".": {
+        development: { "edge-light": "./d.edge.js", default: "./d.js" },
+        "edge-light": "./p.edge.js",
+        default: "./p.js",
+      },
+    }),
+  ).toBe(false);
+
+  // `browser` and `bun` carry the same file, so no consumer can observe which one it matched;
+  // `import` ahead of `node` is what keeps the reorder non-neutral. The `node-fetch-native` shape.
+  expect(
+    unsafe({
+      ".": {
+        browser: "./x.js",
+        bun: "./x.js",
+        import: "./m.js",
+        node: "./n.js",
+        default: "./d.js",
+      },
+    }),
+  ).toBe(false);
+
+  // Control: different targets, no re-dispatch, and a forced runtime name losing. A Metro config
+  // that adds `browser` to its condition names gets the browser build instead of the one built for
+  // React Native — the `@azure/core-util` and `bson` shape, and still fatal.
+  expect(
+    unsafe({
+      ".": { browser: "./b.js", "react-native": "./rn.js", default: "./d.js" },
+    }),
+  ).toBe(true);
 });
 
 it("keeps a condition legally named __proto__, which assignment would silently drop", () => {

@@ -10,7 +10,7 @@
  * Ambient inputs arrive as parameters — no process, filesystem or argv here.
  */
 import { equivalent, reachableByAnyConsumer, ROW_BUDGET, rowsOf } from "./conditions";
-import type { Finding } from "./finding";
+import type { Consequence, Finding } from "./finding";
 import { isObject } from "./json";
 import type { JsonObject } from "./json";
 
@@ -94,8 +94,8 @@ function isKnown(name: string): boolean {
 }
 
 /**
- * True when two keys sit in an order a MEASUREMENT forbids — not merely one this tool would have
- * written differently.
+ * What it costs a consumer that two keys sit in an order a MEASUREMENT forbids — not merely one
+ * this tool would have written differently — or `undefined` when the order is sound.
  *
  * Only forced tiers count, because a rank inversion on its own is no defect: `{import: X,
  * node: Y}` inverts the canonical rank and is a perfectly good map, since which of the two is
@@ -105,17 +105,61 @@ function isKnown(name: string): boolean {
  *
  * `default` is excluded: everything after it is unreachable, which `reportReachability` already
  * says, naming the dead target rather than the ordering.
+ *
+ * The key listed LATER is the one that LOSES, because a consumer activating both takes the first
+ * key it matches — and only a forced key LOSING is a defect. Forcedness is one-directional: it
+ * says a consumer activating this key must not be handed another key's target, so the key winning
+ * is that constraint being SATISFIED. Reporting the other direction refused `@aws-sdk/core`,
+ * `@smithy/core`, `underscore` and every package built like them, all over `module` placed ahead
+ * of `node` — which is the author ranking a bundler above a runtime, the call this function exists
+ * to leave alone.
+ *
+ * What the losing key would have given the consumer then decides the consequence, and two losses
+ * cost nothing a publish should be refused over:
+ *
+ * - `types` names a file nobody executes. A checker that misses it resolves the JS target instead
+ *   and reads the `.d.ts` sitting beside it, which is why 80 of the 103 packages this rule fired
+ *   on across 3674 installed names type-check correctly today. The remaining 23 hand a checker no
+ *   declarations at all, a smaller loss than `exports-unresolvable` — a consumer resolving NOTHING
+ *   — which this tool already reports as a warning.
+ * - `module` losing to `import` hands a bundler the ESM entry point meant for Node rather than the
+ *   ESM build meant for bundlers. A tuned variant, not another module system. Losing it to
+ *   `require` is the opposite and stays fatal: that one serves CJS where ESM was available.
  */
-function forcedOrderViolation(keys: readonly string[]): boolean {
+function forcedOrderConsequence(node: JsonObject): Consequence | undefined {
+  const keys = Object.keys(node);
+  let worst: Consequence | undefined;
   for (let i = 0; i < keys.length; i++)
     for (let j = i + 1; j < keys.length; j++) {
-      const earlier = conditionRank(keys[i] ?? "");
-      const later = conditionRank(keys[j] ?? "");
+      const winner = keys[i] ?? "";
+      const loser = keys[j] ?? "";
+      const earlier = conditionRank(winner);
+      const later = conditionRank(loser);
       if (earlier === undefined || later === undefined || earlier <= later) continue;
-      if (keys[i] === "default" || keys[j] === "default") continue;
-      if ((TIERS[earlier]?.forced ?? false) || (TIERS[later]?.forced ?? false)) return true;
+      // Only `default` can win a rank inversion, holding the last rank, and a key stranded behind
+      // it is `reportReachability`'s to name.
+      if (winner === "default") continue;
+      if (!(TIERS[later]?.forced ?? false)) continue;
+      // The winner costs nobody the loser's specificity when its own subtree dispatches on the
+      // loser: a consumer activating both enters the winner and meets the loser inside. One level
+      // is enough to decide it, because a misordering WITHIN that subtree is a node of its own and
+      // is reported when the walk reaches it. `@emotion/styled` is the shape — `development` ahead
+      // of `edge-light`, and `development` re-dispatching on `edge-light`, `worker` and `workerd`,
+      // so a dev build on an edge runtime gets the file built for it and the canonical order would
+      // hand it a production build instead.
+      const subtree = node[winner];
+      if (isObject(subtree) && Object.hasOwn(subtree, loser)) continue;
+      // Two keys carrying the same target cannot be told apart by any consumer, so their order is
+      // not observable at all. `node-fetch-native` lists eleven runtime names ahead of `node`,
+      // every one of them the same file, and a serialised comparison is the whole test: inside a
+      // condition map key ORDER is semantic, so two subtrees agree exactly when they agree
+      // key-for-key in sequence.
+      if (JSON.stringify(subtree) === JSON.stringify(node[loser])) continue;
+      if (later === conditionRank("types") || (loser === "module" && winner === "import"))
+        worst ??= "waste";
+      else return "breaks";
     }
-  return false;
+  return worst;
 }
 
 /**
@@ -260,25 +304,34 @@ function healNode(node: unknown, where: string, findings: Finding[]): unknown {
       });
       current = permuted;
       changed = true;
-    } else if (forcedOrderViolation(Object.keys(current))) {
-      findings.push({
-        rule: "exports-condition-order-unsafe",
-        consequence: "breaks",
-        healed: false,
-        where,
-        message:
-          `These keys are out of canonical order and reordering them would change what some ` +
-          `consumer resolves, so this tool will not do it: ` +
-          `${Object.keys(current)
-            .map((key) => JSON.stringify(key))
-            .join(", ")}. ` +
-          `The order that holds for every measured consumer is ` +
-          `${ordered.map((key) => JSON.stringify(key)).join(", ")}. ` +
-          `Because a checker also activates node/import/require, and a bundler activates ` +
-          `module even under require, and Bun and Deno both activate node, the current order ` +
-          `hands at least one of them a file meant for another. Fix it by hand: the branches ` +
-          `differ, so only you know which target each consumer should get.`,
-      });
+    } else {
+      const consequence = forcedOrderConsequence(current);
+      if (consequence !== undefined)
+        findings.push({
+          rule: "exports-condition-order-unsafe",
+          consequence,
+          healed: false,
+          where,
+          message:
+            `These keys are out of canonical order and reordering them would change what some ` +
+            `consumer resolves, so this tool will not do it: ` +
+            `${Object.keys(current)
+              .map((key) => JSON.stringify(key))
+              .join(", ")}. ` +
+            `The order that holds for every measured consumer is ` +
+            `${ordered.map((key) => JSON.stringify(key)).join(", ")}. ` +
+            (consequence === "breaks"
+              ? `Because a checker also activates node/import/require, and a bundler activates ` +
+                `module even under require, and Bun and Deno both activate node, the current ` +
+                `order hands at least one of them a file meant for another. Fix it by hand: the ` +
+                `branches differ, so only you know which target each consumer should get.`
+              : `What is out of place here costs no consumer another runtime's build: it either ` +
+                `names declarations, which a type-checker reads from the JS target's adjacent ` +
+                `.d.ts when this map does not offer them, or names a bundler's ESM variant ` +
+                `losing to the ESM entry point beside it. Fix it by hand — the branches differ, ` +
+                `so only you know which target each consumer should get — or use --strict to ` +
+                `refuse a publish over it.`),
+        });
     }
   }
 
