@@ -151,6 +151,13 @@
 - Split CLI args at `--` before parsing; accept only the publication options in `src/options.ts`
   afterward. Reject extra operands, workspace selectors and flag-shaped values: npm reparses
   even `--tag=--workspace` as a workspace option, so equals-form alone does not bind a value.
+- A fault the CALLER caused is a condition this tool states in its own words; a fault this tool
+  caused is a defect and keeps its stack (`main`'s catch in `src/cli.ts`). Never let a third-party
+  parser's message reach the user: it carries that library's assumptions about a syntax it does not
+  own — `parseArgs` answers an unknown flag by advising `--`, which here forwards arguments to
+  `npm publish`. Restate it, drop the cause, and list what IS accepted from the same table the
+  parser reads, never a second copy. One `try` per fault, too: a block spanning a read and a parse
+  reports both as whichever one the message names.
 - Keep npm publication in `.github/workflows/release.yml`; npm trusted publishing is keyed by workflow filename.
 - Release must wait for every check on its tagged commit. `verify` calls the local
   `check.yml` with no token permissions; `publish` requires its success and owns the

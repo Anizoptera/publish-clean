@@ -1,6 +1,6 @@
 // Refuse unchecked artifact selection and compare accepted flag values with npm's own parser.
 import { expect, it } from "vitest";
-import { parseOptions } from "../src/options";
+import { HELP, parseOptions } from "../src/options";
 import { PublishCleanError } from "../src/error";
 import { run } from "../src/command";
 import { wantsTrustedPublish } from "../src/trusted-publish";
@@ -42,6 +42,25 @@ it.concurrent.each([["--stict"], ["-x"], ["--strict=maybe"]])(
     expect(message).toContain("--tarball-out");
   },
 );
+
+// Help text is documentation, never the parser, and nothing else makes the two agree: a flag added
+// to one and not the other is invisible until someone types it. The refusal above prints the
+// parser's own table, so this reads the real list rather than a second copy of it.
+it.concurrent("documents every flag it accepts", () => {
+  let message = "";
+  try {
+    parseOptions(["--no-such-flag"]);
+  } catch (error) {
+    ({ message } = error as PublishCleanError);
+  }
+  const accepted = [...message.matchAll(/--[a-z][a-z-]+/g)]
+    .map(([flag]) => flag)
+    .filter((flag) => flag !== "--no-such-flag");
+  // Controls on the extraction itself: a regex that stopped matching would pass every check below.
+  expect(accepted.length).toBeGreaterThan(5);
+  expect(accepted).toContain("--verify-only");
+  for (const flag of accepted) expect(HELP).toContain(flag);
+});
 
 it.concurrent.each([
   [["--provenance"], true],
