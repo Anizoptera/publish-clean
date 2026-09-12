@@ -44,22 +44,38 @@ export default defineConfig({
   entry: ["src/cli.ts"],
   format: "esm",
   fixedExtension: false,
-  // Off, so `dist/cli.js` reads as the source does. This package sits on a publish path and
-  // handles registry credentials, so someone deciding whether to trust it must be able to
-  // audit the file in `node_modules` and see the same code the repository shows. Measured
-  // 2026-08-11: enabling it costs 1,157 gzipped bytes on a once-per-developer devDependency
-  // and buys a file an auditor can no longer diff against `src/` — `mangle: false` does not
-  // prevent that, because compress alone rewrote `const` to `let`, `===` to `==`, an early
-  // return into a nested branch, and `if (a) b()` into `a && b()`. Comments survived and
-  // described control flow that no longer matched them.
-  minify: false,
+  // Minified. The shipped file is not an audit surface — a devDependency, public sources, and
+  // `--provenance` binding the tarball's sha512 to the commit that built it — so every transform
+  // that preserves behaviour is taken, and only those. Measured 2026-09-12 on real `pnpm pack`
+  // output: 59.6 kB tarball to 33.7 kB, 138.5 kB installed to 58.2 kB.
+  //
+  // Two switches stay off because they break THIS tool, and both read as free wins off the option
+  // list. `dropConsole` would delete every line it prints; all output here is `console.*`.
+  // `mangleProps` is worth a further 10% and renames properties that cross a process boundary —
+  // the manifests this tool rewrites, and what the tests read back — so 41 of them fail.
+  //
+  // `mangle.keepNames` costs 774 bytes — 2.9% of what minifying saves — and buys back a readable
+  // stack: an unexpected throw here is a defect and prints its frames (`main`'s catch in
+  // `src/cli.ts`), and `at e (cli.js:…)` is not a bug report anyone can act on. oxc leaves
+  // function and class declarations under their own names and still mangles locals. Not to be
+  // confused with `compress.keepNames`, which governs `Function.prototype.name` through compress
+  // and changes no byte here. Mangling them is the last headroom inside tsdown; going lower needs
+  // a second minifier (`@swc/core` before `oxc-minify` reaches 32.7 kB) for a native
+  // devDependency, a post-build step on an irreversible publish, and mangled frames back.
+  minify: { mangle: { keepNames: true } },
   treeshake: { moduleSideEffects: false },
   deps: { neverBundle: true },
   outDir: "dist",
   platform: "node",
   shims: false, // disable all shims/polyfills
+  // Off, and not the way to get readable stacks either. A map embeds `sourcesContent`, the whole
+  // of `src/`, tripling the tarball to 112.1 kB — more than minifying saves. It would not even
+  // name the frames: on Node 24.21.0 `--enable-source-maps` recovers file and line while the
+  // function still prints as `e`, and without that flag Node ignores the map.
   sourcemap: false,
   // Stay within engines.node; trusted publishing checks its stricter runtime floor separately.
+  // Not a size lever: es2022, node22, esnext and unset all emit the same bytes, so this floor is
+  // free and raising it gains nothing.
   target: ["es2022", "node22"],
   tsconfig: "./tsconfig.build.json",
 

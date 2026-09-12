@@ -40,6 +40,12 @@ notes: the section for a version is published verbatim when its tag is pushed.
 
 ### Changed
 
+- **The published package is 43% smaller.** `dist/cli.js` is now minified, taking the download
+  from 59.6 kB to 33.7 kB and the installed file from 138.5 kB to 58.2 kB. Function and class
+  names are deliberately kept, so a stack trace from an unexpected failure still names the
+  function that threw and stays usable in a bug report. Behaviour is unchanged; the transforms
+  that could have altered it are off.
+
 - **One run now tells you everything wrong with your package.** Four checks used to stop at the
   first thing they found, so a package with several defects cost one run per defect: a
   credential in a `publishConfig` registry URL and a `workspace:` dependency spec now report as
