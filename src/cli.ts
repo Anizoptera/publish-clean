@@ -61,9 +61,22 @@ function ownVersion(): string {
 }
 
 function readJson(file: string): JsonObject {
+  // Read and parse are separate failures wearing one message otherwise: running the tool from the
+  // wrong directory is the ordinary first mistake, and "unable to parse" sends its author to look
+  // for a syntax error in a file that is not there.
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (cause) {
+    throw new PublishCleanError(
+      `Unable to read ${file}. Run publish-clean from a package directory, or name one as the ` +
+        "first argument.",
+      { cause },
+    );
+  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(file, "utf8")) as unknown;
+    parsed = JSON.parse(text) as unknown;
   } catch (cause) {
     throw new PublishCleanError(`Unable to parse JSON file: ${file}`, {
       cause,

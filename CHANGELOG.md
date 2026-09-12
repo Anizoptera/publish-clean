@@ -109,6 +109,15 @@ notes: the section for a version is published verbatim when its tag is pushed.
 
 ### Fixed
 
+- **A mistyped flag is answered with the flags that exist.** It used to escape as Node's own
+  `ERR_PARSE_ARGS_UNKNOWN_OPTION`: a stack trace through `node:internal` that reads as a defect in
+  this tool, carrying advice to move the argument after `--` — where this CLI forwards it to
+  `npm publish`, the one step nobody can take back. The reply now names the flag, lists every
+  accepted one, and points at `--help`.
+- **Running from the wrong directory no longer reports a syntax error.** A missing `package.json`
+  and a malformed one shared the message "Unable to parse JSON file", so the ordinary first
+  mistake sent its author hunting for a comma in a file that does not exist. A file that cannot be
+  read now says so and names the fix; a file that cannot be parsed still reports where.
 - **An error no longer buries its own explanation in a stack trace.** The cause of a reported
   failure was printed as an object, so its stack and properties followed it: a malformed
   `package.json` produced nine lines of which two carried information. The cause still prints,

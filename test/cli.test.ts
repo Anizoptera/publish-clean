@@ -715,6 +715,29 @@ it.concurrent("scans and preserves the effective names pnpm emits for long USTAR
   }
 });
 
+// The two ways a first run goes wrong before any package is read. Both used to answer with a fault
+// the author does not have: a missing file reported as a syntax error, and a typo reported as a
+// stack trace through `node:internal`, which reads as a defect in this tool rather than in the
+// command they typed.
+it.concurrent("names the real fault when it cannot even start", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "publish-clean-test-"));
+  try {
+    const missing = await runCli(["verify"], root);
+    expect(missing.status).toBe(1);
+    expect(missing.stderr).toContain("Unable to read");
+    expect(missing.stderr).not.toContain("Unable to parse");
+
+    const typo = await runCli(["verify", "--stict"], root);
+    expect(typo.status).toBe(1);
+    expect(typo.stderr).toContain("--stict");
+    expect(typo.stderr).toContain("--tarball-out");
+    expect(typo.stderr).not.toContain("node:internal");
+    expect(typo.stderr).not.toContain("place it at the end");
+  } finally {
+    await cleanup(root);
+  }
+});
+
 it.concurrent("rejects a private flag written by prepack before it can be stripped", async () => {
   const fx = await fixture(
     {
