@@ -6,7 +6,7 @@ Reordering two condition keys changes which file a consumer gets, so nothing in 
 The manifest is the only surface this tool rewrites, and `exports` is the field on it
 where a silent mistake costs a stranger a broken build with no signal here. This file
 records why the obvious simplifications are not safe, and which measurements a change to
-the walker in `src/artifact.ts` has to keep satisfying.
+the walker in `src/declared.ts` has to keep satisfying.
 
 Profiles below were measured on 2026-09-11 against Node 24.20.0, Bun 1.4.1, Deno 2.9.6,
 TypeScript 7.0.2 and the bundler versions named; each run carried a control subpath with
@@ -326,7 +326,7 @@ Measure a runtime's own set before treating its row as fact.
 ## Node's published algorithm is wrong about fallback arrays
 
 `PACKAGE_TARGET_RESOLVE` as documented stops at the first non-`undefined` result. Real
-Node skips `null` and invalid entries and continues. The comment in `src/artifact.ts`
+Node skips `null` and invalid entries and continues. The comment in `src/declared.ts`
 saying arrays continue past `null` is correct against the runtime; the specification prose
 is the thing that is wrong, so do not "fix" the walker to match the document.
 

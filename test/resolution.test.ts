@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { expect, it } from "vitest";
-import { assertDeclaredFiles } from "../src/artifact";
+import { assertDeclaredFiles } from "../src/declared";
 import type { JsonObject } from "../src/json";
 
 it.concurrent.each([

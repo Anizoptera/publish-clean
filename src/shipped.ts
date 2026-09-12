@@ -10,7 +10,7 @@
  */
 import { Script } from "node:vm";
 
-import { collectDeclaredPaths, normalizeDeclaredPath } from "./artifact";
+import { collectDeclaredPaths, normalizeDeclaredPath } from "./declared";
 import { rowsOf } from "./conditions";
 import type { Finding } from "./finding";
 import { isObject } from "./json";

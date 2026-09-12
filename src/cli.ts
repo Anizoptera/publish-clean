@@ -10,7 +10,8 @@ import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertDeclaredFiles, assertSameEntries, validatePackedFiles } from "./artifact";
+import { assertSameEntries, validatePackedFiles } from "./artifact";
+import { assertDeclaredFiles } from "./declared";
 import { requireTool, run } from "./command";
 import { allowedUnreferenced, customDevFields, keptFields, packageConfig } from "./config";
 import { reviewExports } from "./exports";

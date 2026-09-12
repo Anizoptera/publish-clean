@@ -6,7 +6,7 @@
  * argv here — so every rule is one input to one output. `cli.ts` owns the effects.
  */
 import { PublishCleanError } from "./error";
-import { normalizeDeclaredPath } from "./artifact";
+import { normalizeDeclaredPath } from "./declared";
 import { isObject } from "./json";
 import type { JsonObject } from "./json";
 
