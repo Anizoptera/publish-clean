@@ -353,6 +353,66 @@ const MUTATIONS: readonly Mutation[] = [
     to: "reportReachability(node, where, findings);",
   },
 
+  // --- src/command.ts: what reaches cmd.exe -----------------------------------------------------
+  // 0.7.0 shipped with this hole open, found by a hostile argument rather than by packing a benign
+  // repository, so these rows exist to keep the cases that found it attached to the guard. Both
+  // directions are planted: a refusal that stops refusing publishes the pieces of a split command,
+  // and one that spreads to POSIX refuses paths an `exec` passes through untouched.
+  {
+    name: "cmd.exe refusal stops refusing anything",
+    file: "src/command.ts",
+    from: /\/\[&\|<>\^%\(\)\\r\\n\]\//,
+    to: "/(?!)/",
+  },
+  {
+    name: "cmd.exe refusal reads the arguments but not the command name",
+    file: "src/command.ts",
+    from: /const unsafe = \[command, \.\.\.args\]/,
+    to: "const unsafe = [...args]",
+  },
+  {
+    name: "cmd.exe refusal overlooks a command separator written as a line break",
+    file: "src/command.ts",
+    from: /\[&\|<>\^%\(\)\\r\\n\]/,
+    to: "[&|<>^%()]",
+  },
+  {
+    name: "cmd.exe refusal spreads to platforms that never run a shell",
+    file: "src/command.ts",
+    from: /if \(platform !== "win32"\) return \[command, \[\.\.\.args\]\];/,
+    to: 'if (platform !== "win32" && false) return [command, [...args]];',
+  },
+
+  // --- src/trusted-publish.ts: the identity npm signs for ---------------------------------------
+  // A provenance attestation names a repository, and npm mints it from the workflow's OIDC token
+  // rather than from the manifest. Disagreement between the two is therefore invisible at the
+  // publish and permanent afterwards, which is why the refusals matter and why the two messages
+  // must stay distinguishable — a mutant that falls through to the wrong one is still a mutant.
+  {
+    name: "trusted publish accepts a repository the workflow does not claim",
+    file: "src/trusted-publish.ts",
+    from: /if \(slug !== env\.GITHUB_REPOSITORY\)/,
+    to: "if (slug !== env.GITHUB_REPOSITORY && false)",
+  },
+  {
+    name: "trusted publish signs for a package that names no repository",
+    file: "src/trusted-publish.ts",
+    from: /if \(!repoUrl\)/,
+    to: "if (!repoUrl && false)",
+  },
+  {
+    name: "identity check never runs",
+    file: "src/trusted-publish.ts",
+    from: /if \(env\.GITHUB_ACTIONS !== "true" \|\| typeof env\.GITHUB_REPOSITORY !== "string"\) return;/,
+    to: "return;",
+  },
+  {
+    name: "identity check polices an ordinary publish outside Actions",
+    file: "src/trusted-publish.ts",
+    from: /if \(env\.GITHUB_ACTIONS !== "true" \|\| typeof env\.GITHUB_REPOSITORY !== "string"\) return;/,
+    to: 'if (env.GITHUB_ACTIONS !== "true" && false) return;',
+  },
+
   // --- scripts/git-hooks.ts: the installer stays inside this repository -------------------------
   {
     // The pre-fix behaviour exactly: wire unless there is no repository anywhere above, which in a
@@ -361,6 +421,16 @@ const MUTATIONS: readonly Mutation[] = [
     file: "scripts/git-hooks.ts",
     from: /if \(enclosingRepository\(\) !== realpathSync\(ROOT\)\)/,
     to: "if (enclosingRepository() === null)",
+  },
+  {
+    // Refusing to wire, while clearing what the stranger already had — the same silent harm the
+    // guard exists to prevent, reached from the branch that looks like it declines to act. It is
+    // here because an assertion that a refused repository has NO hooksPath cannot see it: cleared
+    // and never-written read identically, which is why the case asserts the value is still THEIRS.
+    name: "hooks: refusing to wire still clears the wiring that was there",
+    file: "scripts/git-hooks.ts",
+    from: /\)\)\n {4}console\.error\(/,
+    to: '))\n    git("config", "--unset", "core.hooksPath"), console.error(',
   },
 ];
 
