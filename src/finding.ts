@@ -49,17 +49,28 @@ export interface Finding {
 }
 
 /**
- * True when this finding alone must stop the run.
+ * How bad the defect is — and nothing else. Repairing one does not make it milder: the defect is
+ * still in the author's source, and only the published artifact was corrected. Keeping severity
+ * independent of what this run did is what stops a repaired breakage from printing as a warning
+ * and teaching the reader to skim it.
+ */
+export type Severity = "error" | "warning";
+
+export function severityOf(finding: Finding, strict: boolean): Severity {
+  if (finding.consequence !== "waste") return "error";
+  return finding.rulesAbort === true || strict ? "error" : "warning";
+}
+
+/**
+ * Whether this finding alone stops the run — the other axis, and the only irreversible one.
  *
- * Healed findings never stop it: the artifact is correct now, and the message exists so the
- * author can fix the source. `strict` raises the remaining warnings, which is all it does —
- * it cannot promote a healed finding, and it has nothing to add to a rule that is already
- * fatal.
+ * A repair never stops it: the artifact being published is correct now. Everything else that is
+ * error-severity does, because this tool cannot clean it and a published version is burned
+ * forever. Reported first and decided at the end, so a run that stops still shows everything it
+ * found rather than the first thing it met.
  */
 export function isFatal(finding: Finding, strict: boolean): boolean {
-  if (finding.healed) return false;
-  if (finding.consequence !== "waste") return true;
-  return finding.rulesAbort === true || strict;
+  return !finding.healed && severityOf(finding, strict) === "error";
 }
 
 export function decide(findings: readonly Finding[], strict: boolean): boolean {
@@ -67,14 +78,19 @@ export function decide(findings: readonly Finding[], strict: boolean): boolean {
 }
 
 /**
- * One block per finding, prefixed so a reader scanning a release log can tell which lines
- * demanded action and which recorded a repair that already happened.
+ * One block per finding: how bad it is, then separately whether this run already fixed it.
+ *
+ * The two were one word before, with a repair printing as its own gentle category — so a repaired
+ * breakage and a harmless stray file read alike, and the reader learned to skim both. They are
+ * independent facts and print as independent words.
  */
 export function formatFindings(findings: readonly Finding[], strict: boolean): string {
   return findings
     .map((finding) => {
-      const label = finding.healed ? "healed" : isFatal(finding, strict) ? "error" : "warning";
-      return `publish-clean [${label}] ${finding.rule} at ${finding.where}:\n${finding.message}`;
+      const repaired = finding.healed
+        ? " repaired in the published artifact, not in your source:"
+        : "";
+      return `publish-clean [${severityOf(finding, strict)}] ${finding.rule} at ${finding.where}${repaired}\n${finding.message}`;
     })
     .join("\n\n");
 }

@@ -71,19 +71,59 @@ describe.concurrent("the verdict a report hands to its reader", () => {
     expect(decide([harmless], true)).toBe(true);
   });
 
-  it("never labels a finding a warning when it is about to stop the run", () => {
-    // The label is what a human or an agent acts on, and it is computed separately from the exit.
-    // Letting them diverge is the dangerous case: `[warning]` above an aborted publish, or `[error]`
-    // above one that proceeds, teaches the reader the opposite of what happened.
+  // How bad a defect is and what this run did about it are independent, and the report prints
+  // them as independent words. Collapsing them is what makes a reader skim: a repaired breakage
+  // shown as its own gentle category reads like a harmless stray file, and the source defect
+  // survives every release while each release looks clean.
+  it("does not soften a defect because this run repaired the artifact", () => {
+    for (const healed of BOOLEANS)
+      for (const rulesAbort of BOOLEANS)
+        for (const strict of BOOLEANS)
+          for (const consequence of ["harm", "breaks"] as Consequence[])
+            expect(
+              formatFindings([finding({ consequence, healed, rulesAbort })], strict),
+            ).toContain("[error]");
+  });
+
+  it("calls wasted bytes a warning until someone rules otherwise", () => {
+    // The two ways it stops being a warning are the maintainer's own: the rule carries its verdict
+    // as data, or the author asked for more with `--strict`. Healing changes neither.
+    for (const healed of BOOLEANS) {
+      expect(formatFindings([finding({ consequence: "waste", healed })], false)).toContain(
+        "[warning]",
+      );
+      expect(formatFindings([finding({ consequence: "waste", healed })], true)).toContain(
+        "[error]",
+      );
+      expect(
+        formatFindings([finding({ consequence: "waste", healed, rulesAbort: true })], false),
+      ).toContain("[error]");
+    }
+  });
+
+  it("says a repair happened, and says it only when one did", () => {
+    // The severity word alone no longer carries this, so the sentence has to. Without it an author
+    // reading `[error]` above a repaired finding re-releases to fix an artifact already correct —
+    // and with it stated loosely they would believe their SOURCE was fixed, which it never is.
+    const repaired = "repaired in the published artifact, not in your source";
+    for (const consequence of CONSEQUENCES)
+      for (const strict of BOOLEANS) {
+        expect(formatFindings([finding({ consequence, healed: true })], strict)).toContain(
+          repaired,
+        );
+        expect(formatFindings([finding({ consequence })], strict)).not.toContain("repaired");
+      }
+  });
+
+  it("never shows a warning above a run it is about to stop", () => {
+    // The severity is what a human or an agent acts on. `[warning]` above an aborted publish
+    // teaches the reader the opposite of what happened.
     for (const consequence of CONSEQUENCES)
       for (const healed of BOOLEANS)
         for (const rulesAbort of BOOLEANS)
           for (const strict of BOOLEANS) {
             const one = finding({ consequence, healed, rulesAbort });
-            const label = formatFindings([one], strict).split(" ")[1];
-            expect(label).toBe(
-              isFatal(one, strict) ? "[error]" : healed ? "[healed]" : "[warning]",
-            );
+            if (isFatal(one, strict)) expect(formatFindings([one], strict)).toContain("[error]");
           }
   });
 });

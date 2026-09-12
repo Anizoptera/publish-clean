@@ -77,14 +77,35 @@
   condition may legally be named `__proto__`; `JSON.parse` keeps it as an ordinary own property and
   `Object.assign` silently drops it, which publishes a manifest missing a branch with nothing raised
   anywhere. Any fixture covering this needs that key in it.
-- Stopping the run is decided by irreversibility, not by how bad a message sounds. A published
-  version number is burned forever, so abort on an UNHEALED finding that leaks something or breaks a
-  consumer, and never on one that only wastes bytes. A healed finding never aborts — that is a rule
-  about a different case, not an exception to this one. `--strict` raises warnings to errors and must
-  never make a healed finding fatal. A waste finding that still aborts — a shipped file nothing
-  reaches and nobody declared, a shipped development file — says so through `rulesAbort` on the
-  finding itself, never through its rule name, so the divergence stays visible as data instead of
-  becoming a branch somebody tidies away.
+- **Heal what can be healed safely, report everything, and abort at the END — never at the first
+  defect.** The general policy for every check in this tool, including ones not written yet:
+  1. REPAIR only what can be repaired without guessing, and only in the published artifact — never
+     in the author's source, and never where the repair could itself damage something. A secret is
+     the standing example of a defect that must NOT be repaired: stripping it hides the leak.
+  2. ACCUMULATE. A check that finds a defect returns a `Finding` and keeps going, so one run tells
+     an author everything wrong with their package instead of the first thing it met. Failing fast
+     is a defect here, not a virtue. A thrown `PublishCleanError` is reserved for what the run
+     cannot CONTINUE past — unreadable bytes, a file set too incomplete to reason about — never for
+     a defect in the package being examined. Where something still throws mid-pipeline, wrap the
+     section in `try`/`finally` so the findings gathered before it are still printed.
+  3. ABORT at the end when anything error-severity was left unrepaired. Publishing burns a version
+     number forever, so what this tool could not heal, recover or clean must stop the run.
+  4. NEVER abort on a repaired defect. The artifact being published is correct.
+  5. Every abrupt stop that is a judgement call carries its own opt-out, one hatch per rule (see the
+     escape-hatch bullet above). A `harm` finding has none and gets none.
+- **Severity and fatality are INDEPENDENT axes. Do not collapse them.** `severityOf` says how bad
+  the defect is, from the defect alone — never from what this run did about it. `isFatal` says
+  whether the run stops, and it is the only irreversible decision here. A repair moves the second
+  and never the first: it corrected the artifact, not the author's source, so a repaired breakage
+  still prints `[error]` with the repair stated as its own sentence beside it. There is no third
+  severity meaning "healed", and adding one is how a reader learns to skim — a repaired breakage
+  and a harmless stray file would read alike, and the source defect then survives every release.
+  `--strict` raises warnings to errors and must never make a repaired finding fatal.
+- Fatality is decided by irreversibility, not by how bad a message sounds: abort on an unrepaired
+  finding that leaks something or breaks a consumer, and not on one that only wastes bytes. A waste
+  finding that still aborts — a shipped file nothing reaches and nobody declared, a shipped
+  development file — says so through `rulesAbort` on the finding itself, never through its rule
+  name, so the divergence stays visible as data instead of becoming a branch somebody tidies away.
 - `src/shipped.ts` mixes OPPOSITE safe directions, and one scan carries BOTH. NEVER unify them.
   The dead-file scan over-matches deliberately — a false positive only hides a report — but its
   closure also emits `import-case-mismatch`, which ABORTS, so that one finding must take its

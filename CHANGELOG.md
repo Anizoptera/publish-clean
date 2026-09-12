@@ -40,6 +40,13 @@ notes: the section for a version is published verbatim when its tag is pushed.
 
 ### Changed
 
+- **A report now says how bad a defect is and whether it was repaired as two separate facts.**
+  There was a third severity, `[healed]`, which made a repaired breakage and a harmless stray file
+  read alike. A repair corrects the published artifact and never your source, so the defect keeps
+  the severity it had — a repaired breakage prints `[error]` — and the repair is stated in words
+  beside it. Whether the run stops is unchanged: a repaired finding never stops it, with or
+  without `--strict`. Anything parsing the `[healed]` label must read the message instead.
+
 - **Publication stops when the tarball holds a file nothing in the package reaches** — no entry
   point, no import from a reached file, no script. Documentation, licences, declarations, source
   maps, native binaries, assets and nested `package.json` files are exempt by nature. Declare the

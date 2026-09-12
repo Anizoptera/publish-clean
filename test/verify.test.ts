@@ -97,7 +97,7 @@ it.concurrent("repairs a provably inert condition in the manifest it publishes",
   expect(healed.status).toBe(0);
   expect(healed.published?.exports).toEqual({ ".": "./index.js" });
   expect(healed.stderr).toContain("exports-inert-condition");
-  expect(healed.stderr).toContain("[healed]");
+  expect(healed.stderr).toContain("repaired in the published artifact, not in your source");
 
   // --no-heal withholds the rewrite and keeps the finding: the artifact is untouched, and the
   // message must stop claiming a repair it no longer carries.
@@ -107,7 +107,7 @@ it.concurrent("repairs a provably inert condition in the manifest it publishes",
     ".": { node: "./index.js", default: "./index.js" },
   });
   expect(reported.stderr).toContain("exports-inert-condition");
-  expect(reported.stderr).not.toContain("[healed]");
+  expect(reported.stderr).not.toContain("repaired");
 });
 
 it.concurrent("--strict promotes a warning but never a repair", async () => {
