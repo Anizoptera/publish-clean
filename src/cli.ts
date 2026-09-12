@@ -407,8 +407,25 @@ async function packAndClean(
 
     // Copied before publishing, and in every mode, so the retained bytes are exactly
     // the validated artifact regardless of whether the publish itself succeeds.
+    // Created here rather than before the pack, deliberately, and `test/registry.test.ts` pins it:
+    // a validator asserts this directory does NOT exist while it runs, so nothing appears at the
+    // path the caller named until the bytes have passed every check. The cost is that a mistyped
+    // destination is not caught until after the pack — which runs the package's build — and that
+    // is the cheaper side: a wasted build is recoverable, a directory left behind for an artifact
+    // that failed validation is a side effect on the caller's filesystem that they did not get.
     if (opts.tarballOut !== null) {
-      await mkdir(opts.tarballOut, { recursive: true });
+      try {
+        await mkdir(opts.tarballOut, { recursive: true });
+      } catch (cause) {
+        // The caller's path to fix, so it is stated: an `mkdir` stack printed after the run has
+        // already announced its findings reads as a defect in this tool.
+        throw new PublishCleanError(
+          `Unable to create the --tarball-out directory ${opts.tarballOut}.`,
+          {
+            cause,
+          },
+        );
+      }
       const kept = path.join(opts.tarballOut, path.basename(finalTarball));
       await copyFile(finalTarball, kept);
       console.log(`Final tarball kept at: ${kept}`);

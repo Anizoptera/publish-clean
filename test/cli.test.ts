@@ -738,6 +738,28 @@ it.concurrent("names the real fault when it cannot even start", async () => {
   }
 });
 
+// A mistyped output directory is the caller's fault, so it is named rather than thrown as an
+// `mkdir` stack — which lands after the run has already printed its findings verdict and reads as
+// a defect in this tool rather than in the command that was typed.
+it.concurrent("names an unusable --tarball-out instead of failing as a stack", async () => {
+  const fx = await fixture(
+    { name: "@scope/tarball-out", version: "1.0.0", files: ["index.js"], main: "index.js" },
+    { "index.js": "module.exports = 1;\n" },
+  );
+  try {
+    const result = await runCli(["verify", ".", "--tarball-out", "/nonexistent/nope"], fx.dir);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "Unable to create the --tarball-out directory /nonexistent/nope",
+    );
+    expect(result.stderr).not.toContain("node:internal");
+    // The errno still prints: it is the one detail the sentence above cannot carry.
+    expect(result.stderr).toContain("ENOENT");
+  } finally {
+    await cleanup(fx.root);
+  }
+});
+
 it.concurrent("rejects a private flag written by prepack before it can be stripped", async () => {
   const fx = await fixture(
     {
