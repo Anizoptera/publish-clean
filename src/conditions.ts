@@ -128,7 +128,7 @@ function flatten(node: unknown, under: Literals, out: Row[], budget: Budget): vo
   }
   if (!isObject(node)) {
     spend(budget);
-    // A number or boolean here is an invalid target. `assertDeclaredFiles` refuses it with the
+    // A number or boolean here is an invalid target. `reviewDeclaredFiles` refuses it with the
     // message that names the offending value; this walker only has to not claim it resolves.
     out.push({ literals: under, target: { kind: "miss" } });
     return;

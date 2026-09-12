@@ -448,7 +448,7 @@ export function reviewExports(pkg: JsonObject, options: { readonly heal: boolean
     const value = pkg[field];
     if (value === undefined || value === null) continue;
     // `exports` is a subpath map when any key starts with `.`, and a single condition object
-    // otherwise; mixing the two is a package-configuration error `assertDeclaredFiles` refuses.
+    // otherwise; mixing the two is a package-configuration error `reviewDeclaredFiles` refuses.
     // `imports` is always a subpath map.
     const subpaths =
       isObject(value) &&

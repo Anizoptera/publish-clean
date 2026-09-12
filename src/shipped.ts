@@ -311,7 +311,7 @@ export function reviewShippedFiles(pkg: JsonObject, files: ReadonlyMap<string, B
   // as a script under every interpreter, so staying quiet loses nothing that could have run.
   //
   // A declared path the archive does not carry — or one that does not normalise at all, because it
-  // escapes the package — belongs to `assertDeclaredFiles`; reporting it here would give one defect
+  // escapes the package — belongs to `reviewDeclaredFiles`; reporting it here would give one defect
   // two voices that disagree about the remedy.
   const commands: string[] = [];
   collectDeclaredPaths(pkg.bin, commands, "every-string");
@@ -420,7 +420,7 @@ export function reviewUnreferencedFiles(
     // a file their own code imports.
     //
     // Only specifiers from source files. A manifest target that misses is already reported by
-    // `assertDeclaredFiles`, and the script-token seeds are over-matched on purpose, so a miss
+    // `reviewDeclaredFiles`, and the script-token seeds are over-matched on purpose, so a miss
     // there carries no information. Patterns are excluded because `expand` answers them by
     // scanning, where an empty result means no match rather than a broken name.
     //
@@ -471,7 +471,7 @@ export function reviewUnreferencedFiles(
 
   const seeds: string[] = [];
   // `collectDeclaredPaths` already knows which manifest fields hold paths and which of their
-  // strings are paths at all, so the seed set cannot drift from the one `assertDeclaredFiles`
+  // strings are paths at all, so the seed set cannot drift from the one `reviewDeclaredFiles`
   // validates. `bin` and `main` are commonly written bare (`dist/cli.js`, not `./dist/cli.js`) —
   // treating those as external reported every such entry as dead and cost a 3.4x error in the
   // measurement that produced the numbers above.

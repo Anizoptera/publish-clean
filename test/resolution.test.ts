@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { expect, it } from "vitest";
-import { assertDeclaredFiles } from "../src/declared";
+import { reviewDeclaredFiles } from "../src/declared";
 import type { JsonObject } from "../src/json";
 
 it.concurrent.each([
@@ -67,7 +67,7 @@ it.concurrent.each([
       }),
     );
     const consume = () => createRequire(path.join(root, "consumer.cjs"))("fixture");
-    const guard = () => assertDeclaredFiles(manifest, Object.keys(contents));
+    const guard = () => reviewDeclaredFiles(manifest, Object.keys(contents));
     if (broken) {
       expect(consume).toThrow(/Cannot find module/);
       expect(guard).toThrow(/missing/);
@@ -98,25 +98,25 @@ it.concurrent.each([
     );
     await writeFile(path.join(dir, "index.js"), "module.exports = 42");
     expect(() => createRequire(path.join(root, "consumer.cjs"))("fixture")).toThrow(/Invalid/);
-    expect(() => assertDeclaredFiles({ exports: target }, ["index.js"])).toThrow(/invalid/i);
+    expect(() => reviewDeclaredFiles({ exports: target }, ["index.js"])).toThrow(/invalid/i);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
 it("checks wildcard substitutions and reachable conditional array branches", () => {
-  expect(() => assertDeclaredFiles({ exports: { "./*": "./missing/*.js" } }, ["index.js"])).toThrow(
+  expect(() => reviewDeclaredFiles({ exports: { "./*": "./missing/*.js" } }, ["index.js"])).toThrow(
     /missing/,
   );
-  expect(() => assertDeclaredFiles({ exports: { "./*": "./lib/*-*.js" } }, ["lib/a-b.js"])).toThrow(
+  expect(() => reviewDeclaredFiles({ exports: { "./*": "./lib/*-*.js" } }, ["lib/a-b.js"])).toThrow(
     /missing/,
   );
   expect(() =>
-    assertDeclaredFiles({ exports: { "./*": "./lib/*-*.js" } }, ["lib/a-a.js"]),
+    reviewDeclaredFiles({ exports: { "./*": "./lib/*-*.js" } }, ["lib/a-a.js"]),
   ).not.toThrow();
   const manifest: JsonObject = {
     exports: [{ node: "./missing.js", default: "invalid" }, "./index.js"],
   };
-  expect(() => assertDeclaredFiles(manifest, ["index.js"])).toThrow(/missing/);
-  expect(() => assertDeclaredFiles({ imports: { "#dep": "external-package" } }, [])).not.toThrow();
+  expect(() => reviewDeclaredFiles(manifest, ["index.js"])).toThrow(/missing/);
+  expect(() => reviewDeclaredFiles({ imports: { "#dep": "external-package" } }, [])).not.toThrow();
 });

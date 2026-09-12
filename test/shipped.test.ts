@@ -219,7 +219,7 @@ describe.concurrent("a manifest branch pointing at the wrong kind of file", () =
     ).toContain("require-branch-is-esm");
 
     // Controls. Real CommonJS is silent; so is a target absent from the archive, because a missing
-    // file is `assertDeclaredFiles`' finding and reporting it twice gives opposite instructions.
+    // file is `reviewDeclaredFiles`' finding and reporting it twice gives opposite instructions.
     expect(
       rules({ exports: { ".": { require: "./cjs.js" } } }, { "cjs.js": "module.exports = 1;\n" }),
     ).toEqual([]);
@@ -258,7 +258,7 @@ describe.concurrent("a manifest branch pointing at the wrong kind of file", () =
     // rule would invent a refusal of something that works.
     expect(rules({ bin: "./tool" }, { tool: "\x7fELF\x02\x01\x01\0" })).toEqual([]);
     expect(rules({ bin: "./tool" }, { tool: "MZ\x90\0" })).toEqual([]);
-    // A declared path the archive does not carry is `assertDeclaredFiles`' finding, not this one:
+    // A declared path the archive does not carry is `reviewDeclaredFiles`' finding, not this one:
     // reporting it here would give one defect two voices that disagree about the remedy.
     expect(rules({ bin: "./missing.js" }, { "cli.js": "run();\n" })).toEqual([]);
   });

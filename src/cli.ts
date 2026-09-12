@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertSameEntries, forbiddenPackedFiles, reviewPackedContent } from "./artifact";
-import { assertDeclaredFiles } from "./declared";
+import { reviewDeclaredFiles } from "./declared";
 import { requireTool, run } from "./command";
 import { allowedUnreferenced, customDevFields, keptFields, packageConfig } from "./config";
 import { reviewExports } from "./exports";
@@ -349,9 +349,11 @@ async function packAndClean(
         ...reviewRegistryDestinations(shippedPkg),
         ...reviewMonorepoProtocols(shippedPkg, finalFiles),
       );
-      // Stops rather than reports, deliberately: an incomplete file set makes every reachability
-      // answer below it wrong, so continuing would produce a confident report about nothing.
-      assertDeclaredFiles(shippedPkg, finalFiles);
+      // Stops rather than reports when a NAMED file is absent, deliberately: an incomplete file
+      // set makes every reachability answer below it wrong, so continuing would produce a
+      // confident report about nothing. It returns the misses nothing resolves through, which are
+      // stale rather than broken and must not cost the author the one step nobody can undo.
+      findings.push(...reviewDeclaredFiles(shippedPkg, finalFiles));
       // A tripwire for this tool's own bugs: every field it would catch is either kept by design
       // or removed on request, and a removal on request is excluded from the comparison. Its
       // decision is exercised directly in the rules suite.
