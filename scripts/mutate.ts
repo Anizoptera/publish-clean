@@ -8,7 +8,12 @@
  *     bun scripts/mutate.ts --dry-run    plant nothing; report which patterns still match
  *
  * Nothing runs this automatically and nothing should: it is one full suite run per row, which is
- * minutes, and it answers a question asked when a guard is WRITTEN rather than on every commit. Its
+ * minutes, and it answers a question asked when a guard is WRITTEN rather than on every commit.
+ *
+ * Do nothing else in this tree while it runs. Each row leaves the source damaged for the length of
+ * one suite run, so a commit landing in that window fails its hook on a file nobody edited —
+ * `Unreachable code detected` in whichever file is planted at that moment, which reads as a real
+ * defect and sends the reader debugging a mutation that is about to be restored anyway. Its
  * value is that a green suite proves nothing on its own — a test that restates the implementation
  * passes whatever the implementation does, and this is the instrument that tells the two apart. The
  * rows are therefore a record of which properties are claimed to be guarded; a row that stops
