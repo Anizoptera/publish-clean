@@ -263,6 +263,12 @@ const MUTATIONS: readonly Mutation[] = [
     to: 'rule: "monorepo-only-spec",\n$1consequence: "waste" as const,',
   },
   {
+    name: "a mistyped flag escapes as the parser wrote it",
+    file: "src/options.ts",
+    from: /throw new PublishCleanError\(\n( +)`\$\{cause instanceof Error/,
+    to: "throw cause;\n$1throw new PublishCleanError(\n$1  `${cause instanceof Error",
+  },
+  {
     name: "the verdict stops at the first finding",
     file: "src/finding.ts",
     from: /const fatal = findings\.filter\(/,

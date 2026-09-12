@@ -100,31 +100,53 @@ Requires pnpm on PATH; npm as well to publish, since only the upload uses it. np
 provenance additionally requires Node.js 22.14+ and npm 11.5.1+, and only a cloud CI
 runner can produce it.`;
 
+/**
+ * The flags this tool accepts, named once. The message for a mistyped one lists them from this same
+ * object, so a flag added here cannot leave a stale list behind in an error.
+ */
+const CLI_FLAGS = {
+  "allow-suspicious": { type: "boolean", default: false },
+  "dry-run": { type: "boolean", default: false },
+  "guard-only": { type: "boolean", default: false },
+  help: { type: "boolean", short: "h", default: false },
+  // Declared by its negative name, like `--no-git-checks`: `parseArgs` has no `--no-`
+  // negation of its own and rejects the flag outright as unknown.
+  "no-git-checks": { type: "boolean", default: false },
+  "no-heal": { type: "boolean", default: false },
+  registry: { type: "string", default: undefined },
+  "skip-file-check": { type: "boolean", default: false },
+  strict: { type: "boolean", default: false },
+  "tarball-out": { type: "string", default: undefined },
+  "verify-only": { type: "boolean", default: false },
+  version: { type: "boolean", short: "v", default: false },
+} as const;
+
 export function parseOptions(rawArgs: readonly string[]) {
   const separator = rawArgs.indexOf("--");
   const cliArgs = separator === -1 ? rawArgs : rawArgs.slice(0, separator);
   const publishArgs = publicationArgs(separator === -1 ? [] : rawArgs.slice(separator + 1));
-  const parsed = parseArgs({
-    args: cliArgs,
-    allowPositionals: true,
-    options: {
-      "allow-suspicious": { type: "boolean", default: false },
-      "dry-run": { type: "boolean", default: false },
-      "guard-only": { type: "boolean", default: false },
-      help: { type: "boolean", short: "h", default: false },
-      // Declared by its negative name, like `--no-git-checks`: `parseArgs` has no `--no-`
-      // negation of its own and rejects the flag outright as unknown.
-      "no-git-checks": { type: "boolean", default: false },
-      "no-heal": { type: "boolean", default: false },
-      registry: { type: "string", default: undefined },
-      "skip-file-check": { type: "boolean", default: false },
-      strict: { type: "boolean", default: false },
-      "tarball-out": { type: "string", default: undefined },
-      "verify-only": { type: "boolean", default: false },
-      version: { type: "boolean", short: "v", default: false },
-    },
-    strict: true,
-  });
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: cliArgs,
+      allowPositionals: true,
+      options: CLI_FLAGS,
+      strict: true,
+    });
+  } catch (cause) {
+    // Restated rather than forwarded. `parseArgs` answers with a stack through `node:internal` —
+    // which reads as a defect in this tool — and advises moving the flag after `--`, where this CLI
+    // forwards it to `npm publish`: the one step nobody can take back. The cause is dropped for the
+    // same reason, since printing it republishes that advice under a different label.
+    throw new PublishCleanError(
+      `${cause instanceof Error ? cause.message.split(". ")[0] : String(cause)}.\n` +
+        `publish-clean accepts: ${Object.keys(CLI_FLAGS)
+          .map((flag) => `--${flag}`)
+          .join(", ")}.\n` +
+        "Run publish-clean --help for what each one does. Arguments meant for `npm publish` go " +
+        "after a `--` separator.",
+    );
+  }
 
   // `verify` is a subcommand as well as a flag, because a script that cannot change shape needs
   // the flag while a person typing the command reads the verb. A directory actually named
