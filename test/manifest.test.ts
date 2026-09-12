@@ -84,6 +84,14 @@ describe.concurrent("unrecognised field report", () => {
     expect(advice({ name: "x", funding: "u", exports: {} })).toBe("");
   });
 
+  // A field an INSTALLER reads out of the shipped package is not waste, and the advice here tells
+  // its author to consider stripping it. Yarn reads `preferUnplugged` from a dependency's own
+  // manifest to decide whether to unzip it, so the author who set it deliberately would be told to
+  // delete it — and refused outright under --strict. Measured at 1.8% of 170 installed packages.
+  it("stays silent about a field a consumer's installer reads", () => {
+    expect(advice({ name: "x", preferUnplugged: true })).toBe("");
+  });
+
   // A report whose only resolution deletes the field is unusable for any ecosystem this tool
   // does not know: a VS Code extension needs `contributes` in the artifact to work at all.
   it("stays silent about a field acknowledged through keepFields", () => {

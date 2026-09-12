@@ -90,6 +90,10 @@ export const RUNTIME_MANIFEST_FIELDS = new Set([
   "directories",
   "jsdelivr",
   "man",
+  // Yarn reads this from an installed dependency's own manifest to decide whether that package
+  // must be unzipped to work, overriding its heuristic. Set by the package author, consumed by
+  // someone else's installer, which is this set's whole criterion.
+  "preferUnplugged",
   "react-native",
   "sass",
   "style",

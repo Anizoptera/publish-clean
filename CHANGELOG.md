@@ -109,6 +109,11 @@ notes: the section for a version is published verbatim when its tag is pushed.
 
 ### Fixed
 
+- **`preferUnplugged` is no longer reported as an unrecognised field.** Yarn reads it from an
+  installed dependency's own manifest to decide whether that package must be unzipped to work, so
+  it is a field a consumer's installer resolves, not noise. The report used to advise stripping it
+  — which would change how the package installs for everyone using Yarn — and `--strict` refused
+  the package outright.
 - **A mistyped flag is answered with the flags that exist.** It used to escape as Node's own
   `ERR_PARSE_ARGS_UNKNOWN_OPTION`: a stack trace through `node:internal` that reads as a defect in
   this tool, carrying advice to move the argument after `--` — where this CLI forwards it to
