@@ -184,8 +184,8 @@ const MUTATIONS: readonly Mutation[] = [
 
   // --- src/artifact.ts: the two halves of the packed-file verdict -------------------------------
   {
-    // The headline promise, and the half of this function that must stay a throw: a finding travels
-    // through `decide()` and the flags it consults, where a throw cannot be reached past.
+    // The headline promise. Nothing downstream re-decides it, so the only thing that can retire
+    // this refusal is the condition itself going false.
     name: "a leaked key no longer stops the run",
     file: "src/artifact.ts",
     from: /if \(critical\.length > 0\)/,

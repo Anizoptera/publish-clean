@@ -48,13 +48,16 @@ const SUSPICIOUS_PATTERNS = [
 /**
  * Judges the packed file list in two halves that must not be merged.
  *
- * A `critical` hit THROWS and never becomes a finding: a leaked key or a packed `node_modules`
- * must be impossible to publish, and a throw cannot be reached past, where a finding travels
- * through `decide()` and the flags it consults. Structure is the guarantee here, not policy.
- *
  * A `suspicious` hit is a judgement call — hence `--allow-suspicious` — so it reports like every
  * other defect in the package being examined, and the run continues to collect the rest. It still
  * refuses to publish, through `rulesAbort`.
+ *
+ * A `critical` hit THROWS instead, which ends the run at the offender: nothing after this line
+ * decides whether a leaked key reaches a registry, and nothing after it gets to report either. The
+ * cost of that is a leaked key arriving alone, without whatever else the same package is doing
+ * wrong. `Consequence` reserves `harm` for exactly this content — a secret, `node_modules`, Git
+ * internals — and this throw is why nothing emits it; that member is not dead, it is this branch
+ * written in the other model.
  */
 export function validatePackedFiles(files: readonly string[], skipSuspicious: boolean): Finding[] {
   const critical = files.filter((file) => CRITICAL_PATTERNS.some((pattern) => pattern.test(file)));
