@@ -21,7 +21,11 @@ notes: the section for a version is published verbatim when its tag is pushed.
 - **Defects that cannot be repaired without guessing are reported.** A `types` condition
   resolving to something that is not a declaration file, a `require` condition resolving to an ES
   module, a branch no consumer can reach, a consumer no branch serves, a condition no measured
-  consumer activates, a fallback array, and a `bin` shebang ending in CR.
+  consumer activates, a fallback array, a `bin` shebang ending in CR, and a `bin` entry with no
+  shebang at all — the installed command is a symlink the kernel resolves through that line, and npm
+  reads the same line to pick the interpreter for its Windows shim, so the command runs on no
+  platform without it. A `bin` file holding a NUL byte is left alone: compiled binaries are executed
+  directly and need no shebang.
 - **Publication stops when a packed name would not survive extraction.** Two files whose names
   differ only in letter case or Unicode form become ONE file on macOS and Windows, so the install
   reports success and the package is silently missing a file. A name Windows cannot create — a
