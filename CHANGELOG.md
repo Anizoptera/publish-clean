@@ -63,6 +63,13 @@ notes: the section for a version is published verbatim when its tag is pushed.
 
 ### Fixed
 
+- **An error no longer buries its own explanation in a stack trace.** The cause of a reported
+  failure was printed as an object, so its stack and properties followed it: a malformed
+  `package.json` produced nine lines of which two carried information. The cause still prints,
+  because it holds the one detail the message cannot — where the JSON syntax broke, which errno a
+  spawn returned — but the frames behind it belong to this tool rather than to your package. An
+  unexpected internal error still prints in full, since there the stack is the report.
+
 - **A package with a long path can be published under pnpm 12.** A path too long for a plain tar
   name is carried by a header in front of the entry it belongs to; pnpm 11 wrote a PAX header
   there, pnpm 12 writes a GNU long-name one. This tool refused GNU long names outright, so under
