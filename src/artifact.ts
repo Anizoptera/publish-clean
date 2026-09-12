@@ -12,6 +12,7 @@
  */
 import { PublishCleanError } from "./error";
 import type { Consequence, Finding } from "./finding";
+import { countOf } from "./finding";
 
 /**
  * Content that carries a credential. `^` means the package root.
@@ -166,7 +167,7 @@ export function reviewPackedContent(files: readonly string[], allowSuspicious: b
         consequence: rule.consequence,
         rulesAbort: rule.rulesAbort,
         healed: false,
-        where: `${matched.length} packed file(s)`,
+        where: countOf(matched.length, "packed file"),
         message: rule.explain(matched),
       },
     ];

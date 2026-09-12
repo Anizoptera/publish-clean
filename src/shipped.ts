@@ -13,6 +13,7 @@ import { Script } from "node:vm";
 import { collectDeclaredPaths, normalizeDeclaredPath } from "./declared";
 import { rowsOf } from "./conditions";
 import type { Finding } from "./finding";
+import { countOf } from "./finding";
 import { isObject } from "./json";
 import type { JsonObject } from "./json";
 import { lexicalZones, zoneAt } from "./lexical";
@@ -478,7 +479,7 @@ export function reviewUnreferencedFiles(
       // published version number cannot be taken back.
       consequence: "breaks",
       healed: false,
-      where: `${mismatches.length} imports`,
+      where: countOf(mismatches.length, "import"),
       message:
         `These imports resolve only because the filesystem this was built on ignores letter ` +
         `case or Unicode form. Where one does not, the import fails and the package is broken ` +
@@ -506,7 +507,7 @@ export function reviewUnreferencedFiles(
     // divergence from the consequence model stays visible in the findings table.
     rulesAbort: true,
     healed: false,
-    where: `${orphans.length} files, ${Math.ceil(total / 1024)} KB`,
+    where: `${countOf(orphans.length, "file")}, ${Math.ceil(total / 1024)} KB`,
     message:
       `Nothing in this package reaches these files — no manifest field names them and no ` +
       `shipped file imports them — so every consumer downloads them forever for nothing:\n` +

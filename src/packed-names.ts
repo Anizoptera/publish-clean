@@ -10,6 +10,7 @@
  * argv here, which is also what lets every rule be judged from a constructed file list.
  */
 import type { Finding } from "./finding";
+import { countOf } from "./finding";
 import type { JsonObject } from "./json";
 
 /**
@@ -164,7 +165,7 @@ export function reviewPackedNames(pkg: JsonObject, files: readonly string[]): Fi
       rule: "packed-name-collision",
       consequence: "breaks",
       healed: false,
-      where: `${collisions.length} colliding names`,
+      where: countOf(collisions.length, "colliding name"),
       message:
         `These entries collapse onto one path wherever the filesystem ignores letter case or ` +
         `Unicode form, which is macOS and Windows by default. Two files means one silently ` +
@@ -195,7 +196,7 @@ export function reviewPackedNames(pkg: JsonObject, files: readonly string[]): Fi
       rule: "packed-name-unportable",
       consequence: "breaks",
       healed: false,
-      where: `${unportable.length} files`,
+      where: countOf(unportable.length, "file"),
       message:
         `These packed names cannot be created on a consumer's filesystem. Installing either ` +
         `fails outright or writes the file under a different name, and nothing imports the name ` +

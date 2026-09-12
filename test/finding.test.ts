@@ -86,6 +86,18 @@ describe.concurrent("the verdict a report hands to its reader", () => {
     expect(report).toContain("1 unrepaired");
   });
 
+  it("counts in English", () => {
+    // This is the last line of every refused run, so it is the sentence most often read and most
+    // often quoted. A tool whose entire pitch is care about what ships cannot end its report with
+    // "1 finding(s)" — and n=1 is the common case, not the edge one.
+    expect(publishRefusal([finding({ consequence: "harm" })], false)).toContain(
+      "1 unrepaired finding ",
+    );
+    expect(
+      publishRefusal([finding({ consequence: "harm" }), finding({ consequence: "breaks" })], false),
+    ).toContain("2 unrepaired findings ");
+  });
+
   // How bad a defect is and what this run did about it are independent, and the report prints
   // them as independent words. Collapsing them is what makes a reader skim: a repaired breakage
   // shown as its own gentle category reads like a harmless stray file, and the source defect

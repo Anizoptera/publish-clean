@@ -8,6 +8,7 @@
 import { PublishCleanError } from "./error";
 import { normalizeDeclaredPath } from "./declared";
 import type { Finding } from "./finding";
+import { countOf } from "./finding";
 import { isObject } from "./json";
 import type { JsonObject } from "./json";
 
@@ -288,7 +289,7 @@ export function reviewMonorepoProtocols(pkg: JsonObject, files: readonly string[
       rule: "monorepo-only-spec",
       consequence: "breaks" as const,
       healed: false,
-      where: `${failures.length} dependency spec(s)`,
+      where: countOf(failures.length, "dependency spec"),
       message: `Packed manifest contains unresolved monorepo-only dependency specs:\n${failures.join("\n")}\n${PUBLISH_ADVISORY}`,
     },
   ];

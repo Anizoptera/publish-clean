@@ -37,6 +37,8 @@ export interface Finding {
    * files has no single location, and putting fifty paths on the header line buries the severity
    * and the rule id that the reader scans for; the message below carries the list. Pick the count
    * form only when the rule really is set-shaped, never to avoid naming a location it knows.
+   * Build that form with `countOf`, so one rule cannot say "1 files" while its neighbour says
+   * "1 file(s)".
    */
   readonly where: string;
   /**
@@ -60,6 +62,19 @@ export interface Finding {
  * independent of what this run did is what stops a repaired breakage from printing as a warning
  * and teaching the reader to skim it.
  */
+/**
+ * `3 files`, `1 file` — the count phrase every set-shaped rule needs, written once.
+ *
+ * Six rules were building this inline and disagreeing: two printed `1 file(s)`, three printed
+ * `1 files`. `(s)` is a note to the reader that the writer could not be bothered with the case
+ * that happens most — a report naming one bad file — and this tool's whole claim is care about
+ * what ships. Every noun these rules use takes a plain `s`; give the irregular one an explicit
+ * plural the day it exists, not before.
+ */
+export function countOf(count: number, noun: string, plural = `${noun}s`): string {
+  return `${count} ${count === 1 ? noun : plural}`;
+}
+
 type Severity = "error" | "warning";
 
 function severityOf(finding: Finding, strict: boolean): Severity {
@@ -95,7 +110,7 @@ export function publishRefusal(findings: readonly Finding[], strict: boolean): n
   const fatal = findings.filter((finding) => isFatal(finding, strict));
   return fatal.length === 0
     ? null
-    : `Refusing to publish: ${fatal.length} unrepaired finding(s) above would reach consumers. ` +
+    : `Refusing to publish: ${countOf(fatal.length, "unrepaired finding")} above would reach consumers. ` +
         `A published version cannot be taken back.`;
 }
 
