@@ -7,8 +7,8 @@
  *
  * Returned rather than printed: a message that is a value can be asserted whole, where one written
  * to a process-wide `console` can be clobbered by a case running beside it. Everything a run has
- * to say about the package travels this way, so the report has ONE shape — a rule id to grep or
- * silence, a severity to rank by, a location. A check that printed its own paragraph instead
+ * to say about the package travels this way, so the report has ONE shape — a rule id to grep, a
+ * severity to rank by, a location. A check that printed its own paragraph instead
  * would land wherever in the output it happened to run, unrankable and unsearchable.
  *
  * Ambient inputs arrive as parameters — no process, filesystem or argv here.
@@ -28,7 +28,12 @@
 export type Consequence = "breaks" | "harm" | "waste";
 
 export interface Finding {
-  /** Stable identifier, so a message can be silenced or searched without quoting its prose. */
+  /**
+   * Stable identifier, so a report can be searched or diffed without quoting its prose. It is not
+   * a silencing key: a rule that may be waived carries its own hatch and names it in the message
+   * (`--allow-suspicious`, `allowUnreferenced`), because waiving one judgement must never be
+   * spelled the same as waiving another.
+   */
   readonly rule: string;
   readonly consequence: Consequence;
   /** True when this run already repaired it in the artifact being published. */

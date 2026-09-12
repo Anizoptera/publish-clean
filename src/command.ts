@@ -109,6 +109,13 @@ export function run(
     const child = spawn(invocation[0], invocation[1], {
       cwd,
       detached,
+      // `pack` sends the child's STDOUT to our stderr, and both halves of that are load-bearing.
+      // Live, because `pnpm pack` runs `prepack`/`prepare` — usually the package's build — and
+      // capturing it would withhold a build's progress and warnings until the run ended, or
+      // forever on success. To stderr, because stdout is this tool's machine-readable channel:
+      // `--dry-run` writes the packed file list and cleaned manifest there for a caller to parse,
+      // and `"inherit"` would interleave a packer's chatter into it. The cost is that pnpm's own
+      // summary duplicates that file list, which beats either alternative.
       stdio:
         output === "capture" || output === "validator"
           ? ["ignore", "pipe", "pipe"]
