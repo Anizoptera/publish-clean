@@ -56,7 +56,7 @@ rows at worst, so the cap, the memo table and the third verdict all disappear.
 Run the proof with the same `flatten` the rewrite runs. A separately written check and the
 rewrite it authorises are two pieces of code that agree today.
 
-## What stops a publish, and why that is not a severity question
+## Two axes: how bad it is, and whether the run stops
 
 Publishing burns a version number forever. Blocking a good publish costs the author a re-run;
 shipping a broken package costs a release nobody can take back. So the stop decision follows that
@@ -70,7 +70,7 @@ Three consequence classes, because they need opposite responses:
 | --- | --- | --- | --- |
 | harm | secret, `node_modules`, Git internals, entry outside `package/` | always | **never** — stripping a leaked token hides that it leaked, and the author still has to rotate it |
 | breaks | target missing from the tarball, wrong-case target, unexported self-import | yes | only with proof |
-| waste | dead files, redundant condition, unknown condition | never | when provable |
+| waste | dead files, redundant condition, unknown condition | only under `--strict`, or when the rule carries `rulesAbort` | when provable |
 
 A healed finding never stops the run. That is not in tension with the rule above: it governs
 unhealed findings, and the two cover different cases.
@@ -80,6 +80,13 @@ author has not declared. It is carried on the finding as `rulesAbort`, not as a 
 the rule name, so the single divergence is data the table shows rather than a branch someone
 deletes while tidying. `--strict` promotes the remaining waste findings to fatal and can never
 promote a healed one.
+
+The severity a report prints — `[error]` or `[warning]` — is the OTHER axis, and it is read off
+the defect alone. Repairing one does not soften it: the defect is still in the author's source and
+only the published artifact was corrected, so a repaired breakage prints `[error]` with the repair
+stated beside it in words. There is deliberately no third severity meaning "healed". One existed,
+and it made a repaired breakage and a harmless stray file read alike, which teaches the reader to
+skim both — so the source defect survives every release while every release looks clean.
 
 ## Defects only the final tarball can show
 
