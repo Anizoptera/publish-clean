@@ -31,7 +31,13 @@ export interface Finding {
   readonly consequence: Consequence;
   /** True when this run already repaired it in the artifact being published. */
   readonly healed: boolean;
-  /** Where in the manifest or archive, e.g. `exports["."]` or `dist/index.js`. */
+  /**
+   * Where in the manifest or archive, e.g. `exports["."]` or `dist/index.js` — or, for a rule that
+   * judges a whole set at once, how big that set is (`12 packed file(s)`). A rule matching fifty
+   * files has no single location, and putting fifty paths on the header line buries the severity
+   * and the rule id that the reader scans for; the message below carries the list. Pick the count
+   * form only when the rule really is set-shaped, never to avoid naming a location it knows.
+   */
   readonly where: string;
   /**
    * The whole message, including the exact text that resolves it — the config line to paste,

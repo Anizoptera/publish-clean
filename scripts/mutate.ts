@@ -248,7 +248,7 @@ const MUTATIONS: readonly Mutation[] = [
     // is that the refusal itself goes missing — a finding nobody made fatal is a warning nobody
     // acts on, and the package publishes with a live credential in its manifest.
     name: "a registry credential becomes a warning",
-    file: "src/manifest.ts",
+    file: "src/registry.ts",
     // Anchored on the neighbouring `where`, not on the consequence alone: a bare
     // `consequence: "harm"` would retarget itself to whichever harm rule lands in this file
     // next, still get killed by that rule's own case, and report green for a row testing

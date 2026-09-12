@@ -28,12 +28,10 @@ import {
   assertNoLostConsumerFields,
   reviewMonorepoProtocols,
   privatePackageRefusal,
-  reviewRegistryDestinations,
-  packageScope,
   stripManifest,
   unrecognizedFieldsReport,
-  withRegistry,
 } from "./manifest";
+import { packageScope, reviewRegistryDestinations, withRegistry } from "./registry";
 import {
   assertPreservedArchive,
   manifestText,

@@ -2,7 +2,8 @@
 import { PublishCleanError } from "./error";
 import { isObject } from "./json";
 import type { JsonObject } from "./json";
-import { RUNTIME_MANIFEST_FIELDS, assertRegistry } from "./manifest";
+import { RUNTIME_MANIFEST_FIELDS } from "./manifest";
+import { assertRegistry } from "./registry";
 
 /**
  * Every key this tool reads out of the manifest's `publish-clean` block. Naming them is what

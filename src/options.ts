@@ -1,7 +1,7 @@
 // Keep npm's publication options separate from arguments that select an unchecked artifact.
 import { parseArgs } from "node:util";
 import { PublishCleanError } from "./error";
-import { assertRegistry } from "./manifest";
+import { assertRegistry } from "./registry";
 
 const PUBLISH_OPTIONS = new Map<string, "string" | "boolean">([
   ["access", "string"],

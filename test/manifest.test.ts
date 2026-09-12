@@ -12,13 +12,11 @@ import {
   filesFieldRefusal,
   assertNoLostConsumerFields,
   privatePackageRefusal,
-  assertRegistry,
   reviewMonorepoProtocols,
-  reviewRegistryDestinations,
   stripManifest,
   unrecognizedFieldsReport,
-  withRegistry,
 } from "../src/manifest";
+import { assertRegistry, reviewRegistryDestinations, withRegistry } from "../src/registry";
 
 describe.concurrent("manifest cleaning", () => {
   it("removes author-only fields and keeps consumer-facing ones", () => {
