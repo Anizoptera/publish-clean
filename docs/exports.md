@@ -279,6 +279,43 @@ justify risk — which is why each is gated by the equivalence proof rather than
 And dropping a redundant condition saves roughly thirty bytes: the manifest is not where the waste
 is, the shipped files are, by three orders of magnitude.
 
+## When a key out of canonical order is not a defect
+
+A key sitting later than `TIERS` ranks it is not by itself evidence of anything. Measured over 3674
+installed published packages — each manifest checked against the canonical order, then the condition
+map of every refused package read by hand — an unconditional rule refused 97, and four of the five
+shapes it found were correct packages.
+
+The shapes, each with the specimen that exposed it:
+
+| shape | why no consumer loses anything | specimen |
+| --- | --- | --- |
+| the forced key WINS | forcedness binds a key against LOSING, so this is the constraint met | `@aws-sdk/core`, `@smithy/core`, `underscore` — all `module` ahead of `node` |
+| the winner re-dispatches on the loser | a consumer activating both enters the winner and meets the loser inside | `@emotion/styled` — `development` ahead of `edge-light`, handling `edge-light` within it |
+| both keys carry the same target | nothing can tell the two branches apart | `node-fetch-native` — eleven runtime names ahead of `node`, every one the same file |
+| the loser is not forced | which of two keys is more specific is the author's call | `{import: X, node: Y}` |
+| `types` loses, or `module` loses to `import` | a checker reaching the JS target reads the `.d.ts` beside it; `import` and `module` both yield ESM | `@floating-ui/core` — `import` ahead of both `types` and `module` |
+
+The last shape is a real defect and a bad refusal, which is why it reports as `waste` and `--strict`
+refuses over it: 80 of the 103 packages the unconditional rule fired on type-check correctly today
+through TypeScript's adjacent-declaration fallback, and the remaining 23 hand a checker no
+declarations — a smaller loss than `exports-unresolvable`, a consumer resolving nothing at all,
+which this tool already reports as a warning.
+
+What survives is one shape: a forced runtime name losing to a generic environment key, with
+different targets and no re-dispatch. `@azure/core-util` and `bson` put `browser` ahead of
+`react-native`, so a Metro config that adds `browser` to its condition names gets the browser build;
+`solid-js` puts `browser` ahead of `deno`; `posthog-node` puts `node` ahead of `edge-light` and
+`workerd`, each naming a separate edge build. Whether each of those is hit depends on one
+consumer's condition set, which no measurement here can enumerate — `TIERS` is the authority that
+says the runtime name should win, and the evidence behind its ranking is the measured condition sets
+below.
+
+The general lesson is about the instrument, not the rule. A refusal count alone cannot separate a
+caught defect from a fabricated one; only reading the refused package can. Each of the four wrong
+shapes looked exactly like a caught defect from inside this repository, and each would have refused
+whole families of correct packages on the one step nobody can undo.
+
 ## Copying a condition map
 
 Never copy one with `Object.assign`. A condition may legally be named `__proto__`, and `JSON.parse`

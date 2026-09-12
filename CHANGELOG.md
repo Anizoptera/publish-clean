@@ -17,7 +17,11 @@ notes: the section for a version is published verbatim when its tag is pushed.
   `{"default": "./x.js"}` collapses, and keys whose order a measured constraint forces are
   ordered. Every repair is reported, applies only to the published manifest, and never touches
   your source. A repair never stops the run. `--no-heal`, or `"publish-clean": { "heal": false }`,
-  reports without rewriting.
+  reports without rewriting. An order that cannot be repaired, because reordering it would change
+  what some consumer resolves, is reported instead — and refuses the publish only where a consumer
+  really loses a target: a runtime-specific build shadowed by a generic one. A misplaced `types`
+  is a warning, because a checker reaching the JavaScript target reads the declarations beside it,
+  and `--strict` still refuses over it.
 - **Defects that cannot be repaired without guessing are reported.** A `types` condition
   resolving to something that is not a declaration file, a `require` condition resolving to an ES
   module, a branch no consumer can reach, a consumer no branch serves, a condition no measured

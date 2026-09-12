@@ -190,6 +190,23 @@
   The near match is not a narrowing of that rule, it is the CORROBORATION that makes it sound: a
   folded name hitting a file that really ships is independent evidence that the specifier is a
   static path to a real file. Specimens in `docs/exports.md`.
+- **A condition out of canonical order is refused only when a consumer can actually LOSE its
+  target** (`forcedOrderConsequence`, `src/exports.ts`). `TIERS` ranks the keys and `forced` marks
+  the ranks a measurement binds, but forcedness is ONE-DIRECTIONAL: it says a consumer activating
+  that key must not be handed another key's target, so the forced key WINNING is that constraint
+  satisfied. Three further tolerances each exist because its absence refused a published, working
+  package — the winner's own subtree re-dispatching on the loser, so a consumer activating both
+  meets the loser inside; the two keys carrying the same target, which nothing can tell apart; and
+  a rank inversion whose loser is not forced, which is the author's call about specificity. Losing
+  `types`, or losing `module` to `import`, costs no consumer another runtime's build — a checker
+  reaching the JS target reads the `.d.ts` beside it, and both keys yield ESM — so those REPORT as
+  `waste` and `--strict` refuses them, the shape `exports-unresolvable` was ruled into. Measured
+  over 3674 installed published packages, the unconditional rule refused 97 and those five
+  corrections leave 14, every one a forced runtime name losing to a generic environment key with
+  different targets and no re-dispatch. Never restore an arm here without running that corpus and
+  reading the condition map of every package it newly refuses: a fabricated refusal and a caught
+  defect are indistinguishable from inside this repository, and these four arms each looked exactly
+  like a caught defect.
 - A packed NAME that two filesystems read as one file, or that a target filesystem cannot create,
   aborts (`reviewPackedNames`, `src/packed-names.ts`). Judge names from the ARCHIVE, never from a
   directory listing: two names differing only in case cannot coexist in a directory on a folding
