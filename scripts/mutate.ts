@@ -137,6 +137,30 @@ const MUTATIONS: readonly Mutation[] = [
     to: "return { reason: `${quoted} is longer than 255 bytes`, windowsOnly: true };",
   },
 
+  // --- src/tarball.ts: names carried by a header rather than by the entry they belong to --------
+  // Only the GNU long-name rows are here. The rest of this file's guards predate the harness and
+  // have none, which is a gap in the record rather than a claim that they are unguarded.
+  {
+    // The pre-fix blind spot: the member is judged under the placeholder in its own header while
+    // it extracts somewhere else entirely.
+    name: "GNU long name no longer names the entry that follows it",
+    file: "src/tarball.ts",
+    from: /local = new Map\(\[\["path", long\]\]\);/,
+    to: "local = null;",
+  },
+  {
+    name: "empty GNU long name falls back to the placeholder",
+    file: "src/tarball.ts",
+    from: /if \(end === 0\) throw new PublishCleanError\("Tarball has an empty GNU long-name entry\."\);/,
+    to: "",
+  },
+  {
+    name: "GNU long name may rename an entry onto the manifest",
+    file: "src/tarball.ts",
+    from: /if \(long === MANIFEST_PATH\)/,
+    to: "if (false)",
+  },
+
   // --- src/lexical.ts: where a specifier sits ---------------------------------------------------
   {
     // The pre-fix behaviour exactly: a template's inner backtick terminates the outer one.
