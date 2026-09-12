@@ -26,12 +26,16 @@ function installerAt(where: string): string {
   return path.join(where, "scripts", "git-hooks.ts");
 }
 
+/**
+ * `--default ""` so an unset key reads as empty instead of exiting non-zero. A cleared key is a
+ * result here, not a failure to run, and reporting it as one would print git's message where the
+ * assertion's own `expected 'their-hooks'` says what went wrong. Anything git genuinely cannot do
+ * still throws.
+ */
 const hooksPathOf = (repo: string): string =>
-  execFileSync("git", ["config", "--get", "core.hooksPath"], {
+  execFileSync("git", ["config", "--default", "", "--get", "core.hooksPath"], {
     cwd: repo,
     encoding: "utf8",
-    // The key being unset is the expected answer in one case and exits non-zero, which is not a
-    // failure to run — reading it as one would turn the passing case into an error.
   }).trim();
 
 describe.concurrent("wiring the commit hook", () => {
@@ -41,11 +45,16 @@ describe.concurrent("wiring the commit hook", () => {
     mkdirSync(installed, { recursive: true });
     execFileSync("git", ["init", "-q", consumer]);
     const script = installerAt(installed);
+    // A value of their own, rather than an unset key. Asserting that reading the key FAILS would
+    // also pass when git itself did, and it says nothing about the worse write: an installer that
+    // clears `core.hooksPath` before setting its own disables every hook this repository had, and
+    // leaves the key exactly as unset as refusing to touch it would.
+    const theirs = "their-hooks";
+    execFileSync("git", ["config", "core.hooksPath", theirs], { cwd: consumer });
 
     execFileSync("bun", [script, "--install"], { cwd: installed, stdio: "ignore" });
 
-    // An unset key exits 1 with empty output, so the throw IS the assertion that nothing was written.
-    expect(() => hooksPathOf(consumer)).toThrow();
+    expect(hooksPathOf(consumer)).toBe(theirs);
   });
 
   it("wires the checkout it actually belongs to", () => {
