@@ -120,7 +120,10 @@ const PACKED_CONTENT_RULES: readonly {
  * What it buys is that an author packing a key AND a test tree AND a dead file learns all three
  * in one run — which is the whole reason every other check here returns findings too.
  */
-export function reviewPackedContent(files: readonly string[], allowSuspicious: boolean): Finding[] {
+function matchPackedContent(
+  files: readonly string[],
+  allowSuspicious: boolean,
+): Map<(typeof PACKED_CONTENT_RULES)[number], string[]> {
   const active = PACKED_CONTENT_RULES.filter((rule) => !rule.waivable || !allowSuspicious);
   const hits = new Map<(typeof active)[number], string[]>();
   for (const file of files) {
@@ -130,9 +133,31 @@ export function reviewPackedContent(files: readonly string[], allowSuspicious: b
     if (matched) matched.push(file);
     else hits.set(rule, [file]);
   }
+  return hits;
+}
+
+/**
+ * Names this run condemns, so the caller can stop asking OTHER questions about them.
+ *
+ * A file that must not be in the tarball has no reachability question worth answering, and
+ * `unreferenced-file` would otherwise hand the author a paste-ready `allowUnreferenced` waiver
+ * naming their private key — a second, contradictory next step for a file whose only next step is
+ * rotate and remove. Derived from the same match, so it cannot disagree with what was reported,
+ * and it honours `--allow-suspicious`: a waived development file IS shipped content and its
+ * reachability is a fair question again.
+ */
+export function forbiddenPackedFiles(
+  files: readonly string[],
+  allowSuspicious: boolean,
+): ReadonlySet<string> {
+  return new Set([...matchPackedContent(files, allowSuspicious).values()].flat());
+}
+
+export function reviewPackedContent(files: readonly string[], allowSuspicious: boolean): Finding[] {
+  const hits = matchPackedContent(files, allowSuspicious);
   // Walks the table rather than the map, so the report reads in severity order however the
   // archive happened to be ordered.
-  return active.flatMap((rule) => {
+  return PACKED_CONTENT_RULES.flatMap((rule) => {
     const matched = hits.get(rule);
     if (!matched) return [];
     return [

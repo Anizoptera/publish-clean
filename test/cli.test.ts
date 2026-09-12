@@ -480,23 +480,29 @@ exit 1
       {
         name: "fixture-suspicious-with-more",
         version: "1.0.0",
-        files: ["index.js", "test", "dead.js"],
+        files: ["index.js", "test", "dead.js", "deploy.key"],
         exports: { ".": "./index.js" },
       },
       {
         "index.js": "module.exports = 1;\n",
         "test/a.test.js": "// shipped by accident\n",
         "dead.js": "module.exports = 2;\n".repeat(80),
+        "deploy.key": "-----BEGIN PRIVATE KEY-----\n",
       },
     );
     try {
       const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
       expect(result.status).not.toBe(0);
-      // Both, in one run: the development file AND the file nothing reaches.
+      // Three unrelated rules, one run. Each used to end the run at its own hit, so an author
+      // learned one of these per round trip and never knew how many were left.
+      expect(result.stderr).toContain("deploy.key");
       expect(result.stderr).toContain("test/a.test.js");
       expect(result.stderr).toContain("dead.js");
-      // The waiver still names itself, so the reader is not left guessing how to overrule it.
+      // Each waiver names itself, so the reader is not left guessing how to overrule it.
       expect(result.stderr).toContain("--allow-suspicious");
+      // And exactly one repair per file: the key must never appear inside a paste-ready
+      // `allowUnreferenced` waiver, which would teach an author to whitelist a credential.
+      expect(result.stderr).not.toMatch(/allowUnreferenced[^\n]*deploy\.key/);
     } finally {
       await cleanup(fx.root);
     }

@@ -10,7 +10,7 @@ import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertSameEntries, reviewPackedContent } from "./artifact";
+import { assertSameEntries, forbiddenPackedFiles, reviewPackedContent } from "./artifact";
 import { assertDeclaredFiles } from "./declared";
 import { requireTool, run } from "./command";
 import { allowedUnreferenced, customDevFields, keptFields, packageConfig } from "./config";
@@ -332,7 +332,14 @@ async function packAndClean(
       // Read from the artifact that ships, like every other guard here. These checks need the file
       // BODIES — what a branch resolves to, and what nothing reaches — and the bytes are already
       // decoded, so this costs a map rather than a second decompression.
-      const contents = packageContents(published);
+      // Content already condemned above is dropped before the rules that reason about what the
+      // package REACHES. Those answer "is this shipped file used", which is not a question about a
+      // file that must not ship at all — and asking it produces a second, contradictory repair for
+      // the same name.
+      const forbidden = forbiddenPackedFiles(finalFiles, allowSuspicious);
+      const contents = new Map(
+        [...packageContents(published)].filter(([file]) => !forbidden.has(file)),
+      );
       findings.push(
         // Judges names alone, so it takes the file list rather than the bodies beside it.
         ...reviewPackedNames(shippedPkg, finalFiles),
