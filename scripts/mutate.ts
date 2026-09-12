@@ -358,6 +358,40 @@ const MUTATIONS: readonly Mutation[] = [
     to: "reportReachability(node, where, findings);",
   },
 
+  // --- src/exports.ts: a shadowed condition is refused only when a consumer can lose it ---------
+  // Each tolerance below exists because its absence refused a published, working package, and the
+  // two fatality rows exist because a reader cannot otherwise tell a tolerance from a hole.
+  {
+    name: "order: a forced key WINNING is a violation again",
+    file: "src/exports.ts",
+    from: /if \(!\(TIERS\[later\]\?\.forced \?\? false\)\) continue;/,
+    to: "if (!(TIERS[later]?.forced ?? false) && !(TIERS[earlier]?.forced ?? false)) continue;",
+  },
+  {
+    name: "order: a winner re-dispatching on the loser is ignored",
+    file: "src/exports.ts",
+    from: /if \(isObject\(subtree\) && Object\.hasOwn\(subtree, loser\)\) continue;/,
+    to: "",
+  },
+  {
+    name: "order: two keys carrying the same target are told apart",
+    file: "src/exports.ts",
+    from: /if \(JSON\.stringify\(subtree\) === JSON\.stringify\(node\[loser\]\)\) continue;/,
+    to: "",
+  },
+  {
+    name: "order: every misordering is fatal again",
+    file: "src/exports.ts",
+    from: /worst \?\?= "waste";/,
+    to: 'return "breaks";',
+  },
+  {
+    name: "order: a shadowed runtime build is waved through",
+    file: "src/exports.ts",
+    from: /else return "breaks";/,
+    to: 'else worst ??= "waste";',
+  },
+
   {
     name: "shipped: bin shebang check reads its condition backwards",
     file: "src/shipped.ts",
