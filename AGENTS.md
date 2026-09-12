@@ -157,7 +157,11 @@
   own — `parseArgs` answers an unknown flag by advising `--`, which here forwards arguments to
   `npm publish`. Restate it, drop the cause, and list what IS accepted from the same table the
   parser reads, never a second copy. One `try` per fault, too: a block spanning a read and a parse
-  reports both as whichever one the message names.
+  reports both as whichever one the message names. The ENVIRONMENT is a third class and belongs
+  with the caller's, not the tool's: an unwritable `TMPDIR`, a full disk, a `--tarball-out` nobody
+  can create. Each one left bare lands in the unexpected-throw branch, and while any of them can,
+  that branch cannot honestly say "publish-clean broke" — so wrap every syscall whose failure the
+  machine explains rather than the code, and the remaining stacks mean exactly one thing.
 - Keep npm publication in `.github/workflows/release.yml`; npm trusted publishing is keyed by workflow filename.
 - Release must wait for every check on its tagged commit. `verify` calls the local
   `check.yml` with no token permissions; `publish` requires its success and owns the
