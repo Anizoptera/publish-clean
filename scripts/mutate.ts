@@ -182,6 +182,24 @@ const MUTATIONS: readonly Mutation[] = [
     to: "",
   },
 
+  // --- src/artifact.ts: the two halves of the packed-file verdict -------------------------------
+  {
+    // The headline promise, and the half of this function that must stay a throw: a finding travels
+    // through `decide()` and the flags it consults, where a throw cannot be reached past.
+    name: "a leaked key no longer stops the run",
+    file: "src/artifact.ts",
+    from: /if \(critical\.length > 0\)/,
+    to: "if (critical.length > 999)",
+  },
+  {
+    // Reporting rather than throwing is only sound while the finding stays fatal; drop this one
+    // field and a package ships its own test tree with a warning nobody reads.
+    name: "a shipped development file becomes a warning",
+    file: "src/artifact.ts",
+    from: /rulesAbort: true,/,
+    to: "",
+  },
+
   // --- src/finding.ts: what stops the run ------------------------------------------------------
   {
     name: "verdict forgets that a repair is not a defect",

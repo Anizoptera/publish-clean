@@ -10,6 +10,7 @@
 import path from "node:path";
 
 import { PublishCleanError } from "./error";
+import type { Finding } from "./finding";
 import { isObject } from "./json";
 import type { JsonObject } from "./json";
 import { foldName } from "./packed-names";
@@ -44,21 +45,48 @@ const SUSPICIOUS_PATTERNS = [
   /\.(?:test|spec)\.[cm]?[jt]sx?$/,
 ];
 
-export function validatePackedFiles(files: readonly string[], skipSuspicious: boolean): void {
+/**
+ * Judges the packed file list in two halves that must not be merged.
+ *
+ * A `critical` hit THROWS and never becomes a finding: a leaked key or a packed `node_modules`
+ * must be impossible to publish, and a throw cannot be reached past, where a finding travels
+ * through `decide()` and the flags it consults. Structure is the guarantee here, not policy.
+ *
+ * A `suspicious` hit is a judgement call — hence `--allow-suspicious` — so it reports like every
+ * other defect in the package being examined, and the run continues to collect the rest. It still
+ * refuses to publish, through `rulesAbort`.
+ */
+export function validatePackedFiles(files: readonly string[], skipSuspicious: boolean): Finding[] {
   const critical = files.filter((file) => CRITICAL_PATTERNS.some((pattern) => pattern.test(file)));
   if (critical.length > 0)
     throw new PublishCleanError(
       `Critical files must not be published:\n${critical.map((file) => JSON.stringify(file)).join("\n")}`,
     );
-  if (skipSuspicious) return;
+  if (skipSuspicious) return [];
 
   const suspicious = files.filter((file) =>
     SUSPICIOUS_PATTERNS.some((pattern) => pattern.test(file)),
   );
-  if (suspicious.length > 0)
-    throw new PublishCleanError(
-      `Suspicious files in package artifact:\n${suspicious.map((file) => JSON.stringify(file)).join("\n")}`,
-    );
+  if (suspicious.length === 0) return [];
+  return [
+    {
+      rule: "suspicious-file",
+      // Bytes and noise: none of these breaks an install or leaks anything — a leak is the
+      // `critical` half above, which throws. It still stops the run, because the maintainer
+      // ruled shipped waste an error outright, exactly as for `unreferenced-file`.
+      consequence: "waste",
+      rulesAbort: true,
+      healed: false,
+      where: `${suspicious.length} files`,
+      message:
+        `These are development files rather than anything a consumer installs, so everyone who ` +
+        `installs this package downloads them forever for nothing:\n` +
+        `${suspicious.map((file) => `  ${file}`).join("\n")}\n` +
+        `Remove them from the "files" array in your package.json. If this package ships them on ` +
+        `purpose — a test helper other packages import, a tsconfig consumers extend — overrule ` +
+        `the judgement with --allow-suspicious, or "publish-clean": { "allowSuspicious": true }.`,
+    },
+  ];
 }
 
 /**

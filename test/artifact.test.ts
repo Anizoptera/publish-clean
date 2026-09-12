@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import { assertDeclaredFiles, normalizeDeclaredPath, validatePackedFiles } from "../src/artifact";
+import { isFatal } from "../src/finding";
 import { PublishCleanError } from "../src/error";
 
 it("keeps side-effect globs as selectors rather than mandatory files", () => {
@@ -65,10 +66,12 @@ describe.concurrent("critical file patterns", () => {
   });
 });
 
-// The default hygiene check, and the one an author meets most often: it refuses outright
-// rather than warning, so a package shipping its own test tree or lockfile cannot publish
-// until someone decides. `--allow-suspicious` exists precisely because that verdict is a
-// judgement call, unlike a leaked key, which is never one.
+// The default hygiene check, and the one an author meets most often: a package shipping its own
+// test tree or lockfile cannot publish until someone decides. It reports rather than throwing, so
+// the run goes on to collect every other defect, and still refuses — the assertions below pin both
+// halves, because a finding that stopped being fatal would look like a passing test.
+// `--allow-suspicious` exists precisely because that verdict is a judgement call, unlike a leaked
+// key, which is never one and therefore still throws.
 describe.concurrent("suspicious file patterns", () => {
   const junk = [
     "test/index.test.js",
@@ -88,24 +91,29 @@ describe.concurrent("suspicious file patterns", () => {
 
   for (const file of junk) {
     it(`refuses to publish ${file}`, () => {
-      expect(() => validatePackedFiles(["index.js", file], false)).toThrow("Suspicious files");
+      const [finding] = validatePackedFiles(["index.js", file], false);
+      expect(finding?.rule).toBe("suspicious-file");
+      expect(finding?.message).toContain(file);
+      // Reporting rather than throwing must not turn the refusal into a warning: this is the
+      // half of the change that a reader cannot see from the return type alone.
+      expect(finding && isFatal(finding, false)).toBe(true);
     });
   }
 
   it("lets the author overrule the whole judgement at once", () => {
-    expect(() => validatePackedFiles(["index.js", ...junk], true)).not.toThrow();
+    expect(validatePackedFiles(["index.js", ...junk], true)).toEqual([]);
   });
 
   // The patterns are anchored at a path segment, so a file that merely CONTAINS one of these
   // words is ordinary source and must publish untouched — over-refusing here would make the
   // default unusable and push every author to the escape hatch.
   it("does not refuse ordinary source that merely reads like it", () => {
-    expect(() =>
+    expect(
       validatePackedFiles(
         ["latest/index.js", "src/contest.js", "protests.js", "my-tsconfig.json.js", "testing.js"],
         false,
       ),
-    ).not.toThrow();
+    ).toEqual([]);
   });
 });
 

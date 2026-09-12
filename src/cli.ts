@@ -304,7 +304,7 @@ async function packAndClean(
     const finalFiles = packageFiles(published);
     assertSameEntries(packageFiles(packed), finalFiles);
     assertPreservedArchive(packed, published);
-    validatePackedFiles(finalFiles, allowSuspicious);
+    findings.push(...validatePackedFiles(finalFiles, allowSuspicious));
     const shippedPkg = manifestOf(published, "the published tarball");
     assertRegistryDestinations(shippedPkg);
     assertDeclaredFiles(shippedPkg, finalFiles);

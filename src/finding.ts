@@ -39,10 +39,10 @@ export interface Finding {
    */
   readonly message: string;
   /**
-   * Fatal despite being `waste`. Exactly one rule sets it: a shipped file no consumer can
-   * reach and no exemption covers, which the maintainer ruled an error outright. Carried as
-   * data so the one divergence from the consequence model is visible in the findings table
-   * rather than hidden in a branch on a rule id that someone deletes while tidying.
+   * Fatal despite being `waste`. Set by the rules the maintainer ruled an error outright even
+   * though nothing breaks — shipped bytes no consumer asked for. Carried as data so each
+   * divergence from the consequence model is visible in the findings table rather than hidden
+   * in a branch on a rule id that someone deletes while tidying.
    */
   readonly rulesAbort?: boolean;
 }

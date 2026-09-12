@@ -61,6 +61,15 @@ notes: the section for a version is published verbatim when its tag is pushed.
   the warning quotes git's own explanation of which it was. Use `--no-git-checks` for what it
   says: a repository whose tree is dirty, which still stops the run.
 
+- **A shipped development file is reported alongside every other defect instead of ending the
+  run.** Packing a test tree, a lockfile, a `tsconfig.json` or a `.github` directory used to stop
+  the run on the spot, so the rest of the report was never produced and an author fixed one problem
+  per round trip without knowing how many were left. It now reports as the `suspicious-file`
+  finding and still refuses to publish, exactly as the shipped-file-nothing-reaches rule does;
+  `--allow-suspicious` and `"publish-clean": { "allowSuspicious": true }` still waive it. A leaked
+  key, `node_modules` or a `.git` directory continues to stop the run immediately — that verdict is
+  never a judgement call and must not be reachable past.
+
 ### Fixed
 
 - **An error no longer buries its own explanation in a stack trace.** The cause of a reported

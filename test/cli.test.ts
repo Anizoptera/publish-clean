@@ -471,6 +471,37 @@ exit 1
   // disarmed the artifact scan. That is the shape of an opt-out that quietly removes a guard
   // nobody meant to remove, so the split is held here: relaxing the convention must leave the
   // scan armed.
+  // A shipped development file used to throw, which ended the run before any other rule reported.
+  // An author then fixed the one thing they were shown, re-ran, and met the next problem — and the
+  // ones after that — one round trip at a time, never knowing how many were left. It is the same
+  // class of waste as `unreferenced-file`, which has always reported instead, so it reports too.
+  it("reports a development file alongside the rest, not instead of them", async () => {
+    const fx = await fixture(
+      {
+        name: "fixture-suspicious-with-more",
+        version: "1.0.0",
+        files: ["index.js", "test", "dead.js"],
+        exports: { ".": "./index.js" },
+      },
+      {
+        "index.js": "module.exports = 1;\n",
+        "test/a.test.js": "// shipped by accident\n",
+        "dead.js": "module.exports = 2;\n".repeat(80),
+      },
+    );
+    try {
+      const result = await runCli(["--dry-run", "--no-git-checks", fx.dir], process.cwd());
+      expect(result.status).not.toBe(0);
+      // Both, in one run: the development file AND the file nothing reaches.
+      expect(result.stderr).toContain("test/a.test.js");
+      expect(result.stderr).toContain("dead.js");
+      // The waiver still names itself, so the reader is not left guessing how to overrule it.
+      expect(result.stderr).toContain("--allow-suspicious");
+    } finally {
+      await cleanup(fx.root);
+    }
+  });
+
   it("keeps scanning the artifact when the files-array requirement is waived", async () => {
     const fx = await fixture(
       { name: "fixture-no-files-field", version: "1.0.0" },
@@ -482,7 +513,9 @@ exit 1
         process.cwd(),
       );
       expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain("Suspicious files in package artifact");
+      // The rule id rather than its prose: an id is the stable handle a finding promises, so this
+      // pins which check refused the publish without pinning a sentence anybody may rewrite.
+      expect(result.stderr).toContain("suspicious-file");
       expect(result.stderr).toContain("index.test.js");
     } finally {
       await cleanup(fx.root);

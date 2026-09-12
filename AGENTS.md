@@ -75,9 +75,10 @@
   version number is burned forever, so abort on an UNHEALED finding that leaks something or breaks a
   consumer, and never on one that only wastes bytes. A healed finding never aborts — that is a rule
   about a different case, not an exception to this one. `--strict` raises warnings to errors and must
-  never make a healed finding fatal. The one waste finding that still aborts — a shipped file nothing
-  reaches and nobody declared — says so through `rulesAbort` on the finding itself, never through its
-  rule name, so the divergence stays visible as data instead of becoming a branch somebody tidies away.
+  never make a healed finding fatal. A waste finding that still aborts — a shipped file nothing
+  reaches and nobody declared, a shipped development file — says so through `rulesAbort` on the
+  finding itself, never through its rule name, so the divergence stays visible as data instead of
+  becoming a branch somebody tidies away.
 - `src/shipped.ts` mixes OPPOSITE safe directions, and one scan carries BOTH. NEVER unify them.
   The dead-file scan over-matches deliberately — a false positive only hides a report — but its
   closure also emits `import-case-mismatch`, which ABORTS, so that one finding must take its
