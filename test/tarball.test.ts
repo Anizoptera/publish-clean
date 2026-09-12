@@ -141,9 +141,10 @@ describe("manifest rewriting", () => {
   });
 
   it("refuses a GNU long-name entry, the other way to rename onto the manifest", () => {
-    // Same substitution as the pax case, in the encoding pnpm does not emit: the real path
-    // is the payload of this entry and the next entry's header carries only a placeholder,
-    // so a walk that reads header names alone cannot see where it points.
+    // Same substitution as the pax case, in the encoding pnpm 12 emits where pnpm 11 wrote a
+    // pax header: the real path is the payload of this entry and the next entry's header
+    // carries only a placeholder, so a walk that reads header names alone cannot see where
+    // it points. Reading the name is what lets this be a refusal rather than a blind pass.
     const source = archive([
       { name: "././@LongLink", body: `${MANIFEST}\0`, type: "L" },
       { name: "package/decoy", body: `{"name":"evil"}` },
@@ -240,6 +241,55 @@ describe("effective archive entries", () => {
       { name: "PaxHeader", body: "secret" },
     ]);
     expect(packageFiles(readArchive(input))).toEqual([deep.slice(8), "dist/secret.key"]);
+  });
+
+  // pnpm 12 writes these wherever a path is too long for the USTAR name/prefix split, which is
+  // where pnpm 11 wrote a pax header. Refusing them outright — as this tool did while no packer
+  // it supports emitted any — rejects correct packages; the guarantee that mattered was never
+  // the refusal but that no name reaches a guard unread.
+  it("reads a GNU long name as the effective path of the entry that follows it", () => {
+    const deep = `package/dist/${"d".repeat(70)}/${"e".repeat(70)}/secret.pem`;
+    const input = archive([
+      { name: "././@LongLink", type: "L", body: `${deep}\0` },
+      { name: "package/dist/truncated-placeholder", body: "secret" },
+      { name: MANIFEST, body: "{}" },
+    ]);
+    // The long-name header is not a file anyone installs, and the member it names is judged by
+    // the path it actually extracts to — not by the placeholder in its own header.
+    expect(packageFiles(readArchive(input))).toEqual([deep.slice(8), "package.json"]);
+  });
+
+  it("refuses a GNU long name that escapes the package directory", () => {
+    const input = archive([
+      { name: "././@LongLink", type: "L", body: "package/../../etc/passwd\0" },
+      { name: "package/harmless.js", body: "x" },
+      { name: MANIFEST, body: "{}" },
+    ]);
+    expect(() => readArchive(input)).toThrow(/unsafe entry path/);
+  });
+
+  it("refuses an empty GNU long name, which leaves the next entry's path unstated", () => {
+    // Falling back to the placeholder in the next header would judge the member under a name
+    // it does not extract to — the same blind spot reading the long name exists to close.
+    const input = archive([
+      { name: "././@LongLink", type: "L", body: "\0" },
+      { name: "package/placeholder", body: "a" },
+      { name: MANIFEST, body: "{}" },
+    ]);
+    expect(() => readArchive(input)).toThrow(/empty GNU long-name/);
+  });
+
+  it("refuses a pax header and a GNU long name competing for one entry", () => {
+    // Both claim to state the next entry's path, and nothing in either format says which an
+    // extractor honours, so the effective name would be the extractor's opinion rather than
+    // this tool's reading.
+    const input = archive([
+      { name: "PaxHeader", type: "x", body: pax("path", "package/one.js") },
+      { name: "././@LongLink", type: "L", body: "package/two.js\0" },
+      { name: "package/placeholder", body: "x" },
+      { name: MANIFEST, body: "{}" },
+    ]);
+    expect(() => readArchive(input)).toThrow(/consecutive extended headers/);
   });
 
   it("uses PAX size when walking an entry and resets it before the next entry", () => {

@@ -11,6 +11,14 @@ const TYPE_OFFSET = 156;
 
 const MANIFEST_PATH = "package/package.json";
 const PAX_TYPES = new Set(["x", "g"]);
+/** GNU's own extension for a path over 100 bytes: the name is the payload of a preceding entry. */
+const GNU_LONG_NAME_TYPE = "L";
+/**
+ * Header entries that describe the member after them instead of installing a file of their
+ * own. Every guard that judges "what does this package ship" must skip exactly these, or it
+ * reports `././@LongLink` as a shipped file and misses the real name it carries.
+ */
+const METADATA_TYPES = new Set([...PAX_TYPES, GNU_LONG_NAME_TYPE]);
 const DIRECTORY_TYPE = "5";
 const UTF8 = new TextDecoder("utf-8", { fatal: true });
 
@@ -102,6 +110,21 @@ function assertChecksum(header: Buffer, name: string): void {
     throw new PublishCleanError(`Tarball entry ${name} has a corrupt header checksum.`);
 }
 
+/**
+ * The path a GNU long-name header carries for the entry that follows it.
+ *
+ * GNU stores the name with a trailing NUL and counts it in the size; readers in the wild also
+ * accept one written without. Trailing NULs are stripped rather than required, and an embedded
+ * one is left in the string so the caller's path check refuses it — a name truncated at a NUL
+ * is how a member reaches a path nobody reviewed.
+ */
+function gnuLongName(body: Buffer): string {
+  let end = body.length;
+  while (end > 0 && body[end - 1] === 0) end -= 1;
+  if (end === 0) throw new PublishCleanError("Tarball has an empty GNU long-name entry.");
+  return UTF8.decode(body.subarray(0, end));
+}
+
 /** Rebuilds a header for a changed payload size, keeping every other field of the original. */
 function reheader(original: Buffer, size: number): Buffer {
   const header = Buffer.from(original);
@@ -160,9 +183,18 @@ export function readArchive(gzipped: Buffer): TarArchive {
         `Tarball entry ${JSON.stringify(name)} runs past the end of the archive.`,
       );
     const body = tar.subarray(offset + BLOCK, offset + BLOCK + size);
-    if (type === "L")
-      throw new PublishCleanError("Tarball uses GNU long-name entries, which this tool refuses.");
-    if (extended) {
+    if (type === GNU_LONG_NAME_TYPE) {
+      // Same guarantee the PAX branch gives, for the encoding pnpm 12 emits in its place: the
+      // name is READ, so the duplicate and unsafe-path checks below judge the effective path.
+      // Passing it through unparsed is what let a member alias the manifest before 0.5.0.
+      if (local) throw new PublishCleanError("Tarball has consecutive extended headers.");
+      const long = gnuLongName(body);
+      if (long === MANIFEST_PATH)
+        throw new PublishCleanError(
+          `Tarball contains a GNU long-name header renaming an entry to ${MANIFEST_PATH}.`,
+        );
+      local = new Map([["path", long]]);
+    } else if (extended) {
       const fields = paxFields(body);
       if (fields.get("path") === MANIFEST_PATH)
         throw new PublishCleanError(
@@ -173,7 +205,7 @@ export function readArchive(gzipped: Buffer): TarArchive {
         if (["path", "size", "linkpath"].some((key) => fields.has(key)))
           throw new PublishCleanError("Tarball has a global PAX path, linkpath or size override.");
       } else {
-        if (local) throw new PublishCleanError("Tarball has consecutive PAX extended headers.");
+        if (local) throw new PublishCleanError("Tarball has consecutive extended headers.");
         local = fields;
       }
     } else {
@@ -204,7 +236,7 @@ export function readArchive(gzipped: Buffer): TarArchive {
   }
   if (tail === null)
     throw new PublishCleanError("Tarball has no end-of-archive marker; the archive is truncated.");
-  if (local) throw new PublishCleanError("Tarball ends with an unused PAX extended header.");
+  if (local) throw new PublishCleanError("Tarball ends with an unused extended header.");
   return { entries, tail };
 }
 
@@ -218,7 +250,7 @@ export function assertPreservedArchive(before: TarArchive, after: TarArchive): v
       !result ||
       original.name !== result.name ||
       original.type !== result.type ||
-      (original.name === MANIFEST_PATH && !PAX_TYPES.has(original.type)
+      (original.name === MANIFEST_PATH && !METADATA_TYPES.has(original.type)
         ? !reheader(original.header, result.body.length).equals(result.header)
         : !original.raw.equals(result.raw))
     )
@@ -246,7 +278,7 @@ export function packageFiles(archive: TarArchive): string[] {
  */
 function installedEntries(archive: TarArchive): { name: string; body: Buffer }[] {
   return archive.entries
-    .filter((entry) => entry.type !== DIRECTORY_TYPE && !PAX_TYPES.has(entry.type))
+    .filter((entry) => entry.type !== DIRECTORY_TYPE && !METADATA_TYPES.has(entry.type))
     .map((entry) => ({
       name: entry.name.startsWith("package/") ? entry.name.slice(8) : entry.name,
       body: entry.body,
@@ -270,7 +302,7 @@ export function packageContents(archive: TarArchive): Map<string, Buffer> {
 function manifestEntry(archive: TarArchive): TarEntry {
   // A metadata header's name is only a label, even when it spells package/package.json.
   const entry = archive.entries.find(
-    (candidate) => candidate.name === MANIFEST_PATH && !PAX_TYPES.has(candidate.type),
+    (candidate) => candidate.name === MANIFEST_PATH && !METADATA_TYPES.has(candidate.type),
   );
   if (!entry) throw new PublishCleanError(`Tarball does not contain ${MANIFEST_PATH}.`);
   return entry;
