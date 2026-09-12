@@ -356,7 +356,9 @@ Registry URLs must not contain usernames or passwords, including scoped destinat
 `skipFileCheck` waives the manifest's `files` requirement. `allowSuspicious` permits the
 listed development files. Neither disables the protected filename checks.
 
-Use `noGitChecks` for a build directory or another directory outside a Git repository.
+Use `noGitChecks` to publish from a checkout whose working tree is dirty. A directory outside any
+Git repository does not need it: there is no commit there for a tree to differ from, so the check
+reports that it was skipped and the run continues.
 
 `devFields` refuses known consumer fields such as `exports`, `bin`, `engines` and dependency
 maps to prevent accidental removal.
