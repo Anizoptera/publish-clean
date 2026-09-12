@@ -28,6 +28,16 @@
   question asked, for a job this file already does — and it answers in lines, so it cannot express
   a filename containing one. Tests may use it freely, and one case pins this reader against it on a
   real pnpm archive; that cross-check is the reason a hand-written parser is acceptable here.
+- **publint and `@arethetypeswrong/cli` are additional instruments, never guarantees this tool leans
+  on.** `publish-clean` must be sufficient without them (Art, 2026-09-12). So "publint already
+  reports it" is NEVER a reason to omit or delete a check here — where publint or attw is stronger
+  than this tool on a defect that reaches consumers, the answer is a better check in `src/`, and the
+  rule belongs there rather than in `scripts/check-cleaned-artifact.ts`, which gates only this
+  repository while `src/` gates everyone. Measured instance: publint's `BIN_FILE_NOT_EXECUTABLE`
+  reported a `bin` file with no shebang and this tool did not, because the carriage-return scan reads
+  only files that already start with `#!`; `bin-no-shebang` closes it. To compare again, publint's
+  full rule vocabulary is the `case` labels in its own `src/shared/message.js`. Never remove or
+  degrade working functionality to reach agreement with anything — add to it.
 - Never weaken critical artifact checks for secrets, `node_modules`, Git internals, or broken export
   paths. They REPORT rather than throw, and that is not a weakening: `secret-file` and
   `internal-file` carry `consequence: "harm"`, which `isFatal` returns true for after reading only
