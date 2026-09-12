@@ -12,7 +12,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Consequence, Finding } from "../src/finding";
-import { decide, formatFindings, isFatal } from "../src/finding";
+import { formatFindings, isFatal, publishRefusal } from "../src/finding";
 
 const CONSEQUENCES: Consequence[] = ["harm", "breaks", "waste"];
 const BOOLEANS = [false, true];
@@ -63,12 +63,27 @@ describe.concurrent("the verdict a report hands to its reader", () => {
   it("stops the run when any single finding demands it, and not otherwise", () => {
     const harmless = finding({ consequence: "waste" });
     const fatal = finding({ consequence: "breaks" });
-    expect(decide([], false)).toBe(false);
-    expect(decide([harmless, harmless], false)).toBe(false);
+    expect(publishRefusal([], false)).toBeNull();
+    expect(publishRefusal([harmless, harmless], false)).toBeNull();
     // Position must not matter: a scan that stopped at the first finding would miss the later one.
-    expect(decide([harmless, fatal], false)).toBe(true);
-    expect(decide([fatal, harmless], false)).toBe(true);
-    expect(decide([harmless], true)).toBe(true);
+    expect(publishRefusal([harmless, fatal], false)).toContain("1 unrepaired");
+    expect(publishRefusal([fatal, harmless], false)).toContain("1 unrepaired");
+    expect(publishRefusal([harmless], true)).toContain("1 unrepaired");
+  });
+
+  it("counts the findings that stopped the run, not the findings it printed", () => {
+    // The number is a claim the reader checks against the blocks above it. Counting everything
+    // reported — repairs and warnings included — turns a correct report into one that says three
+    // things would reach consumers when one would, and the author hunts two defects that are fine.
+    const report = publishRefusal(
+      [
+        finding({ consequence: "breaks", healed: true }),
+        finding({ consequence: "waste" }),
+        finding({ consequence: "harm" }),
+      ],
+      false,
+    );
+    expect(report).toContain("1 unrepaired");
   });
 
   // How bad a defect is and what this run did about it are independent, and the report prints

@@ -263,10 +263,10 @@ const MUTATIONS: readonly Mutation[] = [
     to: 'rule: "monorepo-only-spec",\n$1consequence: "waste" as const,',
   },
   {
-    name: "decide stops at the first finding",
+    name: "the verdict stops at the first finding",
     file: "src/finding.ts",
-    from: /return findings\.some\(\(finding\) => isFatal\(finding, strict\)\);/,
-    to: "return findings.length > 0 && isFatal(findings[0], strict);",
+    from: /const fatal = findings\.filter\(/,
+    to: "const fatal = findings.slice(0, 1).filter(",
   },
 
   // --- src/shipped.ts: what the package ships and what reaches it -------------------------------

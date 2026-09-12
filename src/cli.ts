@@ -15,7 +15,7 @@ import { assertDeclaredFiles } from "./declared";
 import { requireTool, run } from "./command";
 import { allowedUnreferenced, customDevFields, keptFields, packageConfig } from "./config";
 import { reviewExports } from "./exports";
-import { decide, formatFindings, isFatal } from "./finding";
+import { formatFindings, publishRefusal } from "./finding";
 import { reviewSelfReferences, reviewShippedFiles, reviewUnreferencedFiles } from "./shipped";
 import { HELP, parseOptions } from "./options";
 import { reviewPackedNames } from "./packed-names";
@@ -364,11 +364,8 @@ async function packAndClean(
     }
     // Reported first, then decided: an author whose run is about to stop still gets every other
     // finding in the same output, rather than one per re-run.
-    if (decide(findings, opts.strict))
-      throw new PublishCleanError(
-        `Refusing to publish: ${findings.filter((finding) => isFatal(finding, opts.strict)).length} ` +
-          `unrepaired finding(s) above would reach consumers. A published version cannot be taken back.`,
-      );
+    const refusal = publishRefusal(findings, opts.strict);
+    if (refusal) throw new PublishCleanError(refusal);
 
     // Configuration was validated before packing. Append the owned artifact, never a shell string.
     const validator = config.validateArtifact as readonly [string, ...string[]] | undefined;

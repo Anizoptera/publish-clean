@@ -143,7 +143,7 @@
   several reasons at once, so waiving the first one found hands `os` authority over a reason it does
   not own. Doubt about `os` suppresses, because that gate exists only to prevent a fabricated refusal.
 - Verification is the same pipeline minus the publish, and `verify` skips exactly ONE guard:
-  `assertPublicPackage`. A package checked before it goes public must be checked by the rules it will
+  `privatePackageRefusal`. A package checked before it goes public must be checked by the rules it will
   actually face, so never let a second exemption in. Every check reports through `src/finding.ts`
   rather than throwing; a thrown `PublishCleanError` is for what the run cannot continue past, not for
   a defect in the package being examined.

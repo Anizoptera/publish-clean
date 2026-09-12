@@ -54,9 +54,9 @@ export interface Finding {
  * independent of what this run did is what stops a repaired breakage from printing as a warning
  * and teaching the reader to skim it.
  */
-export type Severity = "error" | "warning";
+type Severity = "error" | "warning";
 
-export function severityOf(finding: Finding, strict: boolean): Severity {
+function severityOf(finding: Finding, strict: boolean): Severity {
   if (finding.consequence !== "waste") return "error";
   return finding.rulesAbort === true || strict ? "error" : "warning";
 }
@@ -73,8 +73,24 @@ export function isFatal(finding: Finding, strict: boolean): boolean {
   return !finding.healed && severityOf(finding, strict) === "error";
 }
 
-export function decide(findings: readonly Finding[], strict: boolean): boolean {
-  return findings.some((finding) => isFatal(finding, strict));
+/**
+ * Why this publish must not proceed, or null when it may.
+ *
+ * The verdict and the count come from one pass, so a report cannot announce a number of findings
+ * that differs from the set that actually stopped the run — two expressions of the same predicate
+ * is how that drifts.
+ *
+ * `null | string` is this program's single way of saying "refused, and here is why": the checks
+ * that run before anything is packed answer in the same shape (`privatePackageRefusal` and its
+ * siblings in `manifest.ts`), so every refusal reads alike instead of a boolean in one place and a
+ * message in another.
+ */
+export function publishRefusal(findings: readonly Finding[], strict: boolean): null | string {
+  const fatal = findings.filter((finding) => isFatal(finding, strict));
+  return fatal.length === 0
+    ? null
+    : `Refusing to publish: ${fatal.length} unrepaired finding(s) above would reach consumers. ` +
+        `A published version cannot be taken back.`;
 }
 
 /**
