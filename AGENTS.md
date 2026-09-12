@@ -47,6 +47,13 @@
   consumer-breaking, and still not ours: the format needs `type`, extension and nested-`package.json`
   resolution, and the syntax needs a parser Node does not expose without a flag. That family, JSX
   extensions and `types` format analysis belong to publint and attw.
+  Rejected on EVIDENCE rather than scope, so do not re-derive it either: publint's
+  `EXPORTS_MISSING_ROOT_ENTRYPOINT`, an `exports` subpath map with no `"."` key. It needs no parsing
+  and is squarely in scope, and it is still noise — 55 of 1752 measured subpath maps (3.1%) omit `"."`
+  deliberately, because a package meant to be imported only as `pkg/sub` has nothing to put there.
+  Pairing it with a legacy `main` to catch the author who believes `main` still works narrows it to
+  one package in 5192 (`@aws-sdk/nested-clients`, which is subpath-only by design), so the rule would
+  be built on a sample of one and fire on a package that works.
   `isCommonJs` (`new Script`, for `require-branch-is-esm`) and `src/lexical.ts` predate this and stay
   — working code is not removed to satisfy a boundary — but they are the ceiling, not a licence for a
   third parsing site.
@@ -141,6 +148,12 @@
   that justifies it named beside it, and add a mutation row for BOTH directions: a tolerance whose
   absence refuses a working package and a fatality whose absence ships an unusable one look the same
   to anyone tidying either, and the row is the only thing that tells a reader which they hold.
+  Before TIGHTENING anything here, run this guard over a real corpus — every installed package under
+  a large tree, each manifest checked against its own file list — and then test every path it reports
+  for existence on disk. Neither half is optional: a refusal count alone cannot tell a defect in the
+  package from a defect here, and no test or mutation row can, because a fabricated refusal is
+  indistinguishable from a caught defect from inside this repository. That measurement is cheap, and
+  it is how the 373 were found.
 - **A field no CONSUMER resolves cannot break a stranger's build, so a miss in it REPORTS
   (`declared-path-inert`) instead of aborting.** `sideEffects` and the object form of `browser` are
   read by a bundler's own resolver, which applies extensions and aliases this tool cannot reproduce;
