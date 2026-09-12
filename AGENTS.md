@@ -28,34 +28,28 @@
   question asked, for a job this file already does — and it answers in lines, so it cannot express
   a filename containing one. Tests may use it freely, and one case pins this reader against it on a
   real pnpm archive; that cross-check is the reason a hand-written parser is acceptable here.
-- **publint and `@arethetypeswrong/cli` are additional instruments, never guarantees this tool leans
-  on.** `publish-clean` must be sufficient without them (Art, 2026-09-12). So "publint already
-  reports it" is NEVER a reason to omit or delete a check here — where publint or attw is stronger
-  than this tool on a defect that reaches consumers **and the defect is in scope by the bullet
-  below**, the answer is a better check in `src/`, and the rule belongs there rather than in
-  `scripts/check-cleaned-artifact.ts`, which gates only this repository while `src/` gates everyone.
-  Matching publint rule for rule is NOT the goal, and most of its vocabulary is out of scope here.
-  Measured instance: publint's `BIN_FILE_NOT_EXECUTABLE` reported a `bin` file with no shebang and
-  this tool did not, because the carriage-return scan reads only files that already start with `#!`;
-  `bin-no-shebang` closes it. To compare again, publint's
-  full rule vocabulary is the `case` labels in its own `src/shared/message.js`. Never remove or
-  degrade working functionality to reach agreement with anything — add to it.
-- **This tool verifies the package, not the JavaScript in it.** Scope is what is cheaply decidable
-  from the manifest and the archive bytes: declared paths against packed names, condition-map
-  algebra, names a filesystem cannot carry, credentials, secrets, shipped development files, two
-  bytes of shebang. NOT JavaScript parsing, evaluation, module-format inference or type analysis
-  (Art, 2026-09-12). A package checker that grows a JS front end acquires a second product's worth of
-  maintenance, and every misread becomes a refusal of a working package on the one step nobody can
-  take back.
-  **Rejected under this, so do not re-derive it:** publint's `MODULE_SHOULD_BE_ESM` /
-  `FILE_INVALID_FORMAT` family — a file whose format is ESM but whose syntax is CommonJS. It is a
-  real consumer-breaking defect and this tool deliberately does not report it, because deciding a
-  file's format needs `type`, extension and nested-`package.json` resolution, and deciding its syntax
-  needs a parser Node does not expose without a flag. That whole family, plus JSX extensions and
-  `types` format analysis, belongs to publint and `@arethetypeswrong/cli`.
-  `isCommonJs` (`new Script`, for `require-branch-is-esm`) and `src/lexical.ts` predate this ruling
-  and stay — working functionality is never removed to satisfy a boundary. They are the ceiling, not
-  a licence: do not add a third parsing site.
+- **publint and `@arethetypeswrong/cli` are extra instruments. This tool must be sufficient without
+  them** (Art, 2026-09-12). "publint reports it" is never a reason to skip or delete a check here. If
+  they catch a consumer-breaking defect that is in scope by the bullet below, write the check in
+  `src/`: that gates every consumer, while `scripts/check-cleaned-artifact.ts` gates only this
+  repository. Matching publint rule for rule is NOT the goal — most of its vocabulary is out of scope.
+  publint did find one real gap: a `bin` file with no shebang, which the shebang scan missed because
+  it reads only files that already start with `#!`. `bin-no-shebang` covers it. Never delete or weaken
+  a working check to agree with anything.
+- **This tool checks the package, not the JavaScript in it** (Art, 2026-09-12). In scope: what the
+  manifest and the archive bytes answer cheaply — declared paths against packed names, condition-map
+  algebra, names a filesystem cannot carry, credentials, secrets, shipped development files, the two
+  bytes of a shebang. Out of scope: parsing or running JavaScript, inferring module format, analysing
+  types. A JS front end is a second product to maintain, and every misread refuses a working package
+  on the one step nobody can undo.
+  Rejected under this, so do not re-derive it as a gap: publint's `MODULE_SHOULD_BE_ESM` /
+  `FILE_INVALID_FORMAT` family — an ESM-format file holding CommonJS syntax. Real and
+  consumer-breaking, and still not ours: the format needs `type`, extension and nested-`package.json`
+  resolution, and the syntax needs a parser Node does not expose without a flag. That family, JSX
+  extensions and `types` format analysis belong to publint and attw.
+  `isCommonJs` (`new Script`, for `require-branch-is-esm`) and `src/lexical.ts` predate this and stay
+  — working code is not removed to satisfy a boundary — but they are the ceiling, not a licence for a
+  third parsing site.
 - Never weaken critical artifact checks for secrets, `node_modules`, Git internals, or broken export
   paths. They REPORT rather than throw, and that is not a weakening: `secret-file` and
   `internal-file` carry `consequence: "harm"`, which `isFatal` returns true for after reading only
