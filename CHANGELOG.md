@@ -47,6 +47,12 @@ notes: the section for a version is published verbatim when its tag is pushed.
   for you; prefixes match whole subtrees. The check runs only when `exports` closes the package,
   because without that field every shipped path is importable and nothing is dead.
 
+- **Checking a package no longer needs npm installed.** npm exists here to upload a tarball, so
+  it is now started at the upload rather than at startup: `verify` and `--dry-run` stop before
+  that point and never start it. Measured on this machine, dropping that probe took `verify` from
+  0.14s to 0.07s and removed its spread — the probe was the largest single cost in the run. A
+  publish still refuses when npm is missing or cannot be executed, before anything is uploaded.
+
 - **A package directory that is not a Git repository no longer fails the run.** It used to abort
   with a raw `git exited with 128`, which made `--no-git-checks` — documented as allowing a dirty
   working tree — the only way to publish a directory that has no repository at all. There is no

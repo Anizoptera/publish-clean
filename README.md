@@ -45,9 +45,10 @@ start. pnpm 11 needs nothing special.
 | npm     | `npm i -D @anizoptera/publish-clean`    | `npm exec publish-clean`  |
 | Yarn    | `yarn add -D @anizoptera/publish-clean` | `yarn publish-clean`      |
 
-Both `pnpm` and `npm` must be on `PATH`, including in Bun, npm and Yarn projects and CI.
-The CLI is one JavaScript file with no runtime dependencies. pnpm and npm are separate
-requirements, not bundled dependencies.
+Both `pnpm` and `npm` must be on `PATH` to publish, including in Bun, npm and Yarn projects
+and CI. `pnpm` alone is enough to check one: `verify` and `--dry-run` stop before the upload,
+so they never start npm. The CLI is one JavaScript file with no runtime dependencies. pnpm
+and npm are separate requirements, not bundled dependencies.
 
 For trusted publishing, use Node.js 22.14+ and npm 11.5.1+. Provenance requires a public
 package, a public source repository and a supported CI provider. See

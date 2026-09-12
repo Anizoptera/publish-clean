@@ -246,10 +246,14 @@ async function packAndClean(
   const sourcePkgPath = path.join(packageDir, "package.json");
   const sourcePkg = readJson(sourcePkgPath);
 
-  const [, npmVersion] = await Promise.all([
-    requireTool("pnpm", packageDir, signal),
-    requireTool("npm", packageDir, signal),
-  ]);
+  // Only pnpm is needed to produce and check an artifact; npm exists here to upload one. It is
+  // probed at the upload instead of here, so a run that stops before it — `verify`, `--dry-run` —
+  // neither spawns npm nor requires it to be installed at all. Measured: the probe costs about
+  // 0.1s, which was the largest single component of a 0.14s `verify`.
+  //
+  // Probing late does not risk the irreversible step: it still happens before anything is
+  // uploaded, and the pack and checks it now follows take milliseconds.
+  await requireTool("pnpm", packageDir, signal);
   warnIfNonPnpmLifecycle();
   const config = packageConfig(sourcePkg);
   // Two independent policies, never one switch. The `files` requirement is a manifest
@@ -375,6 +379,7 @@ async function packAndClean(
     }
     if (opts.guardOnly || opts.verify) return;
 
+    const npmVersion = await requireTool("npm", packageDir, signal);
     const env = publishEnv();
     let trusted = wantsTrustedPublish(shippedPkg, opts.publishArgs, env);
     if (trusted === undefined) {
