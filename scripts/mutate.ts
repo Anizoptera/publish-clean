@@ -353,6 +353,28 @@ const MUTATIONS: readonly Mutation[] = [
     to: "reportReachability(node, where, findings);",
   },
 
+  {
+    name: "shipped: bin shebang check reads its condition backwards",
+    file: "src/shipped.ts",
+    from: /if \(body\.subarray\(0, 2\)\.toString\(\) === "#!" \|\| body\.subarray\(0, 512\)\.includes\(0\)\) continue;/,
+    to: 'if (!body.subarray(0, 2).toString().startsWith("#")) continue;',
+  },
+  {
+    // The suppression that keeps a compiled command from reading as a defect. Removing it does not
+    // weaken the rule, it makes the rule REFUSE packages that work — so the row proves the controls
+    // holding that direction are real, not the finding.
+    name: "shipped: bin shebang check demands one of a compiled binary too",
+    file: "src/shipped.ts",
+    from: / \|\| body\.subarray\(0, 512\)\.includes\(0\)\) continue;/,
+    to: ") continue;",
+  },
+  {
+    name: "shipped: bin scan stops seeing the bare spelling of a command path",
+    file: "src/shipped.ts",
+    from: /collectDeclaredPaths\(pkg\.bin, commands, "every-string"\);/,
+    to: 'collectDeclaredPaths(pkg.bin, commands, "relative-only");',
+  },
+
   // --- src/command.ts: what reaches cmd.exe -----------------------------------------------------
   // 0.7.0 shipped with this hole open, found by a hostile argument rather than by packing a benign
   // repository, so these rows exist to keep the cases that found it attached to the guard. Both

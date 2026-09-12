@@ -238,6 +238,30 @@ describe.concurrent("a manifest branch pointing at the wrong kind of file", () =
     // No shebang at all: a CR on line one of an ordinary module breaks nothing.
     expect(rules({}, { "lib.js": "const a = 1;\r\n" })).toEqual([]);
   });
+
+  it("reports a bin entry with no shebang, and only where one is actually required", () => {
+    // On POSIX the installed bin is a symlink the kernel resolves through this line, so a script
+    // without it cannot be executed at all — the defect breaks every consumer of the package.
+    expect(rules({ bin: "./cli.js" }, { "cli.js": "run();\n" })).toContain("bin-no-shebang");
+    // Written bare, which is the common spelling for `bin`, and in the multi-command object form.
+    expect(rules({ bin: "cli.js" }, { "cli.js": "run();\n" })).toContain("bin-no-shebang");
+    expect(rules({ bin: { tool: "./cli.js" } }, { "cli.js": "run();\n" })).toContain(
+      "bin-no-shebang",
+    );
+
+    // The controls, each one character of manifest away from the cases above.
+    expect(rules({ bin: "./cli.js" }, { "cli.js": "#!/usr/bin/env node\nrun();\n" })).toEqual([]);
+    // A file nothing declares as a command needs no shebang; most of a package is this.
+    expect(rules({}, { "cli.js": "run();\n" })).toEqual([]);
+    // A compiled binary is executed by the kernel directly, so demanding a shebang of it would
+    // refuse the packages that ship platform binaries as their command — the one shape where this
+    // rule would invent a refusal of something that works.
+    expect(rules({ bin: "./tool" }, { tool: "\x7fELF\x02\x01\x01\0" })).toEqual([]);
+    expect(rules({ bin: "./tool" }, { tool: "MZ\x90\0" })).toEqual([]);
+    // A declared path the archive does not carry is `assertDeclaredFiles`' finding, not this one:
+    // reporting it here would give one defect two voices that disagree about the remedy.
+    expect(rules({ bin: "./missing.js" }, { "cli.js": "run();\n" })).toEqual([]);
+  });
 });
 
 describe.concurrent("files the package ships but nothing reaches", () => {

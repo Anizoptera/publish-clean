@@ -297,6 +297,44 @@ export function reviewShippedFiles(pkg: JsonObject, files: ReadonlyMap<string, B
     });
   }
 
+  // A `bin` entry promises the file can be EXECUTED. On POSIX the installed command is a symlink
+  // the kernel resolves through the shebang, so without one execve fails and the package is broken
+  // for every consumer — and npm's cmd-shim copies the interpreter name out of that same line to
+  // build the Windows shim, so no platform recovers. The CR check above cannot see this: it only
+  // inspects files that already START with `#!`, which is exactly the set this one must look outside
+  // of.
+  //
+  // Silence on anything carrying a NUL byte, because a compiled command is execve-able with no
+  // shebang at all and this rule ABORTS a publish: doubt must suppress rather than invent a refusal
+  // of a package that works. A magic-number allowlist was the alternative and fails in the dangerous
+  // direction — an unlisted binary format would read as a defect. A NUL also makes the file unusable
+  // as a script under every interpreter, so staying quiet loses nothing that could have run.
+  //
+  // A declared path the archive does not carry — or one that does not normalise at all, because it
+  // escapes the package — belongs to `assertDeclaredFiles`; reporting it here would give one defect
+  // two voices that disagree about the remedy.
+  const commands: string[] = [];
+  collectDeclaredPaths(pkg.bin, commands, "every-string");
+  for (const target of new Set(commands)) {
+    const name = normalizeDeclaredPath(target);
+    if (name === null) continue;
+    const body = files.get(name);
+    if (body === undefined) continue;
+    if (body.subarray(0, 2).toString() === "#!" || body.subarray(0, 512).includes(0)) continue;
+    findings.push({
+      rule: "bin-no-shebang",
+      consequence: "breaks",
+      healed: false,
+      where: name,
+      message:
+        `"bin" names this file as a command, but its first line is not a shebang, so the symlink ` +
+        `an installer creates for it cannot be executed: the command fails with "exec format ` +
+        `error" on Linux and macOS, and npm has no interpreter to write into its Windows shim. ` +
+        `Add "#!/usr/bin/env node" as the first line. Nothing here rewrites it — this tool alters ` +
+        `the manifest and no other file's contents.`,
+    });
+  }
+
   return findings;
 }
 
