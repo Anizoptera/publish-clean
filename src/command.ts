@@ -48,6 +48,33 @@ export function spawnArgs(
   return ["cmd.exe", ["/d", "/c", command, ...args]];
 }
 
+/**
+ * Why a spawn failed, in words the reader can act on.
+ *
+ * `ENOEXEC` earns a translation because every check a reader would run says the tool is fine:
+ * the file is on PATH and carries the executable bit, and the kernel refuses it anyway. The
+ * common cause is an installer that skipped build scripts — pnpm ships a shebang-less
+ * placeholder at its bin path until its own install script puts the native binary there, and
+ * blocking install scripts is the default in Bun and under `--ignore-scripts`. It surfaces on
+ * macOS specifically: Apple's libc, unlike glibc, does not retry such a file under a shell, so
+ * a direct spawn is the one caller that cannot paper over it — and this tool spawns directly
+ * on purpose, because a shell would take the arguments a caller wrote after `--`.
+ *
+ * Kept apart from `run` so the mapping is provable without a spawn, like `spawnArgs` above:
+ * the failure it describes does not reproduce on Linux at all.
+ */
+export function failureReason(failure: Error | undefined, exit: string): string {
+  const code = isObject(failure) ? failure.code : undefined;
+  if (code === "ENOENT") return "is not available in PATH";
+  if (code === "ENOEXEC")
+    return (
+      "is on PATH but cannot be executed: the file is a script with no shebang line, or a " +
+      "program built for another architecture. An installer that skipped build scripts leaves " +
+      "such a placeholder behind — reinstall it with its build scripts allowed"
+    );
+  return failure?.message ?? exit;
+}
+
 interface RunOptions {
   signal?: AbortSignal | undefined;
   output?: "capture" | "pack" | "publish" | "validator";
@@ -162,10 +189,7 @@ export function run(
         return;
       }
       if (failure || status !== 0) {
-        const reason =
-          failure && isObject(failure) && failure.code === "ENOENT"
-            ? "is not available in PATH"
-            : (failure?.message ?? `exited with ${signal ?? status}`);
+        const reason = failureReason(failure, `exited with ${signal ?? status}`);
         reject(
           new PublishCleanError(
             `${command} ${reason}${stderr.trim() ? `: ${stderr.trim()}` : ""}${output === "validator" && stdout.trim() ? `\n${stdout.trim()}` : ""}`,

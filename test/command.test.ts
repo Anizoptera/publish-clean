@@ -10,7 +10,34 @@ import { mkdtemp, writeFile, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { run, spawnArgs } from "../src/command";
+import { failureReason, run, spawnArgs } from "../src/command";
+
+/**
+ * A spawn failure reaches the reader as the only thing they get, so what it classifies decides
+ * whether they can act. Driven directly rather than through a spawn because `ENOEXEC` cannot be
+ * produced on Linux at all: glibc retries such a file under `/bin/sh`, so only macOS surfaces it.
+ */
+describe("spawn failure diagnosis", () => {
+  const failed = (code: string): Error => Object.assign(new Error("spawn ENOEXEC"), { code });
+
+  it("tells a reader whose tool is present and unrunnable what to do about it", () => {
+    // The state every other check calls healthy: on PATH, executable bit set, kernel refuses it.
+    // Naming the placeholder and the repair is the whole value; `spawn ENOEXEC` names neither.
+    const reason = failureReason(failed("ENOEXEC"), "exited with 1");
+    expect(reason).toMatch(/cannot be executed/);
+    expect(reason).toMatch(/build scripts/);
+  });
+
+  it("keeps a missing tool distinct from an unrunnable one", () => {
+    // Same class of complaint, opposite repair: install it, versus finish installing it.
+    expect(failureReason(failed("ENOENT"), "exited with 1")).toMatch(/not available in PATH/);
+  });
+
+  it("never swallows a failure it does not recognise", () => {
+    expect(failureReason(failed("EACCES"), "exited with 1")).toBe("spawn ENOEXEC");
+    expect(failureReason(undefined, "exited with 1")).toBe("exited with 1");
+  });
+});
 
 describe("spawn arguments", () => {
   it("refuses an argument cmd.exe would split, rather than publishing the pieces", () => {
