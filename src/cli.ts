@@ -239,14 +239,18 @@ async function packAndClean(
     tarballOut: null | string;
   },
 ): Promise<void> {
+  // Parsed before either package manager is asked anything, so an unreadable manifest is
+  // reported by the tool that knows which file it read. Every package manager also parses it
+  // — even for `--version` — and what it says then is its own: pnpm 12 reports the syntax
+  // error with no path at all, which sends the reader looking for a file nobody named.
+  const sourcePkgPath = path.join(packageDir, "package.json");
+  const sourcePkg = readJson(sourcePkgPath);
+
   const [, npmVersion] = await Promise.all([
     requireTool("pnpm", packageDir, signal),
     requireTool("npm", packageDir, signal),
   ]);
   warnIfNonPnpmLifecycle();
-
-  const sourcePkgPath = path.join(packageDir, "package.json");
-  const sourcePkg = readJson(sourcePkgPath);
   const config = packageConfig(sourcePkg);
   // Two independent policies, never one switch. The `files` requirement is a manifest
   // convention some packages legitimately do not follow; the artifact scan is what keeps
