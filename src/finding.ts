@@ -5,9 +5,11 @@
  * cannot: some of them repair what they find, and a repaired defect must not stop a publish
  * that is now correct. So they return records and one pure function decides the exit.
  *
- * Returned rather than printed, for the reason `unrecognizedFieldsReport` is: a message that is
- * a value can be asserted whole, where a message written to a process-wide `console` can be
- * clobbered by a case running beside it.
+ * Returned rather than printed: a message that is a value can be asserted whole, where one written
+ * to a process-wide `console` can be clobbered by a case running beside it. Everything a run has
+ * to say about the package travels this way, so the report has ONE shape — a rule id to grep or
+ * silence, a severity to rank by, a location. A check that printed its own paragraph instead
+ * would land wherever in the output it happened to run, unrankable and unsearchable.
  *
  * Ambient inputs arrive as parameters — no process, filesystem or argv here.
  */

@@ -93,6 +93,32 @@ it.concurrent("gives every reason the source cannot be packed, not the first one
   expect(refused.stderr).toContain('"files"');
 });
 
+it.concurrent("reports an unrecognised field in the same shape as every other finding", async () => {
+  // One report, one format. An agent or a human scanning output should not have to learn that
+  // some advice arrives as a labelled block and some as a bare paragraph printed earlier, and a
+  // rule with no id cannot be grepped, silenced or counted like its neighbours.
+  const odd = { ...SOUND, someToolConfig: { threshold: 5 } };
+  const result = await check(odd, INDEX, ["verify"]);
+  expect(result.status).toBe(0);
+  expect(result.stderr).toContain("[warning] unrecognized-field");
+  expect(result.stderr).toContain("someToolConfig");
+  // The advice is the whole point: both resolutions must survive the move into the model.
+  expect(result.stderr).toContain(`"devFields": ["someToolConfig"]`);
+  expect(result.stderr).toContain(`"keepFields": ["someToolConfig"]`);
+});
+
+it.concurrent("says whether it passed, rather than going silent after a warning", async () => {
+  // `verify` exists to be read. Findings then silence cannot be told apart from findings then a
+  // crash, and a clean run printing nothing at all reads as a tool that never ran.
+  const clean = await check(SOUND, INDEX, ["verify"]);
+  expect(clean.status).toBe(0);
+  expect(clean.stderr).toContain("publish-clean: no findings");
+
+  const warned = await check({ ...SOUND, someToolConfig: {} }, INDEX, ["verify"]);
+  expect(warned.status).toBe(0);
+  expect(warned.stderr).toMatch(/1 finding[^s].*stops a publish/);
+});
+
 it.concurrent("keeps --guard-only working and says what replaces it", async () => {
   // Deprecating a flag that stops existing scripts is a migration nobody asked for; this one is
   // in this repository's own prepublishOnly.

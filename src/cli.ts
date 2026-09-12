@@ -15,7 +15,7 @@ import { assertDeclaredFiles } from "./declared";
 import { requireTool, run } from "./command";
 import { allowedUnreferenced, customDevFields, keptFields, packageConfig } from "./config";
 import { reviewExports } from "./exports";
-import { formatFindings, publishRefusal } from "./finding";
+import { countOf, formatFindings, publishRefusal } from "./finding";
 import { reviewSelfReferences, reviewShippedFiles, reviewUnreferencedFiles } from "./shipped";
 import { HELP, parseOptions } from "./options";
 import { reviewPackedNames } from "./packed-names";
@@ -29,7 +29,7 @@ import {
   reviewMonorepoProtocols,
   privatePackageRefusal,
   stripManifest,
-  unrecognizedFieldsReport,
+  reviewUnrecognizedFields,
 } from "./manifest";
 import { packageScope, reviewRegistryDestinations, withRegistry } from "./registry";
 import {
@@ -297,10 +297,8 @@ async function packAndClean(
     const review = reviewExports(withRegistry(stripManifest(packedPkg, extraDevFields), registry), {
       heal: opts.heal && config.heal !== false,
     });
-    const findings = [...review.findings];
+    const findings = [...review.findings, ...reviewUnrecognizedFields(review.manifest, keepFields)];
     const cleanedText = stringifyJson(review.manifest);
-    const unrecognized = unrecognizedFieldsReport(review.manifest, keepFields);
-    if (unrecognized) console.warn(unrecognized);
 
     await writeFile(finalTarball, replaceManifest(packed, cleanedText));
 
@@ -364,6 +362,15 @@ async function packAndClean(
     // finding in the same output, rather than one per re-run.
     const refusal = publishRefusal(findings, opts.strict);
     if (refusal) throw new PublishCleanError(refusal);
+    // A checker that goes quiet when it passes leaves the reader unable to tell "those were
+    // warnings, you are fine" from "it died after printing them" — and `verify` exists to be read,
+    // so its whole output is this report. Silence is only unambiguous for a tool that prints
+    // nothing but errors, which this one is not.
+    console.warn(
+      findings.length === 0
+        ? "publish-clean: no findings."
+        : `publish-clean: ${countOf(findings.length, "finding")} above, none of which stops a publish.`,
+    );
 
     // Configuration was validated before packing. Append the owned artifact, never a shell string.
     const validator = config.validateArtifact as readonly [string, ...string[]] | undefined;

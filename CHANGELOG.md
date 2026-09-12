@@ -48,6 +48,18 @@ notes: the section for a version is published verbatim when its tag is pushed.
   refused together before packing. Every one still refuses the publish; none is waivable that was
   not waivable before.
 
+- **Every run now ends by saying what it decided**, instead of going silent when it passes.
+  `publish-clean: no findings.`, or `N findings above, none of which stops a publish.` A report
+  that printed warnings and then stopped could not be told apart from one that crashed.
+
+- **Unrecognised manifest fields are reported like every other finding**, as
+  `[warning] unrecognized-field`, in severity order with the rest. It used to print as an
+  unlabelled paragraph before the tarball existed — no rule id to grep or silence, no severity to
+  rank it by, and positioned above findings more serious than itself. The advice is unchanged, and
+  it still never stops a publish on its own. **`--strict` now promotes it like any other warning**,
+  so a strict run refuses a package carrying fields nobody has classified; acknowledge them with
+  `"publish-clean": { "keepFields": [...] }`, which the message prints for you.
+
 - **A report now says how bad a defect is and whether it was repaired as two separate facts.**
   There was a third severity, `[healed]`, which made a repaired breakage and a harmless stray file
   read alike. A repair corrects the published artifact and never your source, so the defect keeps

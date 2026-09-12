@@ -14,7 +14,7 @@ import {
   privatePackageRefusal,
   reviewMonorepoProtocols,
   stripManifest,
-  unrecognizedFieldsReport,
+  reviewUnrecognizedFields,
 } from "../src/manifest";
 import { assertRegistry, reviewRegistryDestinations, withRegistry } from "../src/registry";
 
@@ -64,8 +64,16 @@ describe.concurrent("manifest cleaning", () => {
 });
 
 describe.concurrent("unrecognised field report", () => {
+  // Advice, so it must never stop a publish on its own — but it is still a finding, so it is
+  // ranked, greppable and silenceable like every other one instead of a bare paragraph.
+  const advice = (pkg: JsonObject, kept: string[] = []): string => {
+    const found = reviewUnrecognizedFields(pkg, kept);
+    expect(found.some((finding) => isFatal(finding, false))).toBe(false);
+    return found.map((finding) => finding.message).join("\n");
+  };
+
   it("names the field and offers both resolutions", () => {
-    const message = unrecognizedFieldsReport({ name: "x", someTool: {} }, []);
+    const message = advice({ name: "x", someTool: {} });
     expect(message).toContain("someTool");
     expect(message).toContain(`"devFields": ["someTool"]`);
     expect(message).toContain(`"keepFields": ["someTool"]`);
@@ -73,13 +81,13 @@ describe.concurrent("unrecognised field report", () => {
 
   // A report nobody trusts is noise, so a field the tool knows must never appear in it.
   it("stays silent about recognised fields", () => {
-    expect(unrecognizedFieldsReport({ name: "x", funding: "u", exports: {} }, [])).toBeNull();
+    expect(advice({ name: "x", funding: "u", exports: {} })).toBe("");
   });
 
   // A report whose only resolution deletes the field is unusable for any ecosystem this tool
   // does not know: a VS Code extension needs `contributes` in the artifact to work at all.
   it("stays silent about a field acknowledged through keepFields", () => {
-    expect(unrecognizedFieldsReport({ name: "x", contributes: {} }, ["contributes"])).toBeNull();
+    expect(advice({ name: "x", contributes: {} }, ["contributes"])).toBe("");
   });
 });
 
@@ -278,7 +286,7 @@ describe("strict manifest configuration", () => {
   );
   it("emits valid JSON suggestions for arbitrary unknown field names", () => {
     const key = 'a"\n\\b';
-    const report = unrecognizedFieldsReport({ [key]: true }, []);
+    const [report] = reviewUnrecognizedFields({ [key]: true }, []).map((f) => f.message);
     expect(report).toContain(JSON.stringify(key));
     expect(report).not.toContain("were published");
   });

@@ -216,11 +216,15 @@ export function assertNoLostConsumerFields(
  * it next time. It is advice about the package, not an error in it — nothing about the
  * published artifact depends on whether anyone reads it.
  *
- * Returned rather than printed, so the message is this function's value and can be asserted
- * whole. Writing to `console` from here would make that assertion a spy on a process-wide
- * object, which two cases running side by side can clobber.
+ * `waste` and never healed, so it reports and never stops a publish by itself. It travels as a
+ * Finding rather than as its own printed paragraph because a reader — increasingly an agent —
+ * should need one output shape, not two: a bare paragraph has no severity to rank it by, no rule
+ * id to grep or silence, and it printed before the artifact existed, which put it above findings
+ * more serious than itself. `--strict` promotes it like any other warning: an author asking for
+ * strict is asking that no unclassified bytes ship, and the message already carries the one line
+ * that resolves it either way.
  */
-export function unrecognizedFieldsReport(pkg: JsonObject, kept: readonly string[]): null | string {
+export function reviewUnrecognizedFields(pkg: JsonObject, kept: readonly string[]): Finding[] {
   const acknowledged = new Set(kept);
   const unrecognized = Object.keys(pkg).filter(
     (field) =>
@@ -228,16 +232,23 @@ export function unrecognizedFieldsReport(pkg: JsonObject, kept: readonly string[
       !REGISTRY_MANIFEST_FIELDS.has(field) &&
       !acknowledged.has(field),
   );
-  if (unrecognized.length === 0) return null;
+  if (unrecognized.length === 0) return [];
   const quoted = unrecognized.map((field) => JSON.stringify(field));
   const list = quoted.join(", ");
-  return (
-    `publish-clean: these manifest fields are not recognised and are retained as-is:\n` +
-    `  ${quoted.join("\n  ")}\n` +
-    `Strip the ones consumers do not read, and acknowledge the ones they do:\n` +
-    `  "publish-clean": { "devFields": [${list}] }\n` +
-    `  "publish-clean": { "keepFields": [${list}] }`
-  );
+  return [
+    {
+      rule: "unrecognized-field",
+      consequence: "waste" as const,
+      healed: false,
+      where: countOf(unrecognized.length, "manifest field"),
+      message:
+        `These manifest fields are not recognised and are retained as-is:\n` +
+        `  ${quoted.join("\n  ")}\n` +
+        `Strip the ones consumers do not read, and acknowledge the ones they do:\n` +
+        `  "publish-clean": { "devFields": [${list}] }\n` +
+        `  "publish-clean": { "keepFields": [${list}] }`,
+    },
+  ];
 }
 
 /**
