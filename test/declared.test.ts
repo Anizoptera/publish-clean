@@ -110,10 +110,12 @@ describe.concurrent("declared entry points", () => {
       ]),
     ).toEqual([]);
     // `bin` gets none of that tolerance: npm symlinks the exact path it is handed, so nothing fills
-    // the gap and an inexact name is a command that cannot run.
-    expect(() => reviewDeclaredFiles({ bin: "./cli", main: "./index.js" }, shipped)).toThrow(
-      /\.\/cli/,
-    );
+    // the gap and an inexact name is a command that cannot run. `cli.js` ships here, which is
+    // exactly what a main-like resolver would have accepted — without it this case passes for the
+    // wrong reason and says nothing about which resolver `bin` got.
+    expect(() =>
+      reviewDeclaredFiles({ bin: "./cli", main: "./index.js" }, ["index.js", "cli.js"]),
+    ).toThrow(/\.\/cli/);
   });
 
   it("reports a stale hint or a dead pattern rather than refusing the package", () => {
