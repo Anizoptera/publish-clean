@@ -31,10 +31,10 @@ a package that never goes to a registry can still be checked by the rules it wou
 Requires Node.js 22+, pnpm and npm. The CLI has no runtime dependencies. The publish
 command above needs [CI provenance setup](#publishing-a-public-package-from-ci).
 
-pnpm 12 is a native binary that its own install script puts in place, so install it with
-build scripts allowed — under Bun, which blocks them by default, list `pnpm` in
-`trustedDependencies`. Without that its command stays a placeholder, which macOS refuses to
-run and Windows cannot start at all. pnpm 11 needs nothing special.
+pnpm 12 installs its native binary from its own install script, so install it with build
+scripts allowed — under Bun, which blocks them by default, list `pnpm` in
+`trustedDependencies`. Otherwise pnpm's command stays a placeholder that this tool cannot
+start. pnpm 11 needs nothing special.
 
 ## Install
 

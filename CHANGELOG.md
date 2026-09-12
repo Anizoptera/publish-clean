@@ -70,10 +70,9 @@ notes: the section for a version is published verbatim when its tag is pushed.
 - **A package manager that is present but cannot be executed says so, and says what to do about
   it.** It surfaced as a bare `spawn ENOEXEC` and a stack trace naming neither the tool nor a
   repair. Installing pnpm 12 without running its install script — Bun's default, and what
-  `--ignore-scripts` does — leaves a placeholder at its command instead of the real binary: on
-  macOS every run of this tool then fails, and on Windows pnpm cannot be started at all. Allow
-  pnpm's build scripts and reinstall; under Bun that means listing `pnpm` in
-  `trustedDependencies`.
+  `--ignore-scripts` does — leaves a placeholder at its command instead of the real binary, and
+  this tool cannot start it. Allow pnpm's build scripts and reinstall; under Bun that means
+  listing `pnpm` in `trustedDependencies`.
 
 ## [0.9.1] - 2026-09-08
 

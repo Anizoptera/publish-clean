@@ -55,13 +55,20 @@ export function spawnArgs(
  * the file is on PATH and carries the executable bit, and the kernel refuses it anyway. The
  * common cause is an installer that skipped build scripts — pnpm ships a shebang-less
  * placeholder at its bin path until its own install script puts the native binary there, and
- * blocking install scripts is the default in Bun and under `--ignore-scripts`. It surfaces on
- * macOS specifically: Apple's libc, unlike glibc, does not retry such a file under a shell, so
- * a direct spawn is the one caller that cannot paper over it — and this tool spawns directly
- * on purpose, because a shell would take the arguments a caller wrote after `--`.
+ * blocking install scripts is the default in Bun and under `--ignore-scripts`. That placeholder
+ * is deliberate and permanent on pnpm's side, so this is not a bug waiting to be fixed
+ * upstream: pnpm/pnpm#14502 keeps it shebang-less so pnpm 11 can install pnpm 12, and requires
+ * that wrapper installs allow lifecycle scripts.
  *
- * Kept apart from `run` so the mapping is provable without a spawn, like `spawnArgs` above:
- * the failure it describes does not reproduce on Linux at all.
+ * pnpm added a fallback that runs the placeholder through Node.js, but it only rescues callers
+ * that go through a shell or a bin shim — a direct spawn cannot use it. This tool spawns
+ * directly on purpose, because a shell would take the arguments a caller wrote after `--`, so
+ * it is precisely the caller the fallback does not reach.
+ *
+ * Kept apart from `run` so the mapping is provable without a spawn, like `spawnArgs` above.
+ * A spawning test could not prove it anyway: glibc's `execvp` retries an `ENOEXEC` file under
+ * `/bin/sh`, so the same placeholder simply runs on Linux and the failure never appears there.
+ * Measured on macOS, where Apple's libc does not retry.
  */
 export function failureReason(failure: Error | undefined, exit: string): string {
   const code = isObject(failure) ? failure.code : undefined;
