@@ -114,6 +114,10 @@ notes: the section for a version is published verbatim when its tag is pushed.
   it is a field a consumer's installer resolves, not noise. The report used to advise stripping it
   — which would change how the package installs for everyone using Yarn — and `--strict` refused
   the package outright.
+- **A temp directory that cannot be created is explained rather than thrown as a stack.** A full
+  disk or an unwritable `TMPDIR` — the ordinary shape of this on a CI runner — used to surface as an
+  `mkdtemp` stack, which reads as a defect in publish-clean. It now names the directory and says
+  what it is needed for.
 - **An unusable `--tarball-out` directory is named instead of failing as a stack trace.** A typo
   used to surface as a raw `mkdir` stack after the run had already printed its findings verdict,
   which reads as a defect in publish-clean rather than in the command that was typed. It still

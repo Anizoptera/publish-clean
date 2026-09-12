@@ -755,6 +755,14 @@ it.concurrent("names an unusable --tarball-out instead of failing as a stack", a
     expect(result.stderr).not.toContain("node:internal");
     // The errno still prints: it is the one detail the sentence above cannot carry.
     expect(result.stderr).toContain("ENOENT");
+
+    // Same ruling, other end of the run: a temp directory that cannot be created is the
+    // environment's fault, and leaving it bare put an `mkdtemp` stack where a reader looks for a
+    // defect in this tool. A full disk on a CI runner arrives here.
+    const noTemp = await runCli(["verify", "."], fx.dir, { TMPDIR: "/nonexistent/nope" });
+    expect(noTemp.status).toBe(1);
+    expect(noTemp.stderr).toContain("Unable to create a temporary directory");
+    expect(noTemp.stderr).not.toContain("node:internal");
   } finally {
     await cleanup(fx.root);
   }

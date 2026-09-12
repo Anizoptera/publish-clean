@@ -291,7 +291,21 @@ async function packAndClean(
   ].filter((reason) => reason !== null);
   if (blockers.length > 0) throw new PublishCleanError(blockers.join("\n\n"));
 
-  const root = await mkdtemp(path.join(tmpdir(), "publish-clean-"));
+  // An unwritable or full temp directory is an environment fault, not a defect in this tool and not
+  // a mistake in the package — so it is stated. Left bare it reached the unexpected-throw branch as
+  // an `mkdtemp` stack, which reads as a bug to report here; keeping such faults out of that branch
+  // is what lets it mean only "publish-clean broke".
+  let root: string;
+  try {
+    root = await mkdtemp(path.join(tmpdir(), "publish-clean-"));
+  } catch (cause) {
+    throw new PublishCleanError(
+      `Unable to create a temporary directory in ${tmpdir()}. publish-clean packs into a temp ` +
+        "tree, so it needs one that is writable and has room for the tarball. Set TMPDIR to " +
+        "somewhere else, or free space there.",
+      { cause },
+    );
+  }
   try {
     await run("pnpm", ["pack", "--pack-destination", root], packageDir, { signal, output: "pack" });
     const finalTarball = await soleTarball(root);
