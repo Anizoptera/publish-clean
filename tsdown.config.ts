@@ -58,8 +58,9 @@ export default defineConfig({
   // stack: an unexpected throw here is a defect and prints its frames (`main`'s catch in
   // `src/cli.ts`), and `at e (cli.js:…)` is not a bug report anyone can act on. oxc leaves
   // function and class declarations under their own names and still mangles locals. Not to be
-  // confused with `compress.keepNames`, which governs `Function.prototype.name` through compress
-  // and changes no byte here. Mangling them is the last headroom inside tsdown; going lower needs
+  // confused with `compress.keepNames`, a different option governing `Function.prototype.name`
+  // through compress: adding it costs 12 bytes and preserves not one further name. Mangling these
+  // is the last headroom inside tsdown; going lower needs
   // a second minifier (`@swc/core` before `oxc-minify` reaches 32.7 kB) for a native
   // devDependency, a post-build step on an irreversible publish, and mangled frames back.
   minify: { mangle: { keepNames: true } },
