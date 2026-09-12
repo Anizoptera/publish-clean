@@ -207,8 +207,10 @@ and drop files the first pack included.
 
 Only `package/package.json` is replaced. Other archive entries retain their bytes,
 order and metadata, including pnpm's owner `0:0`, fixed timestamps and file modes.
-The reader resolves USTAR and PAX paths before checking files and rejects malformed or
-unsupported path metadata.
+The reader resolves USTAR, PAX and GNU long-name paths before checking files and rejects
+malformed or unsupported path metadata. A path too long for a plain tar name is stated by a
+header in front of the entry it names, so every guard judges the path the archive actually
+extracts to rather than the placeholder in the entry's own header.
 
 `pnpm pack` runs pack hooks, including `prepare` and `prepack`. npm runs no package
 lifecycle scripts when uploading a tarball, so those hooks cannot change the checked

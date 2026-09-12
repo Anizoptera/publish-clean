@@ -5,6 +5,8 @@ tarball without repacking it or running package scripts.
 
 The packer comparisons below were measured against pnpm 11.21, npm 11.19 and Bun 1.3.14;
 they are regression cases to rerun when evaluating another version, not universal claims.
+The reasons for choosing pnpm were not re-measured on pnpm 12. What was re-measured there is
+[what pnpm 12 changed](#what-pnpm-12-changed) — the archive itself, which this tool reads.
 
 ## File selection
 
@@ -98,6 +100,29 @@ switching linkers solves.
 
 In the tested layouts, npm and Bun bundled dependencies in standalone packages but not
 workspace packages whose dependencies were hoisted to the workspace root.
+
+## What pnpm 12 changed
+
+Measured on 12.4.1, darwin-arm64, against 11.21 on the same package.
+
+The normalisation this tool depends on survives: owner and group are still 0, the modification
+time is still the fixed 1985 stamp, and file modes including the executable bit on `bin` are
+still preserved. That is what lets the manifest be rewritten in place rather than repacked, so
+it is the property to re-measure first on any future version.
+
+Two things did change.
+
+**Long paths are encoded differently.** A packed path is stored plain up to 100 bytes, then
+split across USTAR's `name` and `prefix` fields where a `/` falls so both halves fit. When
+neither works — a single component over 100 bytes, or a path over about 255 — pnpm 11 emitted a
+PAX `x` header and pnpm 12 emits a GNU long-name (`L`, `././@LongLink`) one. Both put the real
+path in a header ahead of the entry, leaving a placeholder in the entry's own name field, so a
+reader that trusts header names alone sees neither. `src/tarball.ts` reads both.
+
+**Entry order differs**, so a tarball built by pnpm 12 is not byte-identical to one built by
+pnpm 11 from the same tree. Reproducing a published tarball therefore needs the pnpm version
+that produced it, which the lockfile pins. Nothing here depends on the order itself: the file
+list is sorted before any guard reads it, and the rewrite compares the archive against itself.
 
 ## Why npm publishes
 

@@ -55,6 +55,26 @@ notes: the section for a version is published verbatim when its tag is pushed.
   the warning quotes git's own explanation of which it was. Use `--no-git-checks` for what it
   says: a repository whose tree is dirty, which still stops the run.
 
+### Fixed
+
+- **A package with a long path can be published under pnpm 12.** A path too long for a plain tar
+  name is carried by a header in front of the entry it belongs to; pnpm 11 wrote a PAX header
+  there, pnpm 12 writes a GNU long-name one. This tool refused GNU long names outright, so under
+  pnpm 12 any package holding a path over roughly 100 bytes stopped with `Tarball uses GNU
+  long-name entries`. The name is now read and judged by the rules PAX names already passed: it
+  is still refused when it renames a member onto `package/package.json`, escapes the package
+  directory, or collides with another entry.
+- **An unreadable `package.json` names the file again.** The message came from whichever package
+  manager happened to parse it first, and pnpm 12 reports the syntax error without saying which
+  file it was in. The manifest is read before any package manager is started now.
+- **A package manager that is present but cannot be executed says so, and says what to do about
+  it.** It surfaced as a bare `spawn ENOEXEC` and a stack trace naming neither the tool nor a
+  repair. Installing pnpm 12 without running its install script — Bun's default, and what
+  `--ignore-scripts` does — leaves a placeholder at its command instead of the real binary: on
+  macOS every run of this tool then fails, and on Windows pnpm cannot be started at all. Allow
+  pnpm's build scripts and reinstall; under Bun that means listing `pnpm` in
+  `trustedDependencies`.
+
 ## [0.9.1] - 2026-09-08
 
 ### Added
