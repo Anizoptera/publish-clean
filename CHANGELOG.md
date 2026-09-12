@@ -50,6 +50,21 @@ notes: the section for a version is published verbatim when its tag is pushed.
   function that threw and stays usable in a bug report. Behaviour is unchanged; the transforms
   that could have altered it are off.
 
+- **A package that resolves correctly is no longer refused over a path only its bundler reads.**
+  Every declared path is checked by the resolver that actually reads that field. An empty `main` is
+  the unset field npm and Node treat it as; `module` and a string `browser` may name a directory or
+  omit the extension, exactly like `main`; a target ending in `/` names a directory rather than a
+  file, which is how `@babel/runtime` still serves its Node 12–16 consumers. `bin` keeps none of
+  that tolerance, because npm symlinks the exact path it is given. Measured against 5192 installed
+  packages, the previous exact-name check refused 373 that install and resolve, among them every
+  `@types/*` package, every `@aws-sdk` client, `@babel/runtime`, `svelte` and `vite`.
+  A declared path nothing a consumer resolves can reach — `sideEffects`, the object form of
+  `browser`, an internal `#` import, or a `*` pattern matching no packed file — is now reported as
+  `declared-path-inert` rather than stopping the publish, because it marks or replaces nothing and
+  so is stale rather than broken; `--strict` still refuses over it. An exact path a consumer does
+  resolve stops the run as before, and so does an archive carrying nothing the manifest declares at
+  all, which is the unpacked-build case the stop exists for.
+
 - **One run now tells you everything wrong with your package.** Four checks used to stop at the
   first thing they found, so a package with several defects cost one run per defect: a
   credential in a `publishConfig` registry URL and a `workspace:` dependency spec now report as

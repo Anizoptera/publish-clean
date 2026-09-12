@@ -130,6 +130,28 @@
   finding that still aborts — a shipped file nothing reaches and nobody declared, a shipped
   development file — says so through `rulesAbort` on the finding itself, never through its rule
   name, so the divergence stays visible as data instead of becoming a branch somebody tidies away.
+- **A declared path is checked by the resolver that READS its field, never by equality with a packed
+  name** (`reviewDeclaredFiles`, `src/declared.ts`). Measured against 5192 installed published
+  packages, equality alone refused 373 that install and resolve, so every tolerance there exists
+  because its absence fabricated a refusal. `"main": ""` is the unset field npm and Node read it as,
+  which is how every `@types/*` package ships; `module` and a string `browser` are bundler entry
+  points that may name a directory or omit the extension, while `bin` may NOT, because npm symlinks
+  the exact path it is given; a target ending in `/` names a PREFIX, the folder mapping
+  @babel/runtime still carries for its Node 12–16 consumers. Add a tolerance only with the resolver
+  that justifies it named beside it, and add a mutation row for BOTH directions: a tolerance whose
+  absence refuses a working package and a fatality whose absence ships an unusable one look the same
+  to anyone tidying either, and the row is the only thing that tells a reader which they hold.
+- **A field no CONSUMER resolves cannot break a stranger's build, so a miss in it REPORTS
+  (`declared-path-inert`) instead of aborting.** `sideEffects` and the object form of `browser` are
+  read by a bundler's own resolver, which applies extensions and aliases this tool cannot reproduce;
+  `imports` is resolved only by this package's own code; a `*` pattern declares a FAMILY, and an
+  empty family promises no named file to anybody. `--strict` still refuses over all of them. This is
+  not the weakening the "never weaken critical artifact checks" rule forbids: every exact path a
+  consumer resolves still throws, and the case that throw exists for — an archive carrying NOTHING
+  the manifest declares — is now caught by that signature directly, which also covers field
+  combinations a per-field abort never saw. Never restore a per-field abort here. It refused `vite`,
+  `svelte`, `@sinclair/typebox`, `@anthropic-ai/sdk`, the `@smithy` and `@opentelemetry` packages and
+  every `@aws-sdk` client, all of them correct.
 - `src/shipped.ts` mixes OPPOSITE safe directions, and one scan carries BOTH. NEVER unify them.
   The dead-file scan over-matches deliberately — a false positive only hides a report — but its
   closure also emits `import-case-mismatch`, which ABORTS, so that one finding must take its

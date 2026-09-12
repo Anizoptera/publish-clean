@@ -417,4 +417,14 @@ Reachability is only meaningful when `exports` closes the package. Without that 
 shipped path is importable by a consumer, so nothing is dead and the check does not run.
 
 The strictest form of the check needs none of this: a path the manifest declares that the archive
-does not contain. `assertDeclaredFiles` owns it and has no false positives at all.
+does not contain. `reviewDeclaredFiles` owns it, and every false positive measured came from one
+place: a field whose paths a CONSUMER never resolves by name. Checked against 5192 installed published
+packages, comparing each declared path to the packed names by equality refused 373 that install and
+resolve: `"main": ""` is the unset field npm reads it as, `module` and a string `browser` are
+bundler entry points that may name a directory, a target ending in `/` is the folder mapping
+@babel/runtime still carries for Node 12–16, and `sideEffects`, the object form of `browser` and
+`imports` are read by a bundler's own resolver or by this package's own code. Those last three and
+any `*` pattern matching nothing report `declared-path-inert` instead of aborting. Every remaining
+refusal in that corpus was a file the package genuinely does not ship — `@babel/helper-string-parser`
+declares `lib/index.d.ts` and packs only `lib/index.js`, `watchpack` points `types` at a file that
+was never built — which is why an exact path a consumer resolves still stops the run.
