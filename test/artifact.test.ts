@@ -59,6 +59,21 @@ describe.concurrent("critical file patterns", () => {
     );
   });
 
+  // The refusal is the cheap half. A packed key is already outside the author's repository, so
+  // the only repair that still works is rotation — and an author told merely to fix `files`
+  // reads that as the whole fix and leaves a live credential in a tarball on a build machine.
+  // The control is the same refusal over content that carries no credential: advising rotation
+  // there is noise that teaches readers to skim the paragraph that matters.
+  it("says to rotate a packed credential, and says it only for credentials", () => {
+    expect(() => validatePackedFiles(["index.js", "deploy/id_ed25519"], false)).toThrow(/rotate/i);
+    expect(() =>
+      validatePackedFiles(["index.js", "node_modules/left-pad/index.js"], false),
+    ).toThrow(/files/);
+    expect(() =>
+      validatePackedFiles(["index.js", "node_modules/left-pad/index.js"], false),
+    ).not.toThrow(/rotate/i);
+  });
+
   it("passes a package that carries none of them", () => {
     expect(() =>
       validatePackedFiles(["index.js", "index.d.ts", "README.md", "src/env.js"], false),

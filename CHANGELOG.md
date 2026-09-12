@@ -61,6 +61,15 @@ notes: the section for a version is published verbatim when its tag is pushed.
   the warning quotes git's own explanation of which it was. Use `--no-git-checks` for what it
   says: a repository whose tree is dirty, which still stops the run.
 
+- **A packed credential is now told to rotate it.** The refusal named the files and then advised
+  only fixing the `files` array, which reads as the whole repair — it is not: the key was written
+  into a tarball on the build machine, so it is out of the repository whether or not anything was
+  published, and only rotation ends that. The message says so, and says why this tool will not
+  strip the file for you: an artifact that looks clean is how a leak goes unrotated. Content that
+  carries no credential of its own — `node_modules`, `.git` — still gets only the `files` advice,
+  since there is nothing there to rotate. Measured over 2485 published packages in this machine's
+  install cache, one fires these rules at all, so this is the message that matters when it does.
+
 - **A shipped development file is reported alongside every other defect instead of ending the
   run.** Packing a test tree, a lockfile, a `tsconfig.json` or a `.github` directory used to stop
   the run on the spot, so the rest of the report was never produced and an author fixed one problem

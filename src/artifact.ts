@@ -16,7 +16,13 @@ import type { JsonObject } from "./json";
 import { foldName } from "./packed-names";
 
 /**
- * Content that must never reach a registry. `^` means the package root.
+ * Content that carries a credential. `^` means the package root.
+ *
+ * Split from the merely-internal patterns below because the two need OPPOSITE advice, and a
+ * message giving one of them the other's is worse than a generic one: a secret needs rotating
+ * whatever you do to the tarball, and telling its owner only to fix `files` reads as a repair
+ * that does not exist. Nothing here is ever stripped for the author — a stripped secret has
+ * still leaked, and removing it from the artifact is how it goes unrotated.
  *
  * Case-insensitive throughout, because the filesystems most packages are built on are
  * too. On macOS and Windows `Server.PEM` and `server.pem` are the same file, so a
@@ -28,14 +34,18 @@ import { foldName } from "./packed-names";
  * exact-name form deliberately does not match `id_rsa.pub`, which is public by design and
  * legitimate to ship.
  */
-const CRITICAL_PATTERNS = [
-  /(?:^|\/)node_modules(?:\/|$)/i,
-  /(?:^|\/)\.git(?:\/|$)/i,
+const SECRET_PATTERNS = [
   /(?:^|\/)\.env(?:\.|$)/i,
   /(?:^|\/)\.npmrc$/i,
   /\.(?:pem|key|p12|pfx|p8|ppk|jks|keystore)$/i,
   /(?:^|\/)id_(?:rsa|dsa|ecdsa|ed25519)$/i,
 ];
+
+/**
+ * Build-machine internals. Nothing to rotate — they carry no credential of their own — so the
+ * only repair is to stop packing them, which is why they are judged apart from the secrets.
+ */
+const INTERNAL_PATTERNS = [/(?:^|\/)node_modules(?:\/|$)/i, /(?:^|\/)\.git(?:\/|$)/i];
 
 const SUSPICIOUS_PATTERNS = [
   /(?:^|\/)(?:test|tests|__tests__|__snapshots__|coverage)(?:\/|$)/,
@@ -60,10 +70,26 @@ const SUSPICIOUS_PATTERNS = [
  * written in the other model.
  */
 export function validatePackedFiles(files: readonly string[], skipSuspicious: boolean): Finding[] {
-  const critical = files.filter((file) => CRITICAL_PATTERNS.some((pattern) => pattern.test(file)));
+  // One pass, and secrets win a name matching both — `node_modules/x/.env` is a leaked
+  // credential first and a packed directory second, and the rotation instruction is the half
+  // that expires if it arrives late.
+  const secrets: string[] = [];
+  const internals: string[] = [];
+  for (const file of files) {
+    if (SECRET_PATTERNS.some((pattern) => pattern.test(file))) secrets.push(file);
+    else if (INTERNAL_PATTERNS.some((pattern) => pattern.test(file))) internals.push(file);
+  }
+  const critical = [...secrets, ...internals];
   if (critical.length > 0)
     throw new PublishCleanError(
-      `Critical files must not be published:\n${critical.map((file) => JSON.stringify(file)).join("\n")}`,
+      `Critical files must not be published:\n${critical.map((file) => JSON.stringify(file)).join("\n")}\n` +
+        (secrets.length > 0
+          ? `Treat every credential above as compromised and rotate it now. Publishing was not ` +
+            `required for that — it was packed, so it exists outside your repository already. ` +
+            `This tool will not strip them for you: a stripped secret has still leaked, and an ` +
+            `artifact that looks clean is how it goes unrotated.\n`
+          : "") +
+        `Then narrow the "files" array in your package.json so the next pack cannot reach them.`,
     );
   if (skipSuspicious) return [];
 
