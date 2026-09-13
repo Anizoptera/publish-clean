@@ -7,9 +7,9 @@
   download size is SETTLED and is NEVER a reason to cut, trim or split it; do not raise the subject.
   The only defect that matters here is being WRONG or STALE. Change a rule ⇒ update the README in the
   same commit. Verify against `src/`, never against the prose already there.
-  A finding prints its RULE ID, so that id is what a reader arrives with: `rule-coverage:check`
-  refuses any id that appears nowhere in the README. Tag the bullet that already explains the rule
-  with ``[`rule-id`]``; never start a separate table, which is just `src/` copied out to rot.
+  `readme:check` enforces this for every RULE ID, CLI flag and config key — a finding prints its
+  rule id, so that id is what a reader arrives holding. Tag the bullet that already explains the
+  rule with ``[`rule-id`]``; never start a separate table, which is just `src/` copied out to rot.
 - Use `pnpm pack` as the source of truth for file selection, workspace/catalog resolution and
   `publishConfig` overrides; NEVER substitute `bun pm pack` or `npm pack`. The evidence belongs
   in `docs/why-pnpm-and-npm.md`; update it and this bullet together. A hoisted linker can enable
