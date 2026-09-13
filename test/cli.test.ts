@@ -86,10 +86,18 @@ async function soleTarball(dir: string): Promise<string> {
   return path.join(dir, name);
 }
 
+/** A fake `pnpm`/`npm` on PATH. `#!/bin/sh` means every caller of this is POSIX-only — use `itPosix`. */
 async function writeShim(file: string, script: string): Promise<void> {
   await writeFile(file, script);
   await chmod(file, 0o755);
 }
+
+/**
+ * Windows cannot execute a `#!/bin/sh` shim, and rewriting these as `.cmd` would test the shim
+ * instead of the CLI's reaction to what a tool printed. Skipping loses no Windows coverage: the
+ * Windows-specific spawn path is `spawnArgs`, which `test/command.test.ts` drives directly.
+ */
+const itPosix = it.skipIf(process.platform === "win32");
 
 function readTarballFile(tarball: string, file: string): string {
   const result = spawnSync("tar", ["xOzf", tarball, `package/${file}`], {
@@ -311,7 +319,7 @@ describe.concurrent("publish-clean", () => {
     }
   });
 
-  it("reports a required tool's own words when it is present but refuses to run", async () => {
+  itPosix("reports a required tool's own words when it is present but refuses to run", async () => {
     const fx = await fixture(
       { name: "fixture-broken-shim", version: "1.0.0", files: ["index.js"] },
       { "index.js": "module.exports = 1;\n" },
@@ -360,7 +368,7 @@ exit 126
     }
   });
 
-  it("rejects configured provenance when npm is too old for trusted publishing", async () => {
+  itPosix("rejects configured provenance when npm is too old for trusted publishing", async () => {
     const fx = await fixture(
       { name: "fixture-old-npm", version: "1.0.0", files: ["index.js"] },
       { "index.js": "module.exports = 1;\n" },
@@ -387,7 +395,7 @@ exit 1
     }
   });
 
-  it("rejects GitHub trusted publishing when repository metadata does not match", async () => {
+  itPosix("rejects GitHub trusted publishing when repository metadata does not match", async () => {
     const fx = await fixture(
       {
         name: "fixture-bad-repo",
@@ -816,6 +824,8 @@ it.concurrent("streams verbose lifecycle output without a capture-buffer failure
   }
 });
 
+// POSIX-only: this cancels a real `pnpm` lifecycle through a process GROUP. Windows kills the tree
+// with `taskkill /t` instead, and test/command.test.ts drives that path on every platform.
 it.skipIf(process.platform === "win32").concurrent(
   "cancels a live lifecycle and removes its temporary archive directory",
   async () => {
@@ -883,7 +893,7 @@ it.skipIf(process.platform === "win32").concurrent(
   },
 );
 
-it.concurrent("probes the npm version in the package directory, once", async () => {
+itPosix.concurrent("probes the npm version in the package directory, once", async () => {
   const fx = await fixture(
     { name: "cwd-version", version: "1.0.0", files: ["index.js"] },
     { "index.js": "x" },

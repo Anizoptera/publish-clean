@@ -110,9 +110,12 @@ jobs:
   # branch cannot be proved by any test on Linux or macOS, and an unverified branch claiming
   # a supported platform is worse than declaring the platform unsupported.
   #
-  # Run the platform-independent command cases, including real process-tree cancellation.
-  # The dry-run additionally exercises npm/pnpm shims and the complete artifact pipeline.
-  # CLI cases using POSIX fixture shims stay in the main job.
+  # Runs the WHOLE suite, not a hand-picked subset. Most of it is platform-neutral, and the value
+  # is in the parts that are not — those are exactly where Windows breaks. A case that genuinely
+  # cannot run here skips ITSELF (`itPosix` in test/cli.test.ts, for `#!/bin/sh` shims and POSIX
+  # process groups) instead of being excluded by filename here, so a new test gets Windows
+  # coverage by default and the reason lives beside the test. The dry-run then drives the real
+  # npm/pnpm shims and the whole artifact pipeline.
   windows:
     runs-on: windows-latest
     timeout-minutes: 5
@@ -129,8 +132,9 @@ jobs:
           package-manager-cache: false
       - run: bun install --frozen-lockfile
       - run: bun run build
-      - run: bunx vitest run test/command.test.ts test/registry.test.ts
       # pnpm comes from this repo's devDependencies, so the same version resolves here as in
-      # every other lane, rather than whatever the runner happens to carry.
+      # every other lane, rather than whatever the runner happens to carry. Set BEFORE the tests:
+      # the CLI cases spawn the packer, so an unset PATH makes them fail as a missing tool.
       - run: echo "${{ github.workspace }}\node_modules\.bin" >> $env:GITHUB_PATH
+      - run: bun run test:built
       - run: node dist/cli.js --dry-run
