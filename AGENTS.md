@@ -10,6 +10,9 @@
   `readme:check` enforces this for every RULE ID, CLI flag and config key — a finding prints its
   rule id, so that id is what a reader arrives holding. Tag the bullet that already explains the
   rule with ``[`rule-id`]``; never start a separate table, which is just `src/` copied out to rot.
+  Its `## Why` section — publish is irreversible, the defect table, the corpus figures — is EVIDENCE
+  a reader needs to decide whether to adopt a tool that gates their releases, NOT marketing. Do not
+  cut it, and keep the figures INLINE: the README ships alone, so a link to `docs/` is dead there.
 - Use `pnpm pack` as the source of truth for file selection, workspace/catalog resolution and
   `publishConfig` overrides; NEVER substitute `bun pm pack` or `npm pack`. The evidence belongs
   in `docs/why-pnpm-and-npm.md`; update it and this bullet together. A hoisted linker can enable

@@ -90,7 +90,8 @@ Manifest configuration, under a "publish-clean" key in package.json:
   registry     string    Default for --registry.
   heal         boolean   Set false to report exports/imports repairs without applying them.
   allowUnreferenced string[] Shipped files nothing imports on purpose: a binary a loader finds by
-                        path, a directory read at run time. Prefixes match whole subtrees.
+                        path, a directory read at run time. Matched as a prefix, so naming a
+                        directory covers everything under it.
   noGitChecks  boolean   Default for --no-git-checks.
   skipFileCheck boolean  Default for --skip-file-check.
   allowSuspicious boolean Default for --allow-suspicious.

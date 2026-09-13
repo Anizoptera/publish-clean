@@ -1,10 +1,11 @@
 {
   "name": "@anizoptera/publish-clean",
   "version": "0.9.1",
-  "description": "Pre-publish npm package cleaner that strips common useless noise and crap from package.json; prevents accidental publication of unwanted things and unresolved dependencies. No deps, one JS file.",
+  "description": "Checks and cleans the exact tarball npm is about to upload, then publishes those same bytes: verified exports and entry points, no secrets, no unresolved workspace specs, no dev noise in package.json. No dependencies, one JS file.",
   "keywords": [
     "bun",
     "cleanup",
+    "exports",
     "monorepo",
     "npm",
     "pack",

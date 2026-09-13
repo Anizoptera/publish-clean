@@ -10,13 +10,57 @@ unwanted files, unresolved workspace dependencies and missing entry points.
 [![Runtime deps](https://img.shields.io/badge/runtime_deps-0-2ea44f)](package.json)
 [![License](https://img.shields.io/github/license/Anizoptera/publish-clean)](LICENSE)
 
+## Why
+
+Publishing is the one step you cannot take back. Even inside npm's 72-hour window an unpublish
+needs nothing to depend on your package; after that it also needs under 300 weekly downloads and a
+single maintainer. The number is spent either way — [npm's policy](https://docs.npmjs.com/policies/unpublish)
+is that "once `package@version` has been used, you can never use it again". A bad release is
+repaired only by publishing another one.
+
+The defects that reach consumers are the ones your own machine cannot show you:
+
+| Defect | Your machine | Consumer installs | Consumer builds |
+| ------ | ------------ | ----------------- | --------------- |
+| Two packed names differing only in letter case | fine — case-sensitive disk | **reports success** | file silently missing |
+| `bin` file with no shebang | fine — you run `node file.js` | fine | `exec format error` |
+| Package imports itself through a subpath `exports` hides | fine — resolves by path in your repo | fine | cannot resolve |
+| `./Utils.js` imported as `./utils.js` | fine on macOS | fine | fails on Linux |
+| `types` pointing at JavaScript with no `.d.ts` | fine | fine | every type silently `any` |
+| `require` branch resolving to an ES module | fine — you use `import` | fine | fails on older Node |
+
+Green the whole way down. Nothing in the normal chain fails, so the first report comes from a
+stranger, against a version you can no longer replace.
+
+`publish-clean` packs the package, checks the tarball that is about to go up, repairs what it can
+prove is safe to repair, and refuses the rest. **What it checked is what it uploads** — the same
+file, byte for byte, never a repack. Every finding is reported in one run; it stops at the end, not
+at the first defect.
+
+### Rules are measured, not guessed
+
+A checker that rejects a working package is worse than no checker. From the outside its mistake and
+a real defect look identical, and the only way to settle the argument is to publish anyway — which
+is the step this tool exists to protect.
+
+So no rule here ships on a reading of the spec. Each one is measured against thousands of installed
+published packages first, and every tolerance exists because its absence refused something that
+works. Comparing declared paths to packed names by equality refused 373 of 5192 — `vite`, `svelte`,
+every `@types/*` package, every `@aws-sdk` client. Requiring canonical condition order refused 97 of
+3674; after the tolerances that measurement forced, 14 remain, each a real defect.
+[`docs/exports.md`](https://github.com/Anizoptera/publish-clean/blob/main/docs/exports.md) carries
+the measurements and the specimens.
+
+If it still refuses a package that works, that is a defect in this tool — report it.
+
+## What it does
+
 `publish-clean` removes `devDependencies`, workspace settings and tool config from the
 published manifest. Consumer fields and lifecycle helpers stay. Unknown fields are
 reported for review and kept unless you choose to remove them.
 
-It packs once with pnpm, cleans the manifest inside the tarball, checks that file, then
-uploads it with npm. The checked bytes are the published bytes. Cleaning leaves your
-source files alone; your pack hooks still run and can change them.
+It packs once with pnpm, cleans the manifest inside the tarball, checks that file, then uploads it
+with npm. Cleaning leaves your source files alone; your pack hooks still run and can change them.
 
 Check, then publish:
 
@@ -28,13 +72,8 @@ pnpm exec publish-clean -- --access public --tag latest --provenance
 `verify` runs every check and publishes nothing. It works on a `private: true` package, so
 a package that never goes to a registry can still be checked by the rules it would face.
 
-Requires Node.js 22+ and pnpm, plus npm to publish. The CLI has no runtime dependencies. The publish
-command above needs [CI provenance setup](#publishing-a-public-package-from-ci).
-
-pnpm 12 installs its native binary from its own install script, so install it with build
-scripts allowed — under Bun, which blocks them by default, list `pnpm` in
-`trustedDependencies`. Otherwise pnpm's command stays a placeholder that this tool cannot
-start. pnpm 11 needs nothing special.
+Requires Node.js 22+ and pnpm, plus npm to publish. The publish command above needs
+[CI provenance setup](#publishing-a-public-package-from-ci).
 
 ## Install
 
@@ -47,8 +86,15 @@ start. pnpm 11 needs nothing special.
 
 Both `pnpm` and `npm` must be on `PATH` to publish, including in Bun, npm and Yarn projects
 and CI. `pnpm` alone is enough to check one: `verify` and `--dry-run` stop before the upload,
-so they never start npm. The CLI is one JavaScript file with no runtime dependencies. pnpm
-and npm are separate requirements, not bundled dependencies.
+so they never start npm. pnpm and npm are separate requirements, not bundled dependencies.
+
+The CLI is one JavaScript file with no runtime dependencies, and that is deliberate: it sits on the
+publish path and handles registry credentials, so any transitive package would be unaudited code
+next to a live token.
+
+pnpm 12 installs its native binary from its own install script, so install it with build scripts
+allowed — under Bun, which blocks them by default, list `pnpm` in `trustedDependencies`. Otherwise
+pnpm's command stays a placeholder that this tool cannot start. pnpm 11 needs nothing special.
 
 For trusted publishing, use Node.js 22.14+ and npm 11.5.1+. Provenance requires a public
 package, a public source repository and a supported CI provider. See
@@ -475,7 +521,10 @@ difference between a preview check and publishing through this CLI.
 
 [`publint`](https://publint.dev) and
 [`@arethetypeswrong/cli`](https://github.com/arethetypeswrong/arethetypeswrong.github.io)
-check package entry points and TypeScript compatibility. Use them alongside this tool.
+check package entry points and TypeScript compatibility. Run them alongside this tool. They only
+report — they do not clean the manifest, repair anything, or publish. They also cover what this tool
+deliberately leaves out of scope: type resolution and module-format analysis. Neither replaces the
+other, and no check here is skipped on the grounds that publint reports it too.
 
 `npm publish --dry-run` previews npm's publication. It does not clean the manifest or apply
 this tool's protected filename rules.
