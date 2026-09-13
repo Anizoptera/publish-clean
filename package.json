@@ -58,7 +58,7 @@
     "format:check": "oxfmt --check .",
     "hooks:check": "bun scripts/git-hooks.ts",
     "hooks:install": "bun scripts/git-hooks.ts --install",
-    "prepare": "bun run hooks:install; tsdown",
+    "prepare": "bun run hooks:install && tsdown",
     "prepublishOnly": "pnpm run build && node dist/cli.js verify",
     "preversion": "bun run check",
     "release": "pnpm version",
