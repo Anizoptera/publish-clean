@@ -304,14 +304,21 @@ The shapes, each with the specimen that exposed it:
 | the forced key WINS | forcedness binds a key against LOSING, so this is the constraint met | `@aws-sdk/core`, `@smithy/core`, `underscore` — all `module` ahead of `node` |
 | the winner re-dispatches on the loser | a consumer activating both enters the winner and meets the loser inside | `@emotion/styled` — `development` ahead of `edge-light`, handling `edge-light` within it |
 | both keys carry the same target | nothing can tell the two branches apart | `node-fetch-native` — eleven runtime names ahead of `node`, every one the same file |
-| `types` loses, or `module` loses to `import` | a checker reaching the JS target reads the `.d.ts` beside it; `import` and `module` both yield ESM | `@floating-ui/core` — `import` ahead of both `types` and `module` |
+| `types` loses | a checker reaching the JS target reads the `.d.ts` beside it | `@floating-ui/core` — `import` ahead of `types` |
+| `module` loses to `import` | both keys yield ESM, so this is a bundler's tuned variant losing to the plain one | `@floating-ui/core` — `import` ahead of `module` |
 
-The last shape is a real defect and a bad refusal, which is why it reports as `waste` and `--strict`
-refuses over it: 80 of the 103 names it fired on counting every installed version rather than one
-copy each type-check correctly today through TypeScript's adjacent-declaration fallback, and the
-remaining 23 hand a checker no
-declarations — a smaller loss than `exports-unresolvable`, a consumer resolving nothing at all,
-which this tool already reports as a warning.
+A losing `types` splits in two, and only a look at the ARCHIVE separates them. Of the 103 names it
+fired on — counting every installed version rather than one copy each — 80 type-check correctly
+today through TypeScript's adjacent-declaration fallback, and 23 hand a checker nothing at all.
+Neither half is a refusal any more: the 80 are silent, because a consumer that receives the right
+declarations has lost nothing, and the 23 are REPAIRED by `repairTypes`, which moves the key to the
+front of its object. Only a type checker activates `types`, so no runtime can observe the move.
+
+Where the two mix — one key ahead of `types` leading to declarations and another not — nothing is
+moved, because `types` in front wins for EVERY checker: there is no position that gives the consumer
+who has nothing without taking from the consumer who already has something. That residue is silent
+rather than reported, on the same ground as every other tolerance here: this tool declined to repair
+it, so it will not charge the author for it either.
 
 What survives is one shape: a forced runtime name losing to a generic environment key, with
 different targets and no re-dispatch. `@azure/core-util` and `bson` put `browser` ahead of

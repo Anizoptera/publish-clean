@@ -102,6 +102,17 @@
   flattening is pinned to real Node under real condition sets (`test/conditions.test.ts`), never to
   hand-written expectations — those restate the same reading of the spec the code has, and Node
   departs from its own published algorithm. Keep that oracle.
+- **`repairTypes` is the ONE rewrite allowed to change what a consumer resolves** (Art, 2026-09-13:
+  heal what can be healed safely, report it as an error, and do not abort). Its warrant is that only
+  a type CHECKER activates `types`, so nothing that executes the package can observe either move, and
+  the archive decides both: a branch resolving to JavaScript with no declaration beside it is removed,
+  and declarations no key can reach are hoisted to the front. It lives beside `healNode` rather than
+  inside it precisely so the equivalence assert keeps having nothing to excuse — that assert is worth
+  having only while every rewrite it covers is invisible to every consumer, and one intended exception
+  smuggled among them makes it a formality. Do not add a second semantic rewrite without the same
+  three things: a consumer-visible defect, a repair no runtime can observe, and a corpus measurement
+  of what it newly touches. A fabricated REWRITE is worse than a fabricated refusal — a refusal stops
+  the author, who then looks; a rewrite ships.
 - Copy a condition map by spread or an explicit null-prototype loop, NEVER `Object.assign`. A
   condition may legally be named `__proto__`; `JSON.parse` keeps it as an ordinary own property and
   `Object.assign` silently drops it, which publishes a manifest missing a branch with nothing raised
@@ -184,15 +195,15 @@
   false-positive population and why the rule has no override: `docs/exports.md`.
 - **A branch in `reviewShippedFiles` is judged by what a consumer RECEIVES, and each consumer's own
   recovery is part of that** — the same law as the declared-path and condition-order bullets, which
-  is why none of these four tolerances is optional. A checker reads a `.ts` target directly and
-  falls back from a `.js` target to the declaration shipped beside it, so `types` is mislabelled
-  only where no declaration exists anywhere near the target; a specifier inside
+  is why none of these tolerances is optional. A specifier inside
   `declare module "pkg/sub"` is matched by NAME and never reaches `exports`, which is how every
   api-extractor and dts-bundle-generator bundle is written; `module` is activated by no runtime, so
   a target under it is not what `require()` receives; and a shebang is reached through execve only
-  in a `bin` entry. Measured over 3633 installed published packages, those four refused `xstate`,
-  `react-resizable-panels`, `get-tsconfig`, `@eslint-community/regexpp`, `underscore`, `jotai` and
-  `@mixmark-io/domino`, all of them correct. When measuring this corpus, build the file map with the
+  in a `bin` entry. Measured over 3633 installed published packages, those three refused
+  `@eslint-community/regexpp`, `underscore`, `jotai` and `@mixmark-io/domino`, all of them correct.
+  The fourth tolerance of that measurement — a `types` target whose declarations sit beside it — now
+  lives in `checkerFinds` (`src/declared.ts`), because it decides a repair rather than a refusal.
+  When measuring this corpus, build the file map with the
   keys `packageContents` uses — the archive path with no `./` prefix — and PROVE the map is reachable
   before believing any zero: a map keyed the other way makes every `files.get` miss, so each of these
   rules silently reports nothing and the run looks healthy. The control is that the package's own
@@ -213,10 +224,13 @@
   package — the winner's own subtree re-dispatching on the loser, so a consumer activating both
   meets the loser inside, and the two keys carrying the same target, which nothing can tell apart.
   A rank inversion whose loser is not forced was always silent and stays so: which of two keys is
-  more specific is the author's call. Losing
-  `types`, or losing `module` to `import`, costs no consumer another runtime's build — a checker
-  reaching the JS target reads the `.d.ts` beside it, and both keys yield ESM — so those REPORT as
-  `waste` and `--strict` refuses them, the shape `exports-unresolvable` was ruled into. Measured
+  more specific is the author's call. A `types` loser never reaches this function as a defect —
+  `repairTypes` has already run, so either a checker reaches declarations anyway (tolerated here) or
+  the key was hoisted. Do not restore a grade for it: `types` first wins for EVERY checker, so where
+  one consumer has nothing and another already has something, no position serves both and this
+  function has nothing left to say. Losing `module` to `import` costs no consumer another runtime's
+  build — both keys yield ESM — so that one REPORTS as `waste` and `--strict` refuses it, the shape
+  `exports-unresolvable` was ruled into. Measured
   over 3674 installed published packages, the unconditional rule refused 97 and those corrections
   leave 14, every one a forced runtime name losing to a generic environment key with
   different targets and no re-dispatch. Never restore an arm here without running that corpus and

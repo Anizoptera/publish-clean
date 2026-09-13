@@ -19,13 +19,17 @@ notes: the section for a version is published verbatim when its tag is pushed.
   your source. A repair never stops the run. `--no-heal`, or `"publish-clean": { "heal": false }`,
   reports without rewriting. An order that cannot be repaired, because reordering it would change
   what some consumer resolves, is reported instead — and refuses the publish only where a consumer
-  really loses a target: a runtime-specific build shadowed by a generic one. A misplaced `types`
-  is a warning, because a checker reaching the JavaScript target reads the declarations beside it,
-  and `--strict` still refuses over it.
-- **Defects that cannot be repaired without guessing are reported.** A `types` condition resolving
-  to something that is not a declaration file and has none beside it either — a checker falls back
-  from a JavaScript target to the declaration shipped next to it, and reads a TypeScript source
-  directly — a `require` condition resolving to an ES
+  really loses a target: a runtime-specific build shadowed by a generic one.
+- **A `types` condition no type checker can read is repaired, not refused.** Only a checker
+  activates `types`, so nothing that runs your package can tell the difference, and the archive
+  decides which repair applies. A branch resolving to a JavaScript file with no declaration file
+  beside it promises an API the package does not carry, so it is removed and a checker reports an
+  untyped package instead of an invented one. Declarations that a key ahead of them hides, where
+  that key leads to no declarations either, are moved to the front so they reach somebody. Both
+  print as errors and neither stops the publish; `--no-heal` withholds the rewrite and then both
+  refuse. A branch a checker can already read is never touched — it falls back from a JavaScript
+  target to the declaration shipped next to it, and reads a TypeScript source directly.
+- **Defects that cannot be repaired without guessing are reported.** A `require` condition resolving to an ES
   module, a branch no consumer can reach, a consumer no branch serves, a condition no measured
   consumer activates, a fallback array, a shebang ending in CR — which refuses the publish only in a
   `bin` entry, because nothing else is reached through execve — and a `bin` entry with no
