@@ -5,196 +5,130 @@ notes: the section for a version is published verbatim when its tag is pushed.
 
 ## Unreleased
 
+One run now reports everything wrong with the package and stops at the end, instead of failing at
+the first defect. New checks cover packed names, `bin` shebangs and shipped files nothing reaches.
+`exports` and `imports` are repaired where the result is provably identical.
+
+### Upgrade notes
+
+- The `[healed]` severity is gone. A repair no longer changes how bad a defect is, only whether the
+  run stops: a repaired breakage prints `[error]` with the repair stated beside it, and never stops
+  the run. Anything parsing `[healed]` must read the message instead.
+- `--guard-only` still works and now says it is deprecated. Use `verify`, which also accepts a
+  `private: true` package.
+- The refusals below are new. Run `publish-clean verify` against your package before you upgrade a
+  release pipeline.
+
+### New refusals
+
+Each one reaches consumers and cannot be repaired without guessing what you meant:
+
+- **A packed name that does not survive extraction.** Two names differing only in letter case or
+  Unicode form become ONE file on macOS and Windows: the install reports success with a file
+  missing. A name Windows cannot create — `aux.js` in any path component, `:` or `?`, a trailing dot
+  or space — fails the install there outright. Neither is visible on the machine that packed it. Set
+  `"os": ["!win32"]` if the package genuinely does not run on Windows and that half stops applying;
+  a path component over 255 bytes is refused regardless, because no filesystem accepts one.
+- **A `bin` file with no shebang, or one ending in CR.** The installed command is a symlink the
+  kernel resolves through that line, and npm reads the same line to choose the interpreter for its
+  Windows shim, so the command runs on no platform without it. A `bin` file holding a NUL byte is
+  exempt: compiled binaries are executed directly.
+- **A `require` condition resolving to an ES module.**
+- **A condition order that cannot be corrected without changing what somebody resolves**, where a
+  consumer really loses its target — a runtime-specific build shadowed by a generic one.
+- **A self-import through a subpath your own `exports` does not expose.** It resolves for nobody,
+  and it looks correct in your repository, where the same import resolves by path.
+- **A relative import that resolves only after folding letter case.** Works on macOS, fails on Linux.
+- **A shipped file nothing reaches** — no entry point, no import from a reached file, no script.
+  This runs only when `exports` closes the package; without that field every shipped path is
+  importable and nothing is dead. Declare the deliberate ones:
+  `"publish-clean": { "allowUnreferenced": ["assets"] }`, matched as a prefix, so naming a
+  directory covers everything under it. The message prints the entry for you.
+
+### Manifest repairs
+
+`exports` and `imports` are flattened into the resolution they produce for every possible consumer,
+then rewritten only where the result is provably identical: a condition repeating what a later key
+already yields is dropped, `{"default": "./x.js"}` collapses, and keys whose order a measurement
+forces are ordered. Repairs land in the published manifest only and never touch your source.
+`--no-heal`, or `"publish-clean": { "heal": false }`, reports without rewriting.
+
+`types` is the exception, and the only rewrite that deliberately changes what somebody resolves.
+Only a type checker activates it, so nothing that runs your package can tell the difference:
+
+- a branch pointing at JavaScript with no declaration file beside it is **removed**. It promised an
+  API the package does not carry, and a checker was reading that JavaScript as your declarations and
+  typing everything `any`. A checker now reports an untyped package instead of an invented one.
+- declarations hidden behind a key that leads a checker nowhere are **moved to the front**, where
+  every checker looks first.
+
+Both print as errors and neither stops the publish, because the published artifact is correct.
+`--no-heal` withholds them and then both stop it. Whatever the archive cannot settle is left exactly
+as written: a `types` target the package does not ship stays a missing-file report naming the path,
+and nothing moves across a condition this tool does not recognise, since a private name may be meant
+for a consumer configured to take it.
+
+Defects that would need a guess are reported and left alone: a branch no consumer reaches, a
+consumer no branch serves, a condition no measured consumer activates, anything inside a fallback
+array (Bun resolves those differently from Node and Deno), and a map too large to enumerate.
+
 ### Added
 
-- **`publish-clean verify` checks a package without publishing it.** It runs every rule the
-  publish path runs and skips exactly one guard, so it works on a `private: true` package that
-  publishing still refuses. `--verify-only` is the same operation for scripts that can only pass
-  flags; `--guard-only` keeps working as a deprecated alias and now says so.
-- **`exports` and `imports` are verified and repaired.** The map is flattened into the resolution
-  it produces for every possible consumer, and rewritten only when the result is provably
-  identical: a condition that repeats what a later key already yields is dropped,
-  `{"default": "./x.js"}` collapses, and keys whose order a measured constraint forces are
-  ordered. Every repair is reported, applies only to the published manifest, and never touches
-  your source. A repair never stops the run. `--no-heal`, or `"publish-clean": { "heal": false }`,
-  reports without rewriting. An order that cannot be repaired, because reordering it would change
-  what some consumer resolves, is reported instead — and refuses the publish only where a consumer
-  really loses a target: a runtime-specific build shadowed by a generic one.
-- **A `types` condition no type checker can read is repaired, not refused.** Only a checker
-  activates `types`, so nothing that runs your package can tell the difference, and the archive
-  decides which repair applies. A branch resolving to a JavaScript file with no declaration file
-  beside it promises an API the package does not carry, so it is removed and a checker reports an
-  untyped package instead of an invented one. Declarations that a key ahead of them hides, where
-  that key leads to no declarations either, are moved to the front so they reach somebody. Both
-  print as errors and neither stops the publish; `--no-heal` withholds the rewrite and then both
-  refuse. A branch a checker can already read is never touched — it falls back from a JavaScript
-  target to the declaration shipped next to it, and reads a TypeScript source directly.
-  Every decision is read from the archive, so anything it cannot answer is left exactly as you
-  wrote it: a target the package does not actually ship is a missing file, reported as one with the
-  path it could not find rather than quietly deleted; and nothing is moved across a condition this
-  tool does not recognise, because a private name may be meant for a consumer configured to take it.
-- **Defects that cannot be repaired without guessing are reported.** A `require` condition resolving to an ES
-  module, a branch no consumer can reach, a consumer no branch serves, a condition no measured
-  consumer activates, a fallback array, a shebang ending in CR — which refuses the publish only in a
-  `bin` entry, because nothing else is reached through execve — and a `bin` entry with no
-  shebang at all — the installed command is a symlink the kernel resolves through that line, and npm
-  reads the same line to pick the interpreter for its Windows shim, so the command runs on no
-  platform without it. A `bin` file holding a NUL byte is left alone: compiled binaries are executed
-  directly and need no shebang.
-- **Publication stops when a packed name would not survive extraction.** Two files whose names
-  differ only in letter case or Unicode form become ONE file on macOS and Windows, so the install
-  reports success and the package is silently missing a file. A name Windows cannot create — a
-  reserved device name like `aux.js` in any path component, a character such as `:` or `?`, a
-  trailing dot or space — fails the install outright there. Both are invisible on the machine that
-  built the package. If the package genuinely does not run on Windows, declare `"os": ["!win32"]`
-  and the Windows half stops applying; a path component over 255 bytes is reported regardless,
-  because no filesystem here accepts one.
-- **`--strict` treats warnings as errors.** It never makes an already-applied repair fatal.
-- **Publication stops when the package imports itself through a subpath its own `exports` does not
-  expose.** Self-reference resolves through `exports` like anyone else's import, so shipping the
-  file is not enough — and it cannot be seen from the source tree, where the same import resolves
-  by path. A consumer's type checker reports `TS2307` inside a file they cannot edit, or, under the
-  common `skipLibCheck: true`, silently types it `any`. The fix is to export the subpath or make
-  the import relative; the message prints both.
+- **`publish-clean verify`** runs every check and publishes nothing. It works on a `private: true`
+  package, so a package that never reaches a registry can still be checked by the rules it would
+  face. `--verify-only` is the same operation for scripts that can only pass flags.
+- **`--strict`** treats warnings as errors. It never makes an already-applied repair fatal.
 
 ### Changed
 
-- **The published package is 46% smaller.** `dist/cli.js` is now minified, taking the download
-  from 63.2 kB to 34.0 kB and the installed file from 154.0 kB to 62.7 kB. Function and class
-  names are deliberately kept, so a stack trace from an unexpected failure still names the
-  function that threw and stays usable in a bug report. Behaviour is unchanged; the transforms
-  that could have altered it are off.
-
-- **A package that resolves correctly is no longer refused over a path only its bundler reads.**
-  Every declared path is checked by the resolver that actually reads that field. An empty `main` is
-  the unset field npm and Node treat it as; `module` and a string `browser` may name a directory or
-  omit the extension, exactly like `main`; a target ending in `/` names a directory rather than a
-  file, which is how `@babel/runtime` still serves its Node 12–16 consumers. `bin` keeps none of
-  that tolerance, because npm symlinks the exact path it is given. Measured against 5192 installed
-  packages, the previous exact-name check refused 373 that install and resolve, among them every
-  `@types/*` package, every `@aws-sdk` client, `@babel/runtime`, `svelte` and `vite`.
-  A declared path nothing a consumer resolves can reach — `sideEffects`, the object form of
-  `browser`, an internal `#` import, or a `*` pattern matching no packed file — is now reported as
-  `declared-path-inert` rather than stopping the publish, because it marks or replaces nothing and
-  so is stale rather than broken; `--strict` still refuses over it. An exact path a consumer does
-  resolve stops the run as before, and so does an archive carrying nothing the manifest declares at
-  all, which is the unpacked-build case the stop exists for.
-
-- **One run now tells you everything wrong with your package.** Four checks used to stop at the
-  first thing they found, so a package with several defects cost one run per defect: a
-  credential in a `publishConfig` registry URL and a `workspace:` dependency spec now report as
-  findings (`registry-credentials`, `registry-not-a-url`, `monorepo-only-spec`) alongside the
-  whole artifact scan, and `private: true`, uncommitted changes and a missing `files` array are
-  refused together before packing. Every one still refuses the publish; none is waivable that was
-  not waivable before.
-
-- **Every run now ends by saying what it decided**, instead of going silent when it passes.
-  `publish-clean: no findings.`, or `N findings above, none of which stops a publish.` A report
-  that printed warnings and then stopped could not be told apart from one that crashed.
-
-- **Unrecognised manifest fields are reported like every other finding**, as
-  `[warning] unrecognized-field`, in severity order with the rest. It used to print as an
-  unlabelled paragraph before the tarball existed — no rule id to grep or silence, no severity to
-  rank it by, and positioned above findings more serious than itself. The advice is unchanged, and
-  it still never stops a publish on its own. **`--strict` now promotes it like any other warning**,
-  so a strict run refuses a package carrying fields nobody has classified; acknowledge them with
+- **The download is 46% smaller**: 63.2 kB to 34.0 kB, and 154.0 kB to 62.7 kB installed.
+  `dist/cli.js` is minified with function and class names kept, so a stack trace from an unexpected
+  failure still names the function that threw.
+- **One run reports everything.** Checks that used to stop on the spot — a packed credential,
+  `node_modules`, `.git`, a test tree, a lockfile, a registry URL carrying a password, a
+  `workspace:` spec — now report as findings beside the rest. Nothing is weaker for it:
+  `secret-file` and `internal-file` still stop the publish and no flag waives them. A packed
+  credential is now also told to **rotate** it, because the key was written into a tarball on the
+  build machine whether or not anything was published.
+- **A declared path is checked by the resolver that reads its field.** An empty `main` is the unset
+  field npm and Node treat it as; `module` and a string `browser` may name a directory or omit the
+  extension; a target ending in `/` names a directory. `bin` keeps none of that tolerance, because
+  npm symlinks the exact path it is given. Measured against 5192 installed packages, the previous
+  exact-name check refused 373 that install and resolve — every `@types/*` package, every `@aws-sdk`
+  client, `svelte`, `vite`. A declared path nothing a consumer resolves can reach — `sideEffects`,
+  the object form of `browser`, an internal `#` import, a `*` pattern matching no packed file — now
+  reports as `declared-path-inert` instead of stopping the publish; `--strict` still refuses it.
+- **Unrecognised manifest fields report as `[warning] unrecognized-field`**, in severity order with
+  everything else, instead of an unlabelled paragraph printed before the tarball existed. `--strict`
+  now promotes them like any other warning; acknowledge them with
   `"publish-clean": { "keepFields": [...] }`, which the message prints for you.
-
-- **A report now says how bad a defect is and whether it was repaired as two separate facts.**
-  There was a third severity, `[healed]`, which made a repaired breakage and a harmless stray file
-  read alike. A repair corrects the published artifact and never your source, so the defect keeps
-  the severity it had — a repaired breakage prints `[error]` — and the repair is stated in words
-  beside it. Whether the run stops is unchanged: a repaired finding never stops it, with or
-  without `--strict`. Anything parsing the `[healed]` label must read the message instead.
-
-- **Publication stops when the tarball holds a file nothing in the package reaches** — no entry
-  point, no import from a reached file, no script. Documentation, licences, declarations, source
-  maps, native binaries, assets and nested `package.json` files are exempt by nature. Declare the
-  rest with `"publish-clean": { "allowUnreferenced": ["assets"] }`, which the error message prints
-  for you; prefixes match whole subtrees. The check runs only when `exports` closes the package,
-  because without that field every shipped path is importable and nothing is dead.
-
-- **Checking a package no longer needs npm installed.** npm exists here to upload a tarball, so
-  it is now started at the upload rather than at startup: `verify` and `--dry-run` stop before
-  that point and never start it. Measured on this machine, dropping that probe took `verify` from
-  0.14s to 0.07s and removed its spread — the probe was the largest single cost in the run. A
-  publish still refuses when npm is missing or cannot be executed, before anything is uploaded.
-
-- **A package directory that is not a Git repository no longer fails the run.** It used to abort
-  with a raw `git exited with 128`, which made `--no-git-checks` — documented as allowing a dirty
-  working tree — the only way to publish a directory that has no repository at all. There is no
-  commit there for a tree to differ from, so the check now reports that it was skipped and the run
-  continues. An absent `git` and an unreadable index behave the same way, for the same reason, and
-  the warning quotes git's own explanation of which it was. Use `--no-git-checks` for what it
-  says: a repository whose tree is dirty, which still stops the run.
-
-- **Forbidden content in the tarball is reported with everything else, in one run.** Packing a
-  key, a `node_modules`, a `.git`, a test tree or a lockfile used to stop the run on the spot, so
-  the rest of the report was never produced: an author fixed one problem per round trip without
-  knowing how many were left. All of it now reports as findings — `secret-file`, `internal-file`,
-  `suspicious-file` — beside the export, reachability and packed-name rules, and a run that is
-  about to stop still prints everything it found.
-
-  Nothing is weaker for it. `secret-file` and `internal-file` are `harm`: no flag reaches them,
-  `--strict` has nothing to add, and they are never repaired for you. `suspicious-file` is the one
-  judgement call, waived by `--allow-suspicious` or `"publish-clean": { "allowSuspicious": true }`
-  and by nothing else.
-
-  A packed credential is now also told to **rotate** it. The old message named the files and
-  advised fixing the `files` array, which reads as the whole repair and is not: the key was
-  written into a tarball on the build machine, so it left your repository whether or not anything
-  was published. `node_modules` and `.git` carry no credential of their own and still get only the
-  `files` advice. Measured over 2485 published packages in one machine's install cache, a single
-  package fires these rules at all — so the message is most of what they are worth.
+- **Every run ends by saying what it decided.** `publish-clean: no findings.`, or
+  `publish-clean: N findings above, none of which stops a publish.` A silent pass could not be told apart from a crash.
+- **Checking a package no longer needs npm installed.** npm is started at the upload rather than at
+  startup, so `verify` and `--dry-run` never start it. A publish still refuses when npm is missing
+  or cannot be executed, before anything is uploaded.
+- **A directory outside any Git repository no longer fails the run.** There is no commit there for a
+  tree to differ from, so the check reports that it was skipped and the run continues. It used to
+  abort with a raw `git exited with 128`. `--no-git-checks` still means what it says: a repository
+  whose working tree is dirty.
 
 ### Fixed
 
+- **A package with a long path publishes under pnpm 12.** A path too long for a plain tar name is
+  carried by a header in front of the entry it belongs to; pnpm 11 wrote a PAX header there, pnpm 12
+  writes a GNU long-name one, which this tool refused outright. Such names are now read and judged
+  by the rules PAX names already passed — still refused when the name renames a member onto
+  `package/package.json`, escapes the package directory, or collides with another entry.
 - **`preferUnplugged` is no longer reported as an unrecognised field.** Yarn reads it from an
-  installed dependency's own manifest to decide whether that package must be unzipped to work, so
-  it is a field a consumer's installer resolves, not noise. The report used to advise stripping it
-  — which would change how the package installs for everyone using Yarn — and `--strict` refused
-  the package outright.
-- **A temp directory that cannot be created is explained rather than thrown as a stack.** A full
-  disk or an unwritable `TMPDIR` — the ordinary shape of this on a CI runner — used to surface as an
-  `mkdtemp` stack, which reads as a defect in publish-clean. It now names the directory and says
-  what it is needed for.
-- **An unusable `--tarball-out` directory is named instead of failing as a stack trace.** A typo
-  used to surface as a raw `mkdir` stack after the run had already printed its findings verdict,
-  which reads as a defect in publish-clean rather than in the command that was typed. It still
-  surfaces only after the pack: the destination is deliberately not created until the artifact has
-  passed every check, so nothing appears at the path you named for bytes that failed validation.
-- **A mistyped flag is answered with the flags that exist.** It used to escape as Node's own
-  `ERR_PARSE_ARGS_UNKNOWN_OPTION`: a stack trace through `node:internal` that reads as a defect in
-  this tool, carrying advice to move the argument after `--` — where this CLI forwards it to
-  `npm publish`, the one step nobody can take back. The reply now names the flag, lists every
-  accepted one, and points at `--help`.
-- **Running from the wrong directory no longer reports a syntax error.** A missing `package.json`
-  and a malformed one shared the message "Unable to parse JSON file", so the ordinary first
-  mistake sent its author hunting for a comma in a file that does not exist. A file that cannot be
-  read now says so and names the fix; a file that cannot be parsed still reports where.
-- **An error no longer buries its own explanation in a stack trace.** The cause of a reported
-  failure was printed as an object, so its stack and properties followed it: a malformed
-  `package.json` produced nine lines of which two carried information. The cause still prints,
-  because it holds the one detail the message cannot — where the JSON syntax broke, which errno a
-  spawn returned — but the frames behind it belong to this tool rather than to your package. An
-  unexpected internal error still prints in full, since there the stack is the report.
-
-- **A package with a long path can be published under pnpm 12.** A path too long for a plain tar
-  name is carried by a header in front of the entry it belongs to; pnpm 11 wrote a PAX header
-  there, pnpm 12 writes a GNU long-name one. This tool refused GNU long names outright, so under
-  pnpm 12 any package holding a path over roughly 100 bytes stopped with `Tarball uses GNU
-  long-name entries`. The name is now read and judged by the rules PAX names already passed: it
-  is still refused when it renames a member onto `package/package.json`, escapes the package
-  directory, or collides with another entry.
-- **An unreadable `package.json` names the file again.** The message came from whichever package
-  manager happened to parse it first, and pnpm 12 reports the syntax error without saying which
-  file it was in. The manifest is read before any package manager is started now.
-- **A package manager that is present but cannot be executed says so, and says what to do about
-  it.** It surfaced as a bare `spawn ENOEXEC` and a stack trace naming neither the tool nor a
-  repair. Installing pnpm 12 without running its install script — Bun's default, and what
-  `--ignore-scripts` does — leaves a placeholder at its command instead of the real binary, and
-  this tool cannot start it. Allow pnpm's build scripts and reinstall; under Bun that means
-  listing `pnpm` in `trustedDependencies`.
+  installed dependency's own manifest to decide whether that package must be unzipped to work, so a
+  consumer's installer resolves it. The report used to advise stripping it, which changes how the
+  package installs for every Yarn user, and `--strict` refused the package outright.
+- **Failures name their cause instead of printing a stack.** A mistyped flag is answered with the
+  flags that exist; a missing `package.json` is no longer reported as a syntax error; an unwritable
+  `TMPDIR`, a full disk and an unusable `--tarball-out` each say what failed and where; an
+  unreadable manifest names the file, which pnpm 12 does not; and a pnpm binary that is present but
+  not executable says so and says to allow pnpm's install script. A stack trace now means a defect
+  in this tool, which is the one case where the frames are the report.
 
 ## [0.9.1] - 2026-09-08
 
