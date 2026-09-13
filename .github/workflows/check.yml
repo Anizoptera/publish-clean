@@ -75,12 +75,31 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .tool-versions
-      # The lowest Node this package claims to support. Resolves to the newest 22.x, which clears
-      # the 22.14.0 trusted-publishing guard the provenance tests need.
+      # `engines.node` is the only place the floor is declared, so read it instead of repeating
+      # it. A second copy here would drift in silence the day someone raises the promise: this
+      # job would keep testing the old version and keep reporting green, which is worse than no
+      # job at all. Exits non-zero if the field is gone rather than testing whatever Node the
+      # runner defaults to. The major alone is enough — setup-node resolves it to the newest
+      # matching release, which also clears the 22.14.0 floor trusted publishing needs.
+      - id: floor
+        run: |
+          bun -e 'const r=(await Bun.file("package.json").json()).engines?.node; const m=r?.match(/\d+/); if(!m){console.error("package.json has no engines.node to derive a floor from");process.exit(1)} console.log(`version=${m[0]}`)' >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: ${{ steps.floor.outputs.version }}
           package-manager-cache: false
+      # Proves the floor actually took effect. An empty or wrong version expression leaves the
+      # runner's own Node in place, and every step below would still pass — a job that reports
+      # green while testing a version nobody asked for is worse than no job, because it reads
+      # as evidence. Runs before any work so the failure is immediate and unambiguous.
+      - name: Confirm Node matches the declared floor
+        run: |
+          want='${{ steps.floor.outputs.version }}'
+          have="$(node -p 'process.versions.node.split(".")[0]')"
+          if [ "$want" != "$have" ]; then
+            echo "::error::engines.node asks for Node $want, runner has $have. setup-node did not apply the derived floor, so this job proves nothing."
+            exit 1
+          fi
       - run: bun install --frozen-lockfile
       - run: bun run build
       - run: bun run test:built
