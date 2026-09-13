@@ -10,8 +10,8 @@ verified `exports`, checks for unwanted files, unresolved workspace dependencies
 [![Runtime deps](https://img.shields.io/badge/runtime_deps-0-2ea44f)](package.json)
 [![License](https://img.shields.io/github/license/Anizoptera/publish-clean)](LICENSE)
 
-**TL;DR** — pack once, clean and check *that* tarball, upload *those* bytes. Nothing is ever
-repacked, so what was verified is exactly what the registry stores and what provenance signs.
+**TL;DR** — pack once, clean and check *that* tarball, upload *those* bytes. It never repacks, so
+what was verified is exactly what the registry stores and what provenance signs.
 
 ```text
 pnpm pack ──▶ rewrite package.json inside the tarball ──▶ re-read that file from disk ──▶ check it
@@ -30,16 +30,17 @@ pnpm exec publish-clean -- --provenance --access public    # check, then publish
 | What you get | How |
 | --- | --- |
 | [Broken packages stop here](#what-it-checks) | Declared entry points that resolve to nothing, `exports` conditions in an order that loses a consumer its target, `require` branches resolving to ESM, names two filesystems read as one file, `bin` without a shebang, `workspace:`/`catalog:` specs left unresolved. |
-| [Secrets never get out](#a-packed-secret-is-already-leaked) | `.env`, `.npmrc`, `.pem`/`.key`/keystores and SSH keys abort the run. No flag waives it, and they are not silently stripped: a stripped secret has still leaked, and you need to rotate it. |
+| [Credential files can't ship](#a-packed-secret-is-already-leaked) | A packed `.env`, `.npmrc`, `.pem`/`.key`/keystore or SSH key aborts the run. No flag waives it, and it is not stripped for you: a stripped secret has still leaked and still needs rotating. Matched by file name, so a credential hardcoded inside your source is not caught. |
 | [No dead weight](#dead-weight-ships-forever) | `devDependencies`, `files`, `packageManager`, workspace and catalog config, and tool config blocks (`jest`, `eslint`, `prettier`, `turbo`, …) leave the published manifest. So does the whole `scripts` block, unless it holds an install or `prepare` hook consumers actually run. Packed files nothing references are reported. |
 | [Checked bytes = published bytes](#what-this-buys-for-provenance) | The manifest is rewritten inside pnpm's own tarball and that file is uploaded. A pipeline that repacks after checking signs bytes nothing verified. |
 | [Rules measured, not guessed](#rules-are-measured-not-guessed) | Every rule and every tolerance was measured against thousands of installed published packages first. Equality alone on declared paths refused 373 of 5192; a fixed `exports` order refused 97 of 3674. |
-| [Nothing new to trust](#install) | One JavaScript file, zero runtime dependencies — it sits on the path that handles your registry token. |
-| [Usable without publishing](#checking-every-pull-request) | `verify` gates pull requests and works on `private: true` packages. Exit 1 on failure, findings on stderr. |
+| [Nothing new to trust](#install) | One JavaScript file, zero runtime dependencies. It runs on the path that handles your registry token, so a transitive package would be unaudited code next to a live credential. |
+| [Check without publishing](#checking-every-pull-request) | `verify` gates pull requests and works on `private: true` packages. Exit 1 on failure, findings on stderr. |
 
-The rules it holds itself to: repair only what needs no guessing, and never in your source tree.
-Report everything in one run and abort at the end, never at the first defect. Never abort on
-something it already repaired. One opt-out flag per judgement call; none for a leak.
+It edits nothing outside the tarball, and fixes only what the packed files settle without guessing.
+One run lists every defect instead of stopping at the first. What it repaired does not fail the run;
+what it could not repair does. Every judgement call has a flag to waive it. A leaked credential
+does not.
 
 ## Why
 
