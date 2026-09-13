@@ -357,6 +357,12 @@ const MUTATIONS: readonly Mutation[] = [
     to: "",
   },
   {
+    name: "exports: the versioned types@<selector> form stops counting as a types key",
+    file: "src/exports.ts",
+    from: /return conditionRank\(key\) === conditionRank\("types"\);/,
+    to: 'return key === "types";',
+  },
+  {
     name: "exports: keys are reordered around a fallback array",
     file: "src/exports.ts",
     from: /if \(containsArray\(value\)\) return value;/,

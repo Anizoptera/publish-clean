@@ -259,17 +259,29 @@ function leaves(node: unknown, out: string[] = []): string[] {
  * correct. `--no-heal` withholds the rewrite and turns both findings fatal, which is the only
  * reading of that flag — the author asked to publish their own bytes unaltered.
  */
+/**
+ * Whether a condition name is one only a type checker activates — the whole warrant for
+ * `repairTypes` being allowed to change what a consumer resolves.
+ *
+ * Asked through `conditionRank` rather than by comparing the name, because `types@<selector>` ranks
+ * WITH `types` (see `conditionRank`) and a checker picks it the same way. A spelling of this test
+ * written from the names in view — `key === "types"`, or a pattern over the literal — silently
+ * exempts every package using the versioned form, and the exemption looks exactly like a package
+ * with nothing to repair. Exported so nothing has to write that second spelling.
+ */
+export function isTypesCondition(key: string): boolean {
+  return conditionRank(key) === conditionRank("types");
+}
+
 function repairTypes(
   node: unknown,
   where: string,
   findings: Finding[],
   names: ReadonlySet<string>,
 ): unknown {
-  const typeKey = (key: string): boolean => conditionRank(key) === conditionRank("types");
-
   const hoist = (value: JsonObject, keys: readonly string[], at: string): JsonObject => {
-    const hidden = keys.filter(typeKey);
-    if (hidden.length === 0 || typeKey(keys[0] ?? "")) return value;
+    const hidden = keys.filter(isTypesCondition);
+    if (hidden.length === 0 || isTypesCondition(keys[0] ?? "")) return value;
     // Reordering around a fallback array is the one move this file never makes, because the
     // resolvers disagree about what an array resolves to and the author cannot check the diff
     // against a rule nobody agrees on. Removing a dead branch is unaffected and still happens.
@@ -303,7 +315,7 @@ function repairTypes(
         `published manifest; no runtime activates "types", so nothing that executes your package ` +
         `can tell. Put "types" first in your package.json to stop this report.`,
     });
-    return reorder(value, [...hidden, ...keys.filter((key) => !typeKey(key))]);
+    return reorder(value, [...hidden, ...keys.filter((key) => !isTypesCondition(key))]);
   };
 
   // `undefined` means "delete this key": the branch promises declarations that do not exist.
@@ -328,7 +340,7 @@ function repairTypes(
     const rebuilt: JsonObject = {};
     let changed = false;
     for (const [key, child] of Object.entries(value)) {
-      const kept = visit(child, `${at}[${JSON.stringify(key)}]`, inside || typeKey(key));
+      const kept = visit(child, `${at}[${JSON.stringify(key)}]`, inside || isTypesCondition(key));
       changed ||= kept !== child;
       if (kept !== undefined) Object.defineProperty(rebuilt, key, { ...OWN, value: kept });
     }

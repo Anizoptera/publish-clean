@@ -13,7 +13,7 @@
  */
 import { expect, it } from "vitest";
 import { equivalent } from "../src/conditions";
-import { reviewExports } from "../src/exports";
+import { isTypesCondition, reviewExports } from "../src/exports";
 import { isFatal, publishRefusal } from "../src/finding";
 import { isObject } from "../src/json";
 
@@ -121,7 +121,6 @@ it("never treats a fallback array as interchangeable with anything but itself", 
   expect(equivalent({ node: ["./a.js"], default: ["./a.js"] }, { default: ["./a.js"] })).toBe(true);
 });
 
-/** `ships` is the archive's packed names, which only the `types` repairs consult. */
 /**
  * `ships` is the archive's packed names, and `repairTypes` is its only reader: every question it
  * asks about a `types` branch is answered from there, so an empty archive silently answers "leads
@@ -129,12 +128,16 @@ it("never treats a fallback array as interchangeable with anything but itself", 
  * while still passing — which is how two mutation rows survived once, their guards deleted with no
  * test noticing, because the case that was meant to reach them stopped short one guard earlier.
  *
- * So a fixture naming a `types` key must say what the archive carries. The name test over-matches
- * deliberately (a `types` key nested where nothing reads it still demands one): the cost is an
- * argument a fixture did not strictly need, and the alternative is this failure again, unsignalled.
+ * So a fixture naming a `types` key must say what the archive carries. Which keys those are is
+ * `isTypesCondition`'s to answer and never a second spelling here: the versioned `types@<selector>`
+ * form ranks with `types` and is repaired identically, so a pattern over the literal name would
+ * exempt exactly the fixtures hardest to notice missing.
  */
 function heal(pkg: Record<string, unknown>, enabled = true, ships?: readonly string[]) {
-  if (ships === undefined && /"typ(es|ings)"\s*:/.test(JSON.stringify(pkg)))
+  const namesTypes = (node: unknown): boolean =>
+    isObject(node) &&
+    Object.entries(node).some(([key, child]) => isTypesCondition(key) || namesTypes(child));
+  if (ships === undefined && (namesTypes(pkg.exports) || namesTypes(pkg.imports)))
     throw new Error("fixture names a types key: pass the archive it is resolved against");
   const { manifest, findings } = reviewExports(pkg, { files: new Set(ships), heal: enabled });
   return { findings, result: manifest, rules: findings.map((finding) => finding.rule) };
@@ -170,6 +173,17 @@ it("repairs a types branch no checker can read, and leaves every working one alo
   expect(find(dead, "types-branch-not-declarations")?.consequence).toBe("breaks");
   expect(isFatal(find(dead, "types-branch-not-declarations")!, false)).toBe(false);
   expect(publishRefusal(dead.findings, false)).toBeNull();
+
+  // The versioned form TypeScript selects ranks with `types` and must be repaired identically. A
+  // predicate written from the literal name — the spelling anyone reaches for first — exempts it
+  // silently, and the exemption is indistinguishable from a package with nothing wrong.
+  const versioned = heal(
+    { exports: { ".": { "types@>=5.0": "./index.js", default: "./index.js" } } },
+    true,
+    ["index.js"],
+  );
+  expect(subpath(versioned)).toEqual("./index.js");
+  expect(find(versioned, "types-branch-not-declarations")?.consequence).toBe("breaks");
 
   // `--no-heal` publishes the author's own bytes, so the same defect must stop the run instead.
   const withheld = heal(
