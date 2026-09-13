@@ -19,6 +19,8 @@ import type { JsonObject } from "./json";
 import { lexicalZones, zoneAt } from "./lexical";
 import { foldName } from "./packed-names";
 
+/** `declare module "name"` — the name a checker matches instead of resolving through `exports`. */
+const AMBIENT_MODULE = /\bdeclare\s+module\s+("|')([^"']+)\1/g;
 const DECLARATION = /\.d\.[cm]?ts$/;
 const SCRIPT = /\.[cm]?[jt]sx?$/;
 
@@ -65,24 +67,32 @@ const UNREACHABLE_BY_NATURE = [
 const SPECIFIER =
   /(?:from\s*|require\s*\(\s*|import\s*\(?\s*|URL\s*\(\s*|sourceMappingURL=)['"`]?(\.[^'"`\s)]+)/g;
 
-/** Targets written under a condition key, for the checks that ask what one consumer receives. */
-function targetsUnder(node: unknown, condition: string, inside: boolean, out: string[]): void {
-  if (typeof node === "string") {
-    if (inside) out.push(node);
-    return;
-  }
-  if (Array.isArray(node)) {
-    for (const item of node) targetsUnder(item, condition, inside, out);
-    return;
-  }
-  if (!isObject(node)) return;
-  for (const [key, value] of Object.entries(node))
-    targetsUnder(
-      value,
-      condition,
-      inside || key === condition || key.startsWith(`${condition}@`),
-      out,
-    );
+/**
+ * Targets written under a condition key, for the checks that ask what one consumer receives.
+ *
+ * `skip` names a condition whose subtree this question does not reach. The `require` walk skips
+ * `module`, because no runtime activates it: `module` exists for bundlers, and a bundler reaching a
+ * target loads ES module syntax happily. `underscore` is the specimen — its `require` branch opens
+ * with `"module": "./modules/index-all.js"`, its unbundled ESM source, while `require.node` hands
+ * Node the CommonJS build. Reading that as what `require()` receives refuses a package that works.
+ */
+function targetsUnder(node: unknown, condition: string, out: string[], skip?: string): void {
+  // `inside` is recursion state, kept out of the signature so no caller can start a walk already
+  // claiming to be under the condition.
+  const walk = (current: unknown, inside: boolean): void => {
+    if (typeof current === "string") {
+      if (inside) out.push(current);
+      return;
+    }
+    if (Array.isArray(current)) {
+      for (const item of current) walk(item, inside);
+      return;
+    }
+    if (!isObject(current)) return;
+    for (const [key, value] of Object.entries(current))
+      if (key !== skip) walk(value, inside || key === condition || key.startsWith(`${condition}@`));
+  };
+  walk(node, false);
 }
 
 /**
@@ -140,10 +150,14 @@ function exposes(exports: unknown, subpath: string): boolean {
  *
  * Self-reference resolves through `exports` like any consumer's import would, so shipping the file
  * is not enough — and the author never sees it, because inside their own repository the same
- * import resolves through the source tree instead. Measured across 662 published packages with
- * `exports`: 2 carry one, and both are real. `@eslint-community/regexpp` ships an `index.d.ts`
- * importing `@eslint-community/regexpp/ast` while exporting only `.`; `highlight.js` references
- * `highlight.js/private` from both its declarations and its JSDoc types, exporting neither.
+ * import resolves through the source tree instead. `highlight.js` is the specimen: it references
+ * `highlight.js/private` from both its declarations and its JSDoc types and exports neither.
+ *
+ * Two shapes look identical to this scan and are not defects, so each is excluded above with the
+ * mechanism that resolves it named: a specifier inside a `declare module` block for that same name,
+ * and one the `exports` map exposes through a pattern key. Measured over 3633 installed published
+ * packages, the remaining reports name a subpath nothing exposes — the `@aws-sdk` and `@smithy`
+ * declarations reaching into `dist-types`, and `@trpc/server` reaching into `vendor`.
  *
  * Why `breaks` rather than waste, measured on TypeScript 7.0.2 with a control subpath that is
  * exported: under `skipLibCheck: false` the consumer gets `TS2307` inside a file they cannot edit,
@@ -171,6 +185,20 @@ export function reviewSelfReferences(
     const zones = lexicalZones(source);
     // A scan that lost its place reports nothing from this file: see `lexicalZones`.
     if (zones === null) continue;
+
+    // A specifier this FILE declares as an ambient module resolves to that declaration and never
+    // reaches `exports`: TypeScript matches `declare module "pkg/sub"` by its name alone. A bundled
+    // declaration file is built exactly this way — api-extractor and dts-bundle-generator each emit
+    // one module block per entry point and import between them by package subpath — so reading
+    // those as imports refuses a package whose types resolve perfectly.
+    // `@eslint-community/regexpp` is the specimen: `index.d.ts` declares `"…/ast"`, `"…/parser"`,
+    // `"…/validator"` and `"…/visitor"`, imports all four, and exposes none of them.
+    const ambient = new Set<string>();
+    for (const match of source.matchAll(AMBIENT_MODULE)) {
+      const zone = zoneAt(zones, match.index);
+      if (zone !== "text" && zone !== "comment") ambient.add(match[2] ?? "");
+    }
+
     for (const pattern of patterns)
       for (const match of source.matchAll(pattern)) {
         const zone = zoneAt(zones, match.index);
@@ -194,7 +222,8 @@ export function reviewSelfReferences(
         const line = source.slice(start, end === -1 ? undefined : end).trim();
         const specifier = match[2] ?? "";
         const subpath = specifier === name ? "." : `.${specifier.slice(name.length)}`;
-        if (exposes(pkg.exports, subpath) || seen.has(specifier)) continue;
+        if (ambient.has(specifier) || exposes(pkg.exports, subpath) || seen.has(specifier))
+          continue;
         seen.add(specifier);
         findings.push({
           rule: "self-import-not-exported",
@@ -221,6 +250,30 @@ function entry(files: ReadonlyMap<string, Buffer>, target: string): Buffer | und
 }
 
 /**
+ * Whether a type checker still reads the authored API from a `types` target that is not itself a
+ * declaration file.
+ *
+ * Two ways it does, and between them they account for every package the extension test alone
+ * refused across 3674 installed published names. A TypeScript SOURCE is read directly — the checker
+ * takes the full authored API from it, which is what `get-tsconfig` and `resolve-pkg-maps` ship.
+ * A JavaScript target falls back to the declaration file sitting beside it, the same fallback that
+ * keeps a misplaced `types` condition working: `xstate` points the branch at `dist/xstate.cjs.mjs`
+ * and ships `dist/xstate.cjs.d.mts` next to it, `react-resizable-panels` does the same with a
+ * `.d.ts`.
+ *
+ * The fallback is the CORROBORATION that makes the rule sound rather than a loophole in it. A
+ * declaration that really ships beside the target is independent evidence the author built one and
+ * wired the branch to its sibling; with no declaration anywhere near it, the checker has nothing
+ * but the JavaScript and the refusal stands. All three suffixes count, because this rule ABORTS and
+ * a checker that accepts one this tool did not predict must not cost a working package its release.
+ */
+function readableAsTypes(files: ReadonlyMap<string, Buffer>, target: string): boolean {
+  if (/\.[cm]?tsx?$/.test(target)) return true;
+  const base = target.replace(SCRIPT, "");
+  return [".d.ts", ".d.mts", ".d.cts"].some((suffix) => entry(files, base + suffix) !== undefined);
+}
+
+/**
  * Reports what the files an `exports` branch names turn out to be.
  *
  * These are the defects a source-directory linter cannot see, because each is a disagreement
@@ -233,9 +286,9 @@ export function reviewShippedFiles(pkg: JsonObject, files: ReadonlyMap<string, B
   // A `types` branch that does not name a declaration file hands the checker something else to
   // read as declarations — usually the JavaScript beside it, which types the whole package `any`.
   const typeTargets: string[] = [];
-  for (const map of maps) targetsUnder(map, "types", false, typeTargets);
+  for (const map of maps) targetsUnder(map, "types", typeTargets);
   for (const target of new Set(typeTargets))
-    if (!DECLARATION.test(target) && SCRIPT.test(target))
+    if (!DECLARATION.test(target) && SCRIPT.test(target) && !readableAsTypes(files, target))
       findings.push({
         rule: "types-branch-not-declarations",
         consequence: "breaks",
@@ -250,7 +303,7 @@ export function reviewShippedFiles(pkg: JsonObject, files: ReadonlyMap<string, B
 
   // A `require` branch must name a file `require()` can actually load.
   const requireTargets: string[] = [];
-  for (const map of maps) targetsUnder(map, "require", false, requireTargets);
+  for (const map of maps) targetsUnder(map, "require", requireTargets, "module");
   for (const target of new Set(requireTargets)) {
     if (DECLARATION.test(target) || !SCRIPT.test(target)) continue;
     const body = entry(files, target);
@@ -279,13 +332,31 @@ export function reviewShippedFiles(pkg: JsonObject, files: ReadonlyMap<string, B
   // 0755 and run. npm cannot fail to: `bin-links` 6.0.2 `lib/fix-bin.js` is an unconditional
   // `chmod(file, 0o777 & ~umask)` called from both the symlink and the Windows-shim path, so it
   // never consults the archive's mode. (yarn unmeasured.) A check would fire on a package that works.
+
+  // Collected ahead of BOTH shebang checks, which ask opposite questions of the same set: one
+  // whether a command has a shebang, the other whether a file with one is a command.
+  const commands = new Set<string>();
+  const declaredCommands: string[] = [];
+  collectDeclaredPaths(pkg.bin, declaredCommands, "every-string");
+  for (const target of declaredCommands) {
+    const name = normalizeDeclaredPath(target);
+    if (name !== null) commands.add(name);
+  }
+
   for (const [name, body] of files) {
     if (!body.subarray(0, 2).equals(Buffer.from("#!"))) continue;
     const firstLine = body.subarray(0, body.indexOf(0x0a) + 1 || body.length);
     if (!firstLine.includes(0x0d)) continue;
+    // Fatal only where something EXECUTES the file. Outside `bin` nothing does: no installer
+    // symlinks it onto a PATH, and `node file` ignores the shebang line entirely, so the CR is a
+    // latent defect in a file nobody runs rather than a broken package. Measured over 3633
+    // installed published packages, refusing it outright refused three — `jotai` and
+    // `@mixmark-io/domino`, neither of which declares a `bin` at all, and `human-id`, whose
+    // command ships a clean LF shebang and whose CR sits in a `.d.ts` and a `.ts` beside it.
+    const executed = commands.has(name);
     findings.push({
       rule: "shebang-carriage-return",
-      consequence: "breaks",
+      consequence: executed ? "breaks" : "waste",
       healed: false,
       where: name,
       message:
@@ -293,7 +364,12 @@ export function reviewShippedFiles(pkg: JsonObject, files: ReadonlyMap<string, B
         `"env: node\\r: No such file or directory" on Linux and macOS. Nothing here rewrites it ` +
         `— this tool alters the manifest and no other file's contents — so fix the line endings ` +
         `at the source: add a .gitattributes entry marking it "text eol=lf", or set your ` +
-        `bundler to emit LF.`,
+        `bundler to emit LF.` +
+        (executed
+          ? ` "bin" names this file as a command, so an installer symlinks it and every consumer ` +
+            `gets that failure.`
+          : ` No "bin" entry names this file, so nothing executes it through the kernel and the ` +
+            `publish is not refused over it. Use --strict to refuse anyway.`),
     });
   }
 
@@ -313,11 +389,7 @@ export function reviewShippedFiles(pkg: JsonObject, files: ReadonlyMap<string, B
   // A declared path the archive does not carry — or one that does not normalise at all, because it
   // escapes the package — belongs to `reviewDeclaredFiles`; reporting it here would give one defect
   // two voices that disagree about the remedy.
-  const commands: string[] = [];
-  collectDeclaredPaths(pkg.bin, commands, "every-string");
-  for (const target of new Set(commands)) {
-    const name = normalizeDeclaredPath(target);
-    if (name === null) continue;
+  for (const name of commands) {
     const body = files.get(name);
     if (body === undefined) continue;
     if (body.subarray(0, 2).toString() === "#!" || body.subarray(0, 512).includes(0)) continue;

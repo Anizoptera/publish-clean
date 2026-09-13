@@ -35,8 +35,9 @@ function review(exports: unknown, sources: Record<string, string>, name = "pkg")
 const ONLY_ROOT = { ".": "./index.js" };
 
 it.concurrent("reports a declaration file importing a subpath the package does not export", () => {
-  // `@eslint-community/regexpp` ships exactly this: index.d.ts imports `<name>/ast`, and exports
-  // carries only "." — so a consumer's checker cannot resolve the package's own types.
+  // `@aws-sdk/core` and `@smithy/core` ship exactly this: a declaration imports `<name>/dist-types/…`
+  // and exports exposes no such subpath, so a consumer's checker cannot resolve the package's own
+  // types.
   const found = review(ONLY_ROOT, {
     "index.d.ts": 'import * as AST from "pkg/ast";\nexport declare const x: AST.Node;\n',
   });
@@ -54,6 +55,29 @@ it.concurrent("reports a declaration file importing a subpath the package does n
       },
     ),
   ).toEqual([]);
+});
+
+it.concurrent("leaves a specifier the same file declares as an ambient module alone", () => {
+  // A checker matches `declare module "pkg/ast"` by name and never consults `exports` at all, so
+  // the subpath being unexposed costs nobody anything. api-extractor and dts-bundle-generator emit
+  // a bundled declaration file shaped exactly like this, one module block per entry point importing
+  // the others by package subpath; `@eslint-community/regexpp` ships four of them.
+  expect(
+    review(ONLY_ROOT, {
+      "index.d.ts":
+        'declare module "pkg/ast" {\n  export type Node = { type: string };\n}\n' +
+        'declare module "pkg" {\n  import * as AST from "pkg/ast";\n  export const x: AST.Node;\n}\n',
+    }),
+  ).toEqual([]);
+
+  // The control: the identical import with no declaration for it anywhere in the file IS reported,
+  // so the exemption is the declaration and not the shape of the import.
+  expect(
+    review(ONLY_ROOT, {
+      "index.d.ts":
+        'declare module "pkg" {\n  import * as AST from "pkg/ast";\n  export const x: AST.Node;\n}\n',
+    }),
+  ).toHaveLength(1);
 });
 
 it.concurrent("reads a type import inside a comment, and ignores an example of one", () => {
@@ -207,6 +231,21 @@ describe.concurrent("a manifest branch pointing at the wrong kind of file", () =
     expect(rules({ exports: { ".": { types: "./schema.json" } } }, {})).toEqual([]);
   });
 
+  it("stays silent where a checker still reads the authored API", () => {
+    // A TypeScript SOURCE is read directly — the checker takes the full authored API from it.
+    // `get-tsconfig` and `resolve-pkg-maps` both point the branch at `./src/index.ts`.
+    expect(rules({ exports: { ".": { types: "./src/index.ts" } } }, {})).toEqual([]);
+
+    // A JavaScript target falls back to the declaration beside it, which is why `xstate` works
+    // while pointing the branch at `dist/xstate.cjs.mjs`. The declaration has to really SHIP: that
+    // is the corroboration, not a loophole.
+    const types = { exports: { ".": { types: "./dist/x.mjs", default: "./dist/x.mjs" } } };
+    expect(rules(types, { "dist/x.d.mts": "export {};\n" })).toEqual([]);
+    expect(rules(types, { "dist/x.mjs": "export const a = 1;\n" })).toContain(
+      "types-branch-not-declarations",
+    );
+  });
+
   it("reports a require branch whose file require() cannot load", () => {
     // Judged by Node's own parser rather than by a pattern, so these are the forms that really
     // throw: ESM syntax, and — on every Node version — top-level await.
@@ -224,6 +263,32 @@ describe.concurrent("a manifest branch pointing at the wrong kind of file", () =
       rules({ exports: { ".": { require: "./cjs.js" } } }, { "cjs.js": "module.exports = 1;\n" }),
     ).toEqual([]);
     expect(rules({ exports: { ".": { require: "./cjs.js" } } }, {})).toEqual([]);
+
+    // A target under `module` is bundler-only — no runtime activates that condition — and a bundler
+    // loads ES module syntax happily. `underscore` opens its `require` branch with exactly this,
+    // its unbundled ESM source, while handing Node the CommonJS build from `require.node`.
+    expect(
+      rules(
+        { exports: { ".": { require: { module: "./esm.js", default: "./cjs.js" } } } },
+        { "esm.js": "export const x = 1;\n", "cjs.js": "module.exports = 1;\n" },
+      ),
+    ).toEqual([]);
+  });
+
+  it("refuses a carriage-returned shebang only in a file something executes", () => {
+    const cr = { "cli.js": "#!/usr/bin/env node\r\nrun();\n" };
+    // `bin` promises the file is executed, and the kernel passes the CR to execve as part of the
+    // interpreter's name, so every consumer's command fails.
+    const command = reviewShippedFiles({ bin: "./cli.js" }, asFiles(cr));
+    expect(command.map((finding) => finding.consequence)).toEqual(["breaks"]);
+
+    // The same bytes with nothing naming them a command. Nothing symlinks the file onto a PATH and
+    // `node cli.js` ignores the shebang line, so this is reported and `--strict` refuses it.
+    // Measured: refusing it outright refused `jotai` and `@mixmark-io/domino`, neither of which
+    // declares a `bin` at all, over a CR in a `.d.ts`.
+    const orphan = reviewShippedFiles({}, asFiles(cr));
+    expect(orphan.map((finding) => finding.rule)).toEqual(["shebang-carriage-return"]);
+    expect(orphan.map((finding) => finding.consequence)).toEqual(["waste"]);
   });
 
   it("reports a shebang ended by a carriage return", () => {
