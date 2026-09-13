@@ -36,21 +36,21 @@ Each one reaches consumers and cannot be repaired without guessing what you mean
   command is executed directly, so without that first line Linux and macOS fail with `exec format
   error` and npm has no interpreter to write into its Windows shim. A trailing CR is worse than no
   shebang and invisible in an editor: the kernel looks for an interpreter literally named `node\r`.
-  A `bin` file holding a NUL byte in its first 512 bytes is exempt — it is a compiled binary.
+  A `bin` file holding a NUL byte in its first 512 bytes is exempt: it is a compiled binary.
 - **A `require` condition resolving to an ES module.** Node can require one only from 20.19 and
   22.12 onward, a consumer can still switch it off, and top-level await fails on every version.
-  Point `require` at a CommonJS build, or add a `module-sync` branch — that condition exists so
+  Point `require` at a CommonJS build, or add a `module-sync` branch. That condition exists so
   `require()` and `import` can share one ES module.
-- **A condition order that hands a consumer the wrong target** — a runtime key such as `node`
+- **A condition order that hands a consumer the wrong target**: a runtime key such as `node`
   placed after a generic one that points elsewhere, so Node gets the generic build. Only refused
   when the order cannot be corrected safely; where it can, it is repaired instead (below).
 - **A self-import through a subpath your own `exports` does not expose.** It resolves for nobody,
   and it looks correct in your repository, where the same import resolves by path.
 - **A shipped file importing another by the wrong letter case.** Works on the author's macOS,
   fails on a consumer's Linux.
-- **A shipped file nothing reaches** — no entry point, no import from a reached file, no script.
+- **A shipped file nothing reaches**: no entry point, no import from a reached file, no script.
   It runs only when the package has an `exports` field, because that is what makes unlisted paths
-  unimportable — without it every shipped file is reachable and none is dead. Declare the
+  unimportable. Without it every shipped file is reachable and none is dead. Declare the
   deliberate ones:
   `"publish-clean": { "allowUnreferenced": ["assets"] }`, matched as a prefix, so naming a
   directory covers everything under it. The message prints the entry for you.
@@ -97,7 +97,7 @@ everyone), and a map too large to enumerate.
 - **The download is 46% smaller**: 63.2 kB to 34.0 kB, and 154.0 kB to 62.7 kB installed.
   `dist/cli.js` is minified with function and class names kept, so a stack trace from an unexpected
   failure still names the function that threw.
-- **Guards that used to abort on the spot now report instead** — a packed credential,
+- **Guards that used to abort on the spot now report instead**: a packed credential,
   `node_modules`, `.git`, a test tree, a lockfile, a registry URL carrying a password, a
   `workspace:` spec. They are findings beside the rest now. Nothing is weaker for it:
   `secret-file` and `internal-file` still stop the publish and no flag waives them. A packed
@@ -107,7 +107,7 @@ everyone), and a map too large to enumerate.
   field npm and Node treat it as; `module` and a string `browser` may name a directory or omit the
   extension; a target ending in `/` names a directory. `bin` keeps none of that tolerance, because
   npm symlinks the exact path it is given. Measured against 5192 installed packages, the previous
-  exact-name check refused 373 that install and resolve — every `@types/*` package, every `@aws-sdk`
+  exact-name check refused 373 that install and resolve: every `@types/*` package, every `@aws-sdk`
   client, `svelte`, `vite`. A declared path nothing a consumer resolves can reach — `sideEffects`,
   the object form of `browser`, an internal `#` import, a `*` pattern matching no packed file — now
   reports as `declared-path-inert` instead of stopping the publish; `--strict` still refuses it.
@@ -131,7 +131,7 @@ everyone), and a map too large to enumerate.
 - **A package with a long path publishes under pnpm 12.** A path too long for a plain tar name is
   carried by a header in front of the entry it belongs to; pnpm 11 wrote a PAX header there, pnpm 12
   writes a GNU long-name one, which this tool refused outright. Such names are now read and judged
-  by the rules PAX names already passed — still refused when the name renames a member onto
+  by the rules PAX names already passed. They are still refused when the name renames a member onto
   `package/package.json`, escapes the package directory, or collides with another entry.
 - **`preferUnplugged` is no longer reported as an unrecognised field.** Yarn reads it from an
   installed dependency's own manifest to decide whether that package must be unzipped to work, so a

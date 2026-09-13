@@ -25,7 +25,7 @@ can run in parallel because they do not write that build.
 `bun install` points `core.hooksPath` at `.githooks`, so from then on every commit runs that
 same gate and a failing tree cannot enter history. Fix what it reports; never pass
 `--no-verify`. It validates the working tree rather than the staged snapshot, so an unrelated
-broken file blocks an unrelated commit — stash it deliberately if that is what you want.
+broken file blocks an unrelated commit. Stash it deliberately if that is what you want.
 
 ## Design rules
 
@@ -52,7 +52,7 @@ Use focused Conventional Commits. Explain why the change is needed in the body.
 
 Pick the type by what a user can observe, not by how the edit looks: `feat` and `fix` for
 anything a consumer can see, `test:`, `chore:`, `ci:` or `docs:` for anything they cannot.
-The type does not decide whether a change ships — a pushed tag does — it decides which
+The type does not decide whether a change ships; a pushed tag does. It decides which
 changelog group the subject drafts into, and every commit is drafted. Mark a breaking
 change `!`; pre-1.0 it releases as a minor.
 

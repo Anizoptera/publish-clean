@@ -1,7 +1,7 @@
 # @anizoptera/publish-clean
 
-Publish npm packages with a clean `package.json`, verified `exports`, and checks for
-unwanted files, unresolved workspace dependencies and missing entry points.
+Cleans and helps to publish npm packages properly with a clean `package.json` (no unnecessary entries),
+verified `exports`, checks for unwanted files, unresolved workspace dependencies and missing entry points.
 
 [![npm version](https://img.shields.io/npm/v/@anizoptera/publish-clean?label=npm)](https://www.npmjs.com/package/@anizoptera/publish-clean)
 [![Signed provenance](https://img.shields.io/badge/provenance-signed-2ea44f?logo=npm&logoColor=white)](https://www.npmjs.com/package/@anizoptera/publish-clean#provenance)
@@ -12,46 +12,46 @@ unwanted files, unresolved workspace dependencies and missing entry points.
 
 ## Why
 
-Publishing is the one step you cannot take back. Even inside npm's 72-hour window an unpublish
-needs nothing to depend on your package; after that it also needs under 300 weekly downloads and a
-single maintainer. The number is spent either way — [npm's policy](https://docs.npmjs.com/policies/unpublish)
-is that "once `package@version` has been used, you can never use it again". A bad release is
-repaired only by publishing another one.
+Publishing is the one step you cannot take back. npm lets you unpublish within 72 hours only if no
+other package depends on yours. After that you also need fewer than 300 weekly downloads and a
+single maintainer. The version number is gone either way:
+[npm's policy](https://docs.npmjs.com/policies/unpublish) is that "once `package@version` has been
+used, you can never use it again". You fix a bad release by publishing another one.
 
 The defects that reach consumers are the ones your own machine cannot show you:
 
-| Defect | Your machine | Consumer installs | Consumer builds |
-| ------ | ------------ | ----------------- | --------------- |
-| Two packed names differing only in letter case | fine — case-sensitive disk | **reports success** | file silently missing |
-| `bin` file with no shebang | fine — you run `node file.js` | fine | `exec format error` |
-| Package imports itself through a subpath `exports` hides | fine — resolves by path in your repo | fine | cannot resolve |
+| Defect | Your machine | Consumer installs | Consumer uses it |
+| ------ | ------------ | ----------------- | ---------------- |
+| Two packed names differing only in letter case | fine (case-sensitive disk) | **reports success** | file silently missing |
+| `bin` file with no shebang | fine (you run `node file.js`) | fine | `exec format error` |
+| Package imports itself through a subpath `exports` hides | fine (resolves by path in your repo) | fine | cannot resolve |
 | `./Utils.js` imported as `./utils.js` | fine on macOS | fine | fails on Linux |
 | `types` pointing at JavaScript with no `.d.ts` | fine | fine | every type silently `any` |
-| `require` branch resolving to an ES module | fine — you use `import` | fine | fails on older Node |
+| `require` branch resolving to an ES module | fine (you use `import`) | fine | fails on older Node |
 
 Green the whole way down. Nothing in the normal chain fails, so the first report comes from a
 stranger, against a version you can no longer replace.
 
-`publish-clean` packs the package, checks the tarball that is about to go up, repairs what it can
-prove is safe to repair, and refuses the rest. **What it checked is what it uploads** — the same
-file, byte for byte, never a repack. Every finding is reported in one run; it stops at the end, not
-at the first defect.
+`publish-clean` packs your package, checks the tarball before it goes up, repairs what it can prove
+safe, and refuses the rest. **What it checked is what it uploads**: the same file, byte for byte,
+never a repack. One run reports everything; it stops at the end, not at the first defect.
 
 ### Rules are measured, not guessed
 
-A checker that rejects a working package is worse than no checker. From the outside its mistake and
-a real defect look identical, and the only way to settle the argument is to publish anyway — which
-is the step this tool exists to protect.
+A checker that rejects a working package is worse than no checker. Its mistake and a real defect
+look identical from the outside, and the only way to find out which you have is to publish anyway.
+That is the step this tool exists to protect.
 
-So no rule here ships on a reading of the spec. Each one is measured against thousands of installed
-published packages first, and every tolerance exists because its absence refused something that
-works. Comparing declared paths to packed names by equality refused 373 of 5192 — `vite`, `svelte`,
-every `@types/*` package, every `@aws-sdk` client. Requiring canonical condition order refused 97 of
-3674; after the tolerances that measurement forced, 14 remain, each a real defect.
+So no rule here is written from the spec alone. Each is measured against thousands of installed
+packages first, and every tolerance exists because its absence refused a package that works.
+Matching declared paths to packed names by equality refused 373 of 5192 packages: `vite`, `svelte`,
+every `@types/*` package, every `@aws-sdk` client. Demanding a fixed order for `exports` conditions
+refused 97 of 3674. After the tolerances those measurements forced, 14 remain, every one a real
+defect.
 [`docs/exports.md`](https://github.com/Anizoptera/publish-clean/blob/main/docs/exports.md) carries
 the measurements and the specimens.
 
-If it still refuses a package that works, that is a defect in this tool — report it.
+If it still refuses a package that works, that is a bug here. Report it.
 
 ## What it does
 
@@ -93,7 +93,7 @@ publish path and handles registry credentials, so any transitive package would b
 next to a live token.
 
 pnpm 12 installs its native binary from its own install script, so install it with build scripts
-allowed — under Bun, which blocks them by default, list `pnpm` in `trustedDependencies`. Otherwise
+allowed. Under Bun, which blocks them by default, list `pnpm` in `trustedDependencies`. Otherwise
 pnpm's command stays a placeholder that this tool cannot start. pnpm 11 needs nothing special.
 
 For trusted publishing, use Node.js 22.14+ and npm 11.5.1+. Provenance requires a public
@@ -271,13 +271,13 @@ artifact during upload.
 ## What it checks
 
 Every finding prints as `publish-clean [severity] rule-id at where`. The id in brackets below is
-that id — search this file for the one in your output.
+that id. Search this file for the one in your output.
 
 Two rules cover the whole output:
 
 - **`[warning]` never stops the run.** Wasted bytes, nothing a consumer can trip over. `--strict`
   turns these into errors.
-- **`[error]` stops the run — unless the finding says it was repaired.** A repair fixed the
+- **`[error]` stops the run, unless the finding says it was repaired.** A repair fixed the
   published tarball, not your source, so it still prints as an error and you still have something
   to fix. It does not stop the publish, because the artifact going up is correct. `--strict` never
   changes that.
@@ -308,7 +308,7 @@ Publication stops when:
   only from 20.19 and 22.12 onward, a consumer can switch that off, and top-level await fails on
   every version. Point `require` at a CommonJS build, or add a `module-sync` branch
 - a condition sits out of canonical order where reordering it would change what somebody resolves,
-  and a consumer really loses its target — a runtime-specific build shadowed by a generic one. The
+  and a consumer really loses its target: a runtime-specific build shadowed by a generic one. The
   tool will not guess here, so it reports and stops instead [`exports-condition-order-unsafe`]
 - two packed names differ only in letter case or Unicode form [`packed-name-collision`]. They
   collapse onto one path on macOS and Windows, which ignore both by default. Two files means one
@@ -325,17 +325,17 @@ Publication stops when:
   so without that first line Linux and macOS fail with `exec format error` and npm has no
   interpreter for its Windows shim. A trailing CR is invisible in an editor and makes the kernel
   look for an interpreter literally named `node\r`. A `bin` file holding a NUL byte in its first
-  512 bytes is exempt — it is a compiled binary
+  512 bytes is exempt: it is a compiled binary
 - a shipped file imports another by the wrong letter case [`import-case-mismatch`], so it works on
   the author's macOS and fails on a consumer's Linux
 - the package imports itself by name through a subpath its `exports` does not expose
-  [`self-import-not-exported`], which resolves for nobody — and looks fine in your own repository,
+  [`self-import-not-exported`], which resolves for nobody, and looks fine in your own repository,
   where it resolves by path
-- the tarball holds a file nothing in the package reaches [`unreferenced-file`] — no entry point,
+- the tarball holds a file nothing in the package reaches [`unreferenced-file`]: no entry point,
   no import from a reached file, no script. Declare the ones that are deliberate:
   `"publish-clean": { "allowUnreferenced": ["assets"] }`, matched as a prefix, so naming a directory
   covers everything under it. This check only runs when the package has an `exports` field, because
-  that is what makes unlisted paths unimportable — without it every shipped file is reachable and
+  that is what makes unlisted paths unimportable. Without it every shipped file is reachable and
   none is dead.
 
 A malformed registry URL [`registry-not-a-url`], or one carrying a password
@@ -350,7 +350,7 @@ source file is published and nothing here reports it.
 An `exports` map is order-sensitive: a consumer activates a whole set of conditions at once and
 takes the first key in that set, so the order you wrote picks the winner. `publish-clean`
 flattens the map into the resolution it produces for every possible consumer, and rewrites it
-only when the result is provably identical — dropping a `node` branch that repeats `default`
+only when the result is provably identical: dropping a `node` branch that repeats `default`
 [`exports-inert-condition`], collapsing `{"default": "./x.js"}` [`exports-redundant-default`], and
 putting keys that real resolvers require in a fixed order into it [`exports-condition-order`].
 A branch no consumer reaches [`exports-unreachable-branch`], a consumer no branch serves
@@ -375,9 +375,9 @@ Anything the archive cannot settle is left exactly as you wrote it: a `types` ta
 does not ship is a missing file and keeps that report, and nothing is moved across a condition this
 tool does not recognise, since a private name may be meant for a consumer configured to take it.
 
-Still reported and left alone: anything inside a fallback array [`exports-fallback-array`] — Bun
-resolves those differently from Node and Deno, so no rewrite is safe for everyone — and any map too
-large to enumerate [`exports-too-complex`]. [`docs/exports.md`](https://github.com/Anizoptera/publish-clean/blob/main/docs/exports.md) has
+Still reported and left alone: anything inside a fallback array [`exports-fallback-array`], because
+Bun resolves those differently from Node and Deno and no rewrite is safe for everyone, and any map
+too large to enumerate [`exports-too-complex`]. [`docs/exports.md`](https://github.com/Anizoptera/publish-clean/blob/main/docs/exports.md) has
 the measured condition sets behind these rules.
 
 ## What the cleaned manifest keeps
@@ -534,7 +534,7 @@ difference between a preview check and publishing through this CLI.
 [`publint`](https://publint.dev) and
 [`@arethetypeswrong/cli`](https://github.com/arethetypeswrong/arethetypeswrong.github.io)
 check package entry points and TypeScript compatibility. Run them alongside this tool. They only
-report — they do not clean the manifest, repair anything, or publish. They also cover what this tool
+report: they do not clean the manifest, repair anything, or publish. They also cover what this tool
 deliberately leaves out of scope: type resolution and module-format analysis. Neither replaces the
 other, and no check here is skipped on the grounds that publint reports it too.
 

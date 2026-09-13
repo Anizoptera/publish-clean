@@ -14,7 +14,7 @@ bypassed, a manifest rewrite that changes what any RUNTIME resolves, and anythin
 the published bytes differ from the bytes that were checked.
 
 Two things are deliberate and are not bugs. The `types` repair does change what a type
-checker resolves — that is its purpose, and only a checker reads those keys. And secrets are
+checker resolves. That is its purpose, and only a checker reads those keys. Secrets are
 matched by FILE NAME — `.env`, `.npmrc`, key and keystore extensions, SSH key names — so a
 credential hardcoded inside a source file is published with nothing reported. Scanning file
 contents for secrets is a different tool's job.
