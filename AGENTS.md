@@ -1,6 +1,12 @@
 # @anizoptera/publish-clean
 
 - Keep this CLI dependency-free at runtime.
+- **`README.md` SHIPS in the package deliberately. It is the offline reference an agent or
+  maintainer reads straight out of `node_modules` — no repo, no network.** So it MUST stay complete
+  and current: every rule that can stop a publish, every repair, every flag and config key. Its
+  download size is SETTLED and is NEVER a reason to cut, trim or split it; do not raise the subject.
+  The only defect that matters here is being WRONG or STALE. Change a rule ⇒ update the README in the
+  same commit. Verify against `src/`, never against the prose already there.
 - Use `pnpm pack` as the source of truth for file selection, workspace/catalog resolution and
   `publishConfig` overrides; NEVER substitute `bun pm pack` or `npm pack`. The evidence belongs
   in `docs/why-pnpm-and-npm.md`; update it and this bullet together. A hoisted linker can enable

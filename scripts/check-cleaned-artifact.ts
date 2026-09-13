@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -93,6 +93,34 @@ function assertTestedBytesAreShipped(tested: Buffer, shipped: Buffer): void {
   );
 }
 
+/**
+ * Every relative link in the SHIPPED README must resolve inside the shipped package.
+ *
+ * The README is the reference an agent or maintainer reads straight out of `node_modules`, with no
+ * repository and no network. Only `dist/`, `README.md`, `LICENSE` and `package.json` are there, so
+ * a link to `docs/…`, `src/…` or `CONTRIBUTING.md` is dead for the reader it was written for — and
+ * dead on the npm package page too, which resolves relative links against the registry. Point at
+ * the repository with a full URL instead.
+ *
+ * Checked against the extracted artifact rather than the `files` field, so it measures what a
+ * consumer actually receives instead of what the manifest promises.
+ */
+function assertReadmeLinksResolveOffline(artifact: string): void {
+  const readme = readFileSync(path.join(artifact, "README.md"), "utf8");
+  const dead = [...readme.matchAll(/\]\(([^)\s]+)\)/g)]
+    .map((match) => match[1] ?? "")
+    .filter((target) => !/^(?:[a-z]+:|#)/.test(target))
+    .map((target) => target.split("#")[0] ?? "")
+    .filter((target) => target !== "" && !existsSync(path.join(artifact, target)));
+  if (dead.length > 0)
+    throw new Error(
+      `README.md ships these relative links, and none of them exists in the installed package:\n` +
+        `${[...new Set(dead)].map((target) => `  ${target}`).join("\n")}\n` +
+        `Use https://github.com/Anizoptera/publish-clean/blob/main/<path> so the link works from ` +
+        `node_modules and on the npm page.`,
+    );
+}
+
 function run(command: string, args: readonly string[]): string {
   const result = spawnSync(command, [...args], {
     encoding: "utf8",
@@ -130,6 +158,7 @@ try {
   assertNoRuntimeDependencies(manifest);
   assertTestedBytesAreShipped(tested, shipped);
   assertBannerDeclaresTheArtifact(shipped.toString("utf8"), manifest);
+  assertReadmeLinksResolveOffline(artifact);
   run("bunx", ["publint", "run", artifact, "--pack", "false"]);
   run("bunx", ["@arethetypeswrong/cli", tarball]);
 } finally {

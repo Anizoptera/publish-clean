@@ -73,7 +73,7 @@ artifact's hash.
 ## Package managers
 
 The CLI uses pnpm for workspace resolution and `publishConfig` overrides, and npm to upload the
-checked tarball. The [packer comparison](docs/why-pnpm-and-npm.md) explains the trade-offs.
+checked tarball. The [packer comparison](https://github.com/Anizoptera/publish-clean/blob/main/docs/why-pnpm-and-npm.md) explains the trade-offs.
 
 Starting through another package manager prints an advisory on stderr. It does not change
 the packer or stop publication, and there is no option to suppress it.
@@ -126,7 +126,7 @@ steps:
 Use `--tag latest` for stable releases and `--tag next` for prereleases. npm defaults
 to `latest`, so omitting the tag can give ordinary installs a prerelease.
 
-For a new package name, follow the [first-publish setup](docs/first-publish.md).
+For a new package name, follow the [first-publish setup](https://github.com/Anizoptera/publish-clean/blob/main/docs/first-publish.md).
 
 To block direct publication from your source directory, add this hook. Publishing a
 tarball does not run it:
@@ -241,9 +241,21 @@ Publication stops when:
 - rewriting the manifest changed anything else in the tarball
 - GitHub trusted publishing or provenance is enabled, but the `repository` in your manifest
   is not the repository the workflow is running in
-- a `types` condition resolves to something that is not a declaration file, so a type checker
-  reads JavaScript as your package's types
 - a `require` condition resolves to an ES module
+- a condition sits out of canonical order where reordering it would change what somebody resolves,
+  and a consumer really loses its target — a runtime-specific build shadowed by a generic one. The
+  tool will not guess here, so it reports and stops instead
+- two packed names differ only in letter case or Unicode form. They become ONE file on macOS and
+  Windows, so the install reports success with a file missing. Invisible on the machine that packed
+  it
+- a packed name Windows cannot create: a reserved device name such as `aux.js` in any path
+  component, a character such as `:` or `?`, a trailing dot or space. Declare `"os": ["!win32"]` if
+  the package genuinely does not run there and this stops applying. A path component over 255 bytes
+  is refused regardless, because no filesystem accepts one
+- a `bin` file has no shebang, or its shebang ends in CR. The installed command is a symlink the
+  kernel resolves through that line, and npm reads the same line to pick the interpreter for its
+  Windows shim. A `bin` file holding a NUL byte is exempt: compiled binaries are executed directly
+- a relative import resolves only after folding letter case, so it works on macOS and fails on Linux
 - the package imports itself by name through a subpath its `exports` does not expose, which
   resolves for nobody — and looks fine in your own repository, where it resolves by path
 - the tarball holds a file nothing in the package reaches — no entry point, no import from a
@@ -253,7 +265,7 @@ Publication stops when:
   importable, so nothing is dead.
 
 File guards check paths, not file contents. They cannot detect a credential embedded
-in an otherwise allowed source file. See [the rules](src/artifact.ts).
+in an otherwise allowed source file. See [the rules](https://github.com/Anizoptera/publish-clean/blob/main/src/artifact.ts).
 
 ## What it repairs
 
@@ -265,11 +277,25 @@ collapsing `{"default": "./x.js"}`, ordering keys the measured constraints force
 reported, lands only in the published manifest, and never touches your source. `--no-heal`, or
 `"publish-clean": { "heal": false }`, reports without rewriting.
 
-Defects it cannot repair without guessing what you meant are reported and left alone: a
-`types` key that would have to be hoisted (right for one shared `.d.ts`, wrong for separate
-`.d.mts`/`.d.cts`), anything inside a fallback array (Bun resolves those differently from Node
-and Deno), and any map too large to enumerate. [`docs/exports.md`](docs/exports.md) has the
-measured condition sets behind these rules.
+`types` is the one exception, and the only rewrite here that changes what somebody resolves. Only
+a type checker activates it, so nothing that runs your package can tell the difference:
+
+- a `types` branch pointing at JavaScript with no declaration file beside it is **removed**. It
+  promised an API the package does not carry, and a checker was reading that JavaScript as your
+  declarations and typing everything `any`.
+- declarations hidden behind a key that leads a checker nowhere are **moved to the front**, where
+  every checker looks first.
+
+Both print as errors — fix your source — and neither stops the publish, because the published
+artifact is correct. `--no-heal` withholds both rewrites, and then both stop it.
+
+Anything the archive cannot settle is left exactly as you wrote it: a `types` target the package
+does not ship is a missing file and keeps that report, and nothing is moved across a condition this
+tool does not recognise, since a private name may be meant for a consumer configured to take it.
+
+Still reported and left alone: anything inside a fallback array (Bun resolves those differently
+from Node and Deno) and any map too large to enumerate. [`docs/exports.md`](https://github.com/Anizoptera/publish-clean/blob/main/docs/exports.md) has
+the measured condition sets behind these rules.
 
 ## What the cleaned manifest keeps
 
@@ -447,8 +473,8 @@ bun install --frozen-lockfile
 bun run check
 ```
 
-[CONTRIBUTING.md](CONTRIBUTING.md) has the rest. Security problems go through private
-reporting, not public issues: see [SECURITY.md](SECURITY.md).
+[CONTRIBUTING.md](https://github.com/Anizoptera/publish-clean/blob/main/CONTRIBUTING.md) has the rest. Security problems go through private
+reporting, not public issues: see [SECURITY.md](https://github.com/Anizoptera/publish-clean/blob/main/SECURITY.md).
 
 ## License
 
