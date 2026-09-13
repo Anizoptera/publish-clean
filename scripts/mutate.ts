@@ -345,6 +345,18 @@ const MUTATIONS: readonly Mutation[] = [
     to: "return value;",
   },
   {
+    name: "exports: a branch is hoisted for declarations the archive does not carry",
+    file: "src/exports.ts",
+    from: /if \(!hidden\.some\(reached\)\) return value;/,
+    to: "",
+  },
+  {
+    name: "exports: types is hoisted across a private condition nobody can explain",
+    file: "src/exports.ts",
+    from: /if \(ahead\.some\(\(key\) => !isKnown\(key\)\)\) return value;/,
+    to: "",
+  },
+  {
     name: "exports: keys are reordered around a fallback array",
     file: "src/exports.ts",
     from: /if \(containsArray\(value\)\) return value;/,
@@ -461,7 +473,7 @@ const MUTATIONS: readonly Mutation[] = [
   {
     name: "declared: a TypeScript source stops counting as its own declarations",
     file: "src/declared.ts",
-    from: /if \(\/\\\.\[cm\]\?tsx\?\$\/\.test\(target\)\) return "declarations";/,
+    from: /\|\| \/\\\.\[cm\]\?tsx\?\$\/\.test\(target\)/,
     to: "",
   },
   {

@@ -162,6 +162,7 @@ it("repairs a types branch no checker can read, and leaves every working one alo
   const withheld = heal(
     { exports: { ".": { types: "./index.js", default: "./index.js" } } },
     false,
+    ["index.js"],
   );
   expect(subpath(withheld)).toEqual({ types: "./index.js", default: "./index.js" });
   expect(isFatal(find(withheld, "types-branch-not-declarations")!, false)).toBe(true);
@@ -173,7 +174,7 @@ it("repairs a types branch no checker can read, and leaves every working one alo
   // nothing, and sharing `import`'s target would make `import` provably inert — two other rules
   // firing on the same specimen, either of which would mask what this one is measuring.
   const shadowed = { ".": { import: "./m.js", types: "./t.d.ts", default: "./d.js" } };
-  const hidden = heal({ exports: shadowed }, true, ["m.js"]);
+  const hidden = heal({ exports: shadowed }, true, ["m.js", "t.d.ts"]);
   expect(Object.keys(subpath(hidden) as Record<string, unknown>)).toEqual([
     "types",
     "import",
@@ -194,9 +195,15 @@ it("repairs a types branch no checker can read, and leaves every working one alo
 
   // A TypeScript source is read directly, and a non-script target is out of this rule's measured
   // scope — neither may be rewritten on a guess about what the author meant.
-  const kept = (target: string) => subpath(heal({ exports: { ".": { types: target } } }));
+  const kept = (target: string, ships: string[] = ["src/index.ts", "schema.json"]) =>
+    subpath(heal({ exports: { ".": { types: target } } }, true, ships));
   expect(kept("./src/index.ts")).toEqual({ types: "./src/index.ts" });
   expect(kept("./schema.json")).toEqual({ types: "./schema.json" });
+
+  // A target the archive does not carry belongs to the missing-file rule, which names the path it
+  // could not find. `@drizzle-team/brocli` writes `./index.d.cjs` for the `./index.d.cts` it ships;
+  // deleting that branch would take the subject of the only report that can explain the typo.
+  expect(kept("./index.d.cjs", ["index.d.cts"])).toEqual({ types: "./index.d.cjs" });
 
   // A map past ROW_BUDGET cannot be enumerated, so every proof-backed rewrite is withheld — but the
   // `types` repair never depended on that proof, and a package too large to reason about is the
@@ -237,6 +244,29 @@ it("repairs a types branch no checker can read, and leaves every working one alo
   );
   expect(viaArray.rules).not.toContain("types-branch-unreachable");
 
+  // Declarations nobody built are not made reachable: the `svgo` installed here names
+  // `./types/lib/svgo-node.d.ts` and ships no `types/` at all, and putting a dead path where every
+  // checker looks first is not a repair. The missing target is the declared-path rule's to name.
+  const absent = heal(
+    { exports: { ".": { import: "./lib/n.js", types: "./types/n.d.ts" } } },
+    true,
+    ["lib/n.js"],
+  );
+  expect(Object.keys(subpath(absent) as Record<string, unknown>)).toEqual(["import", "types"]);
+
+  // A private condition ahead stops the move. `zod` leads every subpath with `@zod/source` pointing
+  // at TypeScript it does not ship, so the archive reports no declarations there — while a checker
+  // configured with that condition is meant to take it and would be handed the built `.d.cts`.
+  const private_ = heal(
+    { exports: { ".": { "@zod/source": "./src/index.ts", types: "./index.d.cts" } } },
+    true,
+    ["index.d.cts"],
+  );
+  expect(Object.keys(subpath(private_) as Record<string, unknown>)).toEqual([
+    "@zod/source",
+    "types",
+  ]);
+
   // Stranded behind `default`, the key is no consumer's to reach, which makes it provably inert —
   // so the neutral rewrites delete it and collapse what is left. Hoisting it instead would make it
   // live, and leave the reachability finding claiming it is dead: one key, two contradictory
@@ -250,7 +280,10 @@ it("reorders toward the canonical order only when the permutation is provably ne
   // Both branches carry the same target, so no consumer can observe which key it matched. The
   // declaration beside that target keeps `repairTypes` out of it — this case is about the neutral
   // permutation, and a repair running first would decide the order before the permutation is tried.
-  const safe = heal({ exports: { ".": { import: "./m.js", types: "./m.js" } } }, true, ["m.d.ts"]);
+  const safe = heal({ exports: { ".": { import: "./m.js", types: "./m.js" } } }, true, [
+    "m.js",
+    "m.d.ts",
+  ]);
   expect(safe.rules).toContain("exports-condition-order");
   const subpath = (safe.result.exports as Record<string, unknown>)["."] as Record<string, unknown>;
   expect(Object.keys(subpath)).toEqual(["types", "import"]);
