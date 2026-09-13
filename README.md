@@ -36,6 +36,32 @@ stranger, against a version you can no longer replace.
 safe, and refuses the rest. **What it checked is what it uploads**: the same file, byte for byte,
 never a repack. One run reports everything; it stops at the end, not at the first defect.
 
+### A packed secret is already leaked
+
+The worst case is not a broken package. It is a `.env` or an `.npmrc` inside the tarball. By the
+time anything notices, the key exists outside your machine: it was written into an archive, and if
+the upload went through, into a registry that hands it to anyone who asks.
+
+`publish-clean` refuses those outright. No flag waives it and `--strict` has nothing to add. It also
+will not quietly strip the file for you, which is the part people expect and should not want: a
+stripped secret has still leaked, and an artifact that looks clean is how a leak goes unrotated. The
+report tells you to rotate the credential first, then narrow `files`.
+
+### Dead weight ships forever
+
+The second cost is invisible to the only person who can fix it. You pay nothing for a bloated
+package: you build it once. Everyone else pays, on every install, every CI run, every Docker layer.
+Those bytes sit in every `node_modules` that ever resolved your package, and they cannot be taken
+out of a version that is already published.
+
+Nothing complains, because nothing is broken. A shipped `__tests__` directory installs fine. A jest
+config block in `package.json` parses fine. Both are downloaded forever by people who will never
+use them.
+
+So waste here is a defect with a rule id and an exit code, not a matter of taste. The one thing this
+tool will not do is drop a manifest field it does not recognise: breaking a stranger's build costs
+more than the bytes do.
+
 ### Rules are measured, not guessed
 
 A checker that rejects a working package is worse than no checker. Its mistake and a real defect
@@ -185,6 +211,22 @@ tarball does not run it:
 }
 ```
 
+### Checking every pull request
+
+`verify` needs no registry, no credentials and no npm, so it runs in ordinary PR CI next to your
+tests:
+
+```yaml
+- run: pnpm exec publish-clean verify
+```
+
+A packaging defect then shows up in the change that caused it, instead of on release day with
+everyone waiting. Most of what this tool finds is introduced by an edit to `package.json` or to the
+file layout, so the PR that made the edit is where the answer is cheapest.
+
+`--strict` is worth considering here even if you do not use it when publishing: a warning that fails
+a PR costs a rerun, while the same warning at release costs a version number.
+
 ### Keeping your existing release tool
 
 If your release tool supports a custom upload command, use `publish-clean` there.
@@ -221,6 +263,19 @@ publish-clean -- --access restricted --tag latest
 Omit provenance for restricted packages. Leave `private: true` unset: it prohibits
 publication, even to a private registry.
 
+### Adding it to a package that already exists
+
+A package published for years will usually report several findings the first time. You do not have
+to clear them all before you can publish again.
+
+Run `verify` first: it shows the whole list and cannot publish anything. Then decide per finding.
+The judgement calls have opt-outs, one per rule, so you can disagree with one and keep shipping:
+`--allow-suspicious` for development files you ship on purpose, `allowUnreferenced` for files
+nothing imports by design, `--skip-file-check` for a package with no `files` array.
+
+What has no opt-out is a leaked credential, a packed `node_modules` or `.git`, and a defect that
+breaks a consumer. Those are the ones worth stopping for.
+
 ### Publishing one package out of a monorepo
 
 ```bash
@@ -238,6 +293,11 @@ flowchart TD
   E -->|any fails| F[Exit non-zero, publish nothing]
   E -->|all pass| G[npm publish this same tarball]
 ```
+
+Exit code is 0 when nothing stopped the run, 1 when something did, and 130 or 143 when a SIGINT or
+SIGTERM cancelled it. A CI job can tell a real failure from a cancelled runner by that alone.
+Findings and the verdict go to stderr; `--dry-run` prints the file list and the cleaned manifest on
+stdout, so you can read one without the other.
 
 `verify` and `--dry-run` validate the artifact, but skip publication preflight.
 Neither proves that registry access, credentials, provenance requirements or repository
@@ -267,6 +327,13 @@ extracts to rather than the placeholder in the entry's own header.
 `pnpm pack` runs pack hooks, including `prepare` and `prepack`. npm runs no package
 lifecycle scripts when uploading a tarball, so those hooks cannot change the checked
 artifact during upload.
+
+### What this buys for provenance
+
+npm builds a provenance attestation from the SHA-512 of the file it uploads. A pipeline that checks
+one artifact and then repacks signs bytes that nothing verified, and the attestation still looks
+perfectly valid. Uploading the checked file is what makes the signature cover what the checks
+actually passed.
 
 ## What it checks
 
