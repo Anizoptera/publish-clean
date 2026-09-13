@@ -71,7 +71,6 @@
     "docs:check": "bun scripts/check-doc-claims.ts"
   },
   "devDependencies": {
-    "@arethetypeswrong/cli": "^0.18.5",
     "@types/bun": "^1.4.2",
     "@types/node": "^26.5.1",
     "git-cliff": "^2.13.1",

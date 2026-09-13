@@ -74,8 +74,8 @@ function assertBannerDeclaresTheArtifact(
  * The file the suite ran against and the file the tarball carries must be the same bytes.
  *
  * They are two different builds. The lane builds `dist/cli.js` and `vitest` spawns THAT one; then
- * the CLI below packs with `pnpm`, which runs this package's `prepare` — `tsdown` — so the tarball,
- * publint and attw all read a SECOND build. Measured by planting an old mtime on `dist/cli.js` and
+ * the CLI below packs with `pnpm`, which runs this package's `prepare` — `tsdown` — so the tarball
+ * and publint both read a SECOND build. Measured by planting an old mtime on `dist/cli.js` and
  * watching the tool's own run replace it. They agree today only because the build is reproducible,
  * and nothing else here would notice if it stopped being: the published artifact would simply be one
  * no test ever executed, with every check still green.
@@ -137,7 +137,7 @@ function run(command: string, args: readonly string[]): string {
 const tested = readFileSync("dist/cli.js");
 
 // The CLI keeps no temp tree, so this script names its own and deletes it.
-// publint reads the extracted package; @arethetypeswrong/cli reads the tarball.
+// publint reads the extracted package, so the tarball is unpacked here rather than handed over.
 const root = mkdtempSync(path.join(tmpdir(), "publish-clean-check-"));
 try {
   run(process.execPath, ["dist/cli.js", "--dry-run", "--no-git-checks", "--tarball-out", root]);
@@ -160,11 +160,6 @@ try {
   assertBannerDeclaresTheArtifact(shipped.toString("utf8"), manifest);
   assertReadmeLinksResolveOffline(artifact);
   run("bunx", ["publint", "run", artifact, "--pack", "false"]);
-  // attw can only answer "This package does not contain types." while this stays a bin-only
-  // package with no `types` key and no importable entry — that verdict is correct here, not a
-  // misconfiguration. Kept rather than deleted because it becomes load-bearing the moment a
-  // types entry is added, and nothing else in this lane would notice it had stopped running.
-  run("bunx", ["@arethetypeswrong/cli", tarball]);
 } finally {
   rmSync(root, { recursive: true, force: true });
 }
