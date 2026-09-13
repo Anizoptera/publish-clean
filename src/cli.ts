@@ -321,7 +321,11 @@ async function packAndClean(
     // The packed manifest is what every check judges, because pnpm has already applied any
     // `publishConfig.exports` override by this point — so this value, not the source one, is
     // what consumers will resolve against.
+    // `exports` is repaired against the names pnpm packed, which `assertSameEntries` below proves
+    // the rewrite leaves untouched — only the manifest member's bytes change.
+    const packedNames = packageFiles(packed);
     const review = reviewExports(withRegistry(stripManifest(packedPkg, extraDevFields), registry), {
+      files: new Set(packedNames),
       heal: opts.heal && config.heal !== false,
     });
     const findings = [...review.findings, ...reviewUnrecognizedFields(review.manifest, keepFields)];
@@ -336,7 +340,7 @@ async function packAndClean(
     const finalBytes = await readFile(finalTarball);
     const published = readArchive(finalBytes);
     const finalFiles = packageFiles(published);
-    assertSameEntries(packageFiles(packed), finalFiles);
+    assertSameEntries(packedNames, finalFiles);
     assertPreservedArchive(packed, published);
     // Everything that collects findings runs inside the `finally`, so a guard that STOPS the run
     // cannot also silence what was already found. Without it, a package carrying a leaked key and

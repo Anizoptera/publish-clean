@@ -4,12 +4,14 @@
  * The proof that authorises every rewrite here lives in `src/conditions.ts`: a map flattens to a
  * decision list, and two maps are equivalent when every jointly satisfiable pair of rows agrees.
  * This file owns the policy on top of it — the canonical condition order and which parts of it a
- * measurement actually forces, the messages, and the repairs. Every transformation is verified
- * with `equivalent` against the value it replaces.
+ * measurement actually forces, the messages, and the repairs. Every transformation is verified with
+ * `equivalent` against the value it replaces — except `repairTypes`, the one rewrite that INTENDS a
+ * difference and therefore states its own warrant instead of borrowing that proof.
  *
  * Ambient inputs arrive as parameters — no process, filesystem or argv here.
  */
 import { equivalent, reachableByAnyConsumer, ROW_BUDGET, rowsOf } from "./conditions";
+import { checkerFinds } from "./declared";
 import type { Consequence, Finding } from "./finding";
 import { isObject } from "./json";
 import type { JsonObject } from "./json";
@@ -114,14 +116,12 @@ function isKnown(name: string): boolean {
  * of `node` — which is the author ranking a bundler above a runtime, the call this function exists
  * to leave alone.
  *
- * What the losing key would have given the consumer then decides the consequence, and two losses
- * cost nothing a publish should be refused over:
+ * What the losing key would have given the consumer then decides the consequence. One loss is
+ * already repaired before this runs and one costs nothing a publish should be refused over:
  *
- * - `types` names a file nobody executes. A checker that misses it resolves the JS target instead
- *   and reads the `.d.ts` sitting beside it, which is why 80 of the 103 packages this rule fired
- *   on across 3674 installed names type-check correctly today. The remaining 23 hand a checker no
- *   declarations at all, a smaller loss than `exports-unresolvable` — a consumer resolving NOTHING
- *   — which this tool already reports as a warning.
+ * - `types` names a file nobody executes, and `repairTypes` owns it: a checker that misses the key
+ *   resolves the JS target and reads the `.d.ts` sitting beside it, so the loss exists only where
+ *   no such declaration ships, and there the key is hoisted rather than reported here.
  * - `module` losing to `import` hands a bundler the ESM entry point meant for Node rather than the
  *   ESM build meant for bundlers. A tuned variant, not another module system. Losing it to
  *   `require` is the opposite and stays fatal: that one serves CJS where ESM was available.
@@ -155,8 +155,14 @@ function forcedOrderConsequence(node: JsonObject): Consequence | undefined {
       // condition map key ORDER is semantic, so two subtrees agree exactly when they agree
       // key-for-key in sequence.
       if (JSON.stringify(subtree) === JSON.stringify(node[loser])) continue;
-      if (later === conditionRank("types") || (loser === "module" && winner === "import"))
-        worst ??= "waste";
+      // A `types` loser belongs to `repairTypes`, which has already run: it removed the branch when
+      // nothing fulfils it and hoisted it when the archive's declarations were unreachable. What
+      // survives is a map where a checker DOES reach declarations — beside the winner's target, or
+      // beside a sibling's, which is the case hoisting cannot repair without taking that sibling's
+      // answer away. `types` first wins for EVERY checker, so there is no position that serves the
+      // consumer who has nothing without changing the one who already has something.
+      if (later === conditionRank("types")) continue;
+      if (loser === "module" && winner === "import") worst ??= "waste";
       else return "breaks";
     }
   return worst;
@@ -202,6 +208,123 @@ function without(node: JsonObject, omit: string): JsonObject {
     node,
     Object.keys(node).filter((key) => key !== omit),
   );
+}
+
+/** Every string a consumer could resolve through this node. Arrays cannot occur: a node holding one
+ * anywhere below is frozen whole before the repair pass reaches it. */
+function leaves(node: unknown, out: string[] = []): string[] {
+  if (typeof node === "string") out.push(node);
+  else if (isObject(node)) for (const value of Object.values(node)) leaves(value, out);
+  return out;
+}
+
+/**
+ * Repairs a `types` condition no type checker can read declarations through — the ONE rewrite in
+ * this file that deliberately changes what a consumer resolves.
+ *
+ * It is kept out of `healNode`, and out of the equivalence assert in `reviewExports` that guards
+ * it, because the whole value of that assert is having nothing to excuse: every rewrite it covers
+ * is invisible to every consumer that could ever exist, and one intended exception smuggled in
+ * among them would make it a formality. Here the change IS the repair, so it carries its own
+ * warrant instead.
+ *
+ * Only a type checker activates `types`, which is what makes both moves invisible to everything
+ * that EXECUTES the package. Which one applies follows from a single fact about the archive —
+ * what a checker actually finds at a target (`checkerFinds`):
+ *
+ * - the target names JavaScript with no declaration file beside it, so the branch promises an API
+ *   the archive does not carry and a checker reads that JavaScript as the package's declarations,
+ *   typing everything `any`. The promise is REMOVED, and the checker then reports an untyped
+ *   package — true, and actionable, where an invented API is neither.
+ * - the target names real declarations that a key ahead of it hides, and nothing that key offers a
+ *   checker carries declarations either, so what the author built is unreachable by anybody. The
+ *   key is HOISTED to the front of its own object.
+ *
+ * Where the key ahead DOES lead to declarations nothing is moved: the checker already has an API,
+ * the adjacent declarations may legitimately differ per module format, and exchanging one working
+ * answer for another is not a repair. That is the majority — 80 of the 103 packages the ordering
+ * rule fired on across 3674 installed published names type-check correctly today through exactly
+ * that fallback.
+ *
+ * The hoist may move `types` across a condition this tool does not recognise, which `canonicalOrder`
+ * refuses to do. The reason that refusal exists is the DIFF — an author cannot review a move this
+ * tool cannot explain — and here it can: the finding names every key the move passed, and each was
+ * checked to lead a checker nowhere.
+ *
+ * Both report `breaks`, because a consumer getting the wrong API or none is a breakage, and both
+ * print `[error]` however mild the word "types" sounds. Neither aborts: the published artifact is
+ * correct. `--no-heal` withholds the rewrite and turns both findings fatal, which is the only
+ * reading of that flag — the author asked to publish their own bytes unaltered.
+ */
+function repairTypes(
+  node: unknown,
+  where: string,
+  findings: Finding[],
+  names: ReadonlySet<string>,
+): unknown {
+  const typeKey = (key: string): boolean => conditionRank(key) === conditionRank("types");
+
+  const hoist = (value: JsonObject, keys: readonly string[], at: string): JsonObject => {
+    const hidden = keys.filter(typeKey);
+    if (hidden.length === 0 || typeKey(keys[0] ?? "")) return value;
+    const ahead = keys.slice(0, keys.indexOf(hidden[0] ?? ""));
+    // A key stranded behind `default` is `reportReachability`'s, which has already named it — the
+    // same split `forcedOrderConsequence` keeps. Hoisting it too would leave the run holding two
+    // findings about one key, one of them saying it is dead after this made it live.
+    if (ahead.includes("default")) return value;
+    const reached = (key: string): boolean =>
+      leaves(value[key]).some((target) => checkerFinds(names, target) === "declarations");
+    if (ahead.some(reached)) return value;
+    findings.push({
+      rule: "types-branch-unreachable",
+      consequence: "breaks",
+      healed: true,
+      where: at,
+      message:
+        `${hidden.map((key) => JSON.stringify(key)).join(", ")} sits behind ` +
+        `${ahead.map((key) => JSON.stringify(key)).join(", ")}, and a type checker activates those ` +
+        `too, so it takes one of them and finds no declarations there or beside them — the ` +
+        `declarations this branch names reach nobody. Moved to the front of this object in the ` +
+        `published manifest; no runtime activates "types", so nothing that executes your package ` +
+        `can tell. Put "types" first in your package.json to stop this report.`,
+    });
+    return reorder(value, [...hidden, ...keys.filter((key) => !typeKey(key))]);
+  };
+
+  // `undefined` means "delete this key": the branch promises declarations that do not exist.
+  const visit = (value: unknown, at: string, inside: boolean): unknown => {
+    if (typeof value === "string") {
+      if (!inside || checkerFinds(names, value) !== "javascript") return value;
+      findings.push({
+        rule: "types-branch-not-declarations",
+        consequence: "breaks",
+        healed: true,
+        where: at,
+        message:
+          `This "types" condition resolves to ${JSON.stringify(value)}, which is not a declaration ` +
+          `file and has none shipped beside it, so a checker taking this branch reads JavaScript as ` +
+          `the package's API. Removed from the published manifest, which leaves a checker reporting ` +
+          `an untyped package instead of the wrong one. Build the declarations and point the branch ` +
+          `at them, or delete the condition yourself to stop this report.`,
+      });
+      return undefined;
+    }
+    if (!isObject(value)) return value;
+    const rebuilt: JsonObject = {};
+    let changed = false;
+    for (const [key, child] of Object.entries(value)) {
+      const kept = visit(child, `${at}[${JSON.stringify(key)}]`, inside || typeKey(key));
+      changed ||= kept !== child;
+      if (kept !== undefined) Object.defineProperty(rebuilt, key, { ...OWN, value: kept });
+    }
+    // An object emptied by the pruning above promises nothing either, so the key holding it goes
+    // the same way. One that arrived empty is the author's own "not exported" and stays.
+    const keys = Object.keys(rebuilt);
+    if (keys.length === 0 && Object.keys(value).length > 0) return undefined;
+    return hoist(changed ? rebuilt : value, keys, at);
+  };
+
+  return containsArray(node) ? node : visit(node, where, false);
 }
 
 /**
@@ -325,12 +448,11 @@ function healNode(node: unknown, where: string, findings: Finding[]): unknown {
                 `module even under require, and Bun and Deno both activate node, the current ` +
                 `order hands at least one of them a file meant for another. Fix it by hand: the ` +
                 `branches differ, so only you know which target each consumer should get.`
-              : `What is out of place here costs no consumer another runtime's build: it either ` +
-                `names declarations, which a type-checker reads from the JS target's adjacent ` +
-                `.d.ts when this map does not offer them, or names a bundler's ESM variant ` +
-                `losing to the ESM entry point beside it. Fix it by hand — the branches differ, ` +
-                `so only you know which target each consumer should get — or use --strict to ` +
-                `refuse a publish over it.`),
+              : `What is out of place here costs no consumer another runtime's build: "module" is ` +
+                `a bundler's tuned ESM variant losing to the ESM entry point beside it, so both ` +
+                `sides of the inversion are ES modules. Fix it by hand — the branches differ, so ` +
+                `only you know which target each consumer should get — or use --strict to refuse ` +
+                `a publish over it.`),
         });
     }
   }
@@ -458,9 +580,11 @@ export interface ExportsReview {
  * The input is never modified, and `manifest` is the input object itself when nothing changed, so
  * a caller can tell a real repair from a copy by identity.
  *
- * Each repaired node is asserted equivalent to the one it replaces before it is returned, so a
- * defect in any transformation above fails HERE, naming itself as this tool's bug, rather than in
- * a stranger's build.
+ * Each neutrally repaired node is asserted equivalent to the one it replaces before it is returned,
+ * so a defect in any transformation above fails HERE, naming itself as this tool's bug, rather than
+ * in a stranger's build. `repairTypes` is the one rewrite that intends a difference, which is why it
+ * runs outside that assert and states its own warrant — `files` is the archive's packed names, the
+ * only evidence it acts on.
  *
  * This is the ONLY funnel a rewrite passes through, and `cli.ts` then proves the archive's manifest
  * is byte-identical to the cleaned one — so re-resolving every subpath after the rewrite would
@@ -471,8 +595,11 @@ export interface ExportsReview {
  * `heal: false` keeps every finding and withholds only the rewrite, which is why those findings
  * are corrected to stop claiming a repair the published artifact does not carry.
  */
-export function reviewExports(pkg: JsonObject, options: { readonly heal: boolean }): ExportsReview {
-  const { heal } = options;
+export function reviewExports(
+  pkg: JsonObject,
+  options: { readonly files: ReadonlySet<string>; readonly heal: boolean },
+): ExportsReview {
+  const { files, heal } = options;
   const findings: Finding[] = [];
   const analyse = (node: unknown, where: string): unknown => {
     // A map whose outcomes cannot be enumerated is frozen whole, exactly as one containing a
@@ -482,8 +609,12 @@ export function reviewExports(pkg: JsonObject, options: { readonly heal: boolean
     // reporting a defect in this tool for a package that is merely large.
     if (!reportReachability(node, where, findings)) return node;
     const first = findings.length;
-    const healed = healNode(node, where, findings);
-    if (!equivalent(node, healed))
+    // The one deliberate semantic change, taken BEFORE the neutral rewrites so they see the map a
+    // consumer will actually resolve — a removed branch can leave the rest in canonical order, and
+    // a hoisted one can make another key provably inert.
+    const repaired = repairTypes(node, where, findings, files) ?? {};
+    const healed = healNode(repaired, where, findings);
+    if (!equivalent(repaired, healed))
       throw new Error(
         `publish-clean defect: repairing ${where} changed what a consumer resolves. This is a ` +
           `bug in publish-clean, not in your package; publish with --no-heal meanwhile.`,

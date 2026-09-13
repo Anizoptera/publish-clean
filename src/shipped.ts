@@ -10,7 +10,7 @@
  */
 import { Script } from "node:vm";
 
-import { collectDeclaredPaths, normalizeDeclaredPath } from "./declared";
+import { collectDeclaredPaths, DECLARATION, normalizeDeclaredPath, SCRIPT } from "./declared";
 import { rowsOf } from "./conditions";
 import type { Finding } from "./finding";
 import { countOf } from "./finding";
@@ -21,8 +21,6 @@ import { foldName } from "./packed-names";
 
 /** `declare module "name"` — the name a checker matches instead of resolving through `exports`. */
 const AMBIENT_MODULE = /\bdeclare\s+module\s+("|')([^"']+)\1/g;
-const DECLARATION = /\.d\.[cm]?ts$/;
-const SCRIPT = /\.[cm]?[jt]sx?$/;
 
 /**
  * Files that are unreachable by nature and still earn their bytes. Documentation is read by a
@@ -250,30 +248,6 @@ function entry(files: ReadonlyMap<string, Buffer>, target: string): Buffer | und
 }
 
 /**
- * Whether a type checker still reads the authored API from a `types` target that is not itself a
- * declaration file.
- *
- * Two ways it does, and between them they account for every package the extension test alone
- * refused across 3674 installed published names. A TypeScript SOURCE is read directly — the checker
- * takes the full authored API from it, which is what `get-tsconfig` and `resolve-pkg-maps` ship.
- * A JavaScript target falls back to the declaration file sitting beside it, the same fallback that
- * keeps a misplaced `types` condition working: `xstate` points the branch at `dist/xstate.cjs.mjs`
- * and ships `dist/xstate.cjs.d.mts` next to it, `react-resizable-panels` does the same with a
- * `.d.ts`.
- *
- * The fallback is the CORROBORATION that makes the rule sound rather than a loophole in it. A
- * declaration that really ships beside the target is independent evidence the author built one and
- * wired the branch to its sibling; with no declaration anywhere near it, the checker has nothing
- * but the JavaScript and the refusal stands. All three suffixes count, because this rule ABORTS and
- * a checker that accepts one this tool did not predict must not cost a working package its release.
- */
-function readableAsTypes(files: ReadonlyMap<string, Buffer>, target: string): boolean {
-  if (/\.[cm]?tsx?$/.test(target)) return true;
-  const base = target.replace(SCRIPT, "");
-  return [".d.ts", ".d.mts", ".d.cts"].some((suffix) => entry(files, base + suffix) !== undefined);
-}
-
-/**
  * Reports what the files an `exports` branch names turn out to be.
  *
  * These are the defects a source-directory linter cannot see, because each is a disagreement
@@ -282,24 +256,6 @@ function readableAsTypes(files: ReadonlyMap<string, Buffer>, target: string): bo
 export function reviewShippedFiles(pkg: JsonObject, files: ReadonlyMap<string, Buffer>): Finding[] {
   const findings: Finding[] = [];
   const maps = [pkg.exports, pkg.imports];
-
-  // A `types` branch that does not name a declaration file hands the checker something else to
-  // read as declarations — usually the JavaScript beside it, which types the whole package `any`.
-  const typeTargets: string[] = [];
-  for (const map of maps) targetsUnder(map, "types", typeTargets);
-  for (const target of new Set(typeTargets))
-    if (!DECLARATION.test(target) && SCRIPT.test(target) && !readableAsTypes(files, target))
-      findings.push({
-        rule: "types-branch-not-declarations",
-        consequence: "breaks",
-        healed: false,
-        where: `exports "types" -> ${target}`,
-        message:
-          `A "types" condition must resolve to a declaration file (.d.ts, .d.mts or .d.cts); ` +
-          `this one resolves to ${JSON.stringify(target)}. A type checker takes this branch and ` +
-          `reads that file as the package's declarations, so every consumer sees the wrong API ` +
-          `or none. Point the branch at the declaration file built beside it.`,
-      });
 
   // A `require` branch must name a file `require()` can actually load.
   const requireTargets: string[] = [];

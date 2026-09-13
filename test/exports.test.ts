@@ -14,6 +14,7 @@
 import { expect, it } from "vitest";
 import { equivalent } from "../src/conditions";
 import { reviewExports } from "../src/exports";
+import { isFatal, publishRefusal } from "../src/finding";
 import { isObject } from "../src/json";
 
 const NAMES = ["types", "node", "browser", "import", "require", "module", "custom"] as const;
@@ -120,8 +121,9 @@ it("never treats a fallback array as interchangeable with anything but itself", 
   expect(equivalent({ node: ["./a.js"], default: ["./a.js"] }, { default: ["./a.js"] })).toBe(true);
 });
 
-function heal(pkg: Record<string, unknown>, enabled = true) {
-  const { manifest, findings } = reviewExports(pkg, { heal: enabled });
+/** `ships` is the archive's packed names, which only the `types` repairs consult. */
+function heal(pkg: Record<string, unknown>, enabled = true, ships: readonly string[] = []) {
+  const { manifest, findings } = reviewExports(pkg, { files: new Set(ships), heal: enabled });
   return { findings, result: manifest, rules: findings.map((finding) => finding.rule) };
 }
 
@@ -137,25 +139,82 @@ it("repairs only what it can prove, and proves what it repaired", () => {
   );
 });
 
+it("repairs a types branch no checker can read, and leaves every working one alone", () => {
+  const find = (result: ReturnType<typeof heal>, rule: string) =>
+    result.findings.find((finding) => finding.rule === rule);
+  const subpath = (result: ReturnType<typeof heal>) =>
+    (result.result.exports as Record<string, unknown>)["."];
+
+  // Nothing named `index.d.*` ships, so the branch promises an API the archive does not carry. The
+  // promise goes; what the package does at RUN time must not move, so `default` stays untouched.
+  const dead = heal({ exports: { ".": { types: "./index.js", default: "./index.js" } } }, true, [
+    "index.js",
+  ]);
+  // `{default: X}` is X written longer, and the neutral rewrites see the pruned map because the
+  // repair runs first — so one report collapses the wrapper the other left behind.
+  expect(subpath(dead)).toEqual("./index.js");
+  // An error the author must act on, and not a refusal: the published artifact no longer lies.
+  expect(find(dead, "types-branch-not-declarations")?.consequence).toBe("breaks");
+  expect(isFatal(find(dead, "types-branch-not-declarations")!, false)).toBe(false);
+  expect(publishRefusal(dead.findings, false)).toBeNull();
+
+  // `--no-heal` publishes the author's own bytes, so the same defect must stop the run instead.
+  const withheld = heal(
+    { exports: { ".": { types: "./index.js", default: "./index.js" } } },
+    false,
+  );
+  expect(subpath(withheld)).toEqual({ types: "./index.js", default: "./index.js" });
+  expect(isFatal(find(withheld, "types-branch-not-declarations")!, false)).toBe(true);
+
+  // Real declarations that `import` hides: a checker activates both, takes `./m.js`, and finds no
+  // `m.d.*` beside it — so what the author built reaches nobody. Hoisting is invisible to every
+  // runtime, because no runtime activates `types`.
+  // `default` carries a target of its own throughout: without it a `require` consumer resolves
+  // nothing, and sharing `import`'s target would make `import` provably inert — two other rules
+  // firing on the same specimen, either of which would mask what this one is measuring.
+  const shadowed = { ".": { import: "./m.js", types: "./t.d.ts", default: "./d.js" } };
+  const hidden = heal({ exports: shadowed }, true, ["m.js"]);
+  expect(Object.keys(subpath(hidden) as Record<string, unknown>)).toEqual([
+    "types",
+    "import",
+    "default",
+  ]);
+  expect(isFatal(find(hidden, "types-branch-unreachable")!, false)).toBe(false);
+
+  // The same map, one file different: `m.d.ts` ships, so the checker already has an API through the
+  // adjacent-declaration fallback. Moving `types` would hand it `./t.d.ts` instead — a different
+  // answer, possibly a worse one for this module format — so nothing is touched and nothing is said.
+  const working = heal({ exports: shadowed }, true, ["m.js", "m.d.ts"]);
+  expect(Object.keys(subpath(working) as Record<string, unknown>)).toEqual([
+    "import",
+    "types",
+    "default",
+  ]);
+  expect(working.rules).toEqual([]);
+
+  // A TypeScript source is read directly, and a non-script target is out of this rule's measured
+  // scope — neither may be rewritten on a guess about what the author meant.
+  const kept = (target: string) => subpath(heal({ exports: { ".": { types: target } } }));
+  expect(kept("./src/index.ts")).toEqual({ types: "./src/index.ts" });
+  expect(kept("./schema.json")).toEqual({ types: "./schema.json" });
+
+  // Stranded behind `default`, the key is no consumer's to reach, which makes it provably inert —
+  // so the neutral rewrites delete it and collapse what is left. Hoisting it instead would make it
+  // live, and leave the reachability finding claiming it is dead: one key, two contradictory
+  // reports, and a rewrite nobody asked for in place of a repair that needs no warrant at all.
+  const stranded = heal({ exports: { ".": { default: "./d.js", types: "./t.d.ts" } } });
+  expect(subpath(stranded)).toEqual("./d.js");
+  expect(stranded.rules).not.toContain("types-branch-unreachable");
+});
+
 it("reorders toward the canonical order only when the permutation is provably neutral", () => {
-  // Both branches carry the same target, so no consumer can observe which key it matched.
-  const safe = heal({ exports: { ".": { import: "./m.js", types: "./m.js" } } });
+  // Both branches carry the same target, so no consumer can observe which key it matched. The
+  // declaration beside that target keeps `repairTypes` out of it — this case is about the neutral
+  // permutation, and a repair running first would decide the order before the permutation is tried.
+  const safe = heal({ exports: { ".": { import: "./m.js", types: "./m.js" } } }, true, ["m.d.ts"]);
   expect(safe.rules).toContain("exports-condition-order");
   const subpath = (safe.result.exports as Record<string, unknown>)["."] as Record<string, unknown>;
   expect(Object.keys(subpath)).toEqual(["types", "import"]);
-
-  // Hoisting `types` here would CHANGE what a checker resolves — node16 ESM activates `types`
-  // and `import` at once, so it takes `./m.js` today and would take `./t.d.ts` after the move.
-  // That is why types-not-first is a real defect and why this tool refuses to repair it: the
-  // fix is a semantic change and only the author knows which file each consumer should get. It
-  // is not fatal, because the checker reaching `./m.js` then reads the `.d.ts` beside it.
-  const unsafe = heal({
-    exports: { ".": { import: "./m.js", types: "./t.d.ts", default: "./m.js" } },
-  });
-  expect(unsafe.rules).toContain("exports-condition-order-unsafe");
-  expect(
-    unsafe.findings.find((f) => f.rule === "exports-condition-order-unsafe")?.consequence,
-  ).toBe("waste");
 
   // `module` losing to the ESM entry point beside it costs a bundler the build tuned for it and
   // nothing more, so this one is reported rather than refused.

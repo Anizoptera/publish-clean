@@ -69,6 +69,53 @@ export function normalizeDeclaredPath(declared: string): null | string {
   return normalized;
 }
 
+export const DECLARATION = /\.d\.[cm]?ts$/;
+export const SCRIPT = /\.[cm]?[jt]sx?$/;
+
+/**
+ * What a type checker reading this target as declarations actually gets.
+ *
+ * Three answers rather than a yes/no, because `src/exports.ts` asks two different questions of the
+ * same target and a boolean would force a second extension test at one of the call sites that could
+ * then disagree with this one. Removing a `types` branch needs `javascript` — a target the checker
+ * reads as the package's API when it is nothing of the kind. Deciding whether a key AHEAD of `types`
+ * hides it needs `declarations`, and for that purpose `other` groups with `javascript`: a `.wasm` or
+ * `.json` target hides a `types` key exactly as a `.js` one does.
+ *
+ * `other` is never rewritten. A non-script target under `types` may well be an author error, but it
+ * has no corpus measurement behind it, and this answer authorises a change to a published manifest —
+ * a fabricated rewrite is worse than a fabricated refusal, because nothing downstream reviews it.
+ *
+ * Two ways a target that is not itself a declaration file still qualifies, and between them they
+ * account for every package the extension test alone refused across 3674 installed published names.
+ * A TypeScript SOURCE is read directly — the checker takes the full authored API from it, which is
+ * what `get-tsconfig` and `resolve-pkg-maps` ship. A JavaScript target falls back to the declaration
+ * file sitting beside it, which is why `xstate` works while pointing the branch at
+ * `dist/xstate.cjs.mjs` and shipping `dist/xstate.cjs.d.mts` next to it, and
+ * `react-resizable-panels` does the same with a `.d.ts`.
+ *
+ * That fallback is the CORROBORATION that makes the rule sound rather than a loophole in it: a
+ * declaration that really ships beside the target is independent evidence the author built one and
+ * wired the branch to its sibling. With none anywhere near it, the checker has nothing but the
+ * JavaScript and the branch is a promise the archive does not keep. All three suffixes count — a
+ * checker that accepts one this tool did not predict must not cost the author a rewrite of a branch
+ * that already works.
+ */
+export function checkerFinds(
+  packed: ReadonlySet<string>,
+  target: string,
+): "declarations" | "javascript" | "other" {
+  if (DECLARATION.test(target)) return "declarations";
+  if (!SCRIPT.test(target)) return "other";
+  if (/\.[cm]?tsx?$/.test(target)) return "declarations";
+  const base = target.replace(SCRIPT, "");
+  const beside = [".d.ts", ".d.mts", ".d.cts"].some((suffix) => {
+    const name = normalizeDeclaredPath(base + suffix);
+    return name !== null && packed.has(name);
+  });
+  return beside ? "declarations" : "javascript";
+}
+
 /** Node replaces every target star with the same subpath, including slashes. */
 function matchesTarget(file: string, pattern: string): boolean {
   const parts = pattern.split("*");

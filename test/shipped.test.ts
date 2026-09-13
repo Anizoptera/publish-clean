@@ -217,35 +217,6 @@ describe.concurrent("a manifest branch pointing at the wrong kind of file", () =
   const rules = (pkg: JsonObject, sources: Record<string, string>) =>
     reviewShippedFiles(pkg, asFiles(sources)).map((finding) => finding.rule);
 
-  it("reports a types branch that hands a checker something other than declarations", () => {
-    // The consumer-visible effect is silent: the checker reads the JavaScript beside it and types
-    // the whole package `any`, so nobody sees an error anywhere.
-    expect(
-      rules({ exports: { ".": { types: "./index.js", default: "./index.js" } } }, {}),
-    ).toContain("types-branch-not-declarations");
-    // One character of difference, same position: the branch that is correct must stay silent.
-    expect(
-      rules({ exports: { ".": { types: "./index.d.ts", default: "./index.js" } } }, {}),
-    ).toEqual([]);
-    // A non-script target is somebody else's concern, not a mislabelled declaration file.
-    expect(rules({ exports: { ".": { types: "./schema.json" } } }, {})).toEqual([]);
-  });
-
-  it("stays silent where a checker still reads the authored API", () => {
-    // A TypeScript SOURCE is read directly — the checker takes the full authored API from it.
-    // `get-tsconfig` and `resolve-pkg-maps` both point the branch at `./src/index.ts`.
-    expect(rules({ exports: { ".": { types: "./src/index.ts" } } }, {})).toEqual([]);
-
-    // A JavaScript target falls back to the declaration beside it, which is why `xstate` works
-    // while pointing the branch at `dist/xstate.cjs.mjs`. The declaration has to really SHIP: that
-    // is the corroboration, not a loophole.
-    const types = { exports: { ".": { types: "./dist/x.mjs", default: "./dist/x.mjs" } } };
-    expect(rules(types, { "dist/x.d.mts": "export {};\n" })).toEqual([]);
-    expect(rules(types, { "dist/x.mjs": "export const a = 1;\n" })).toContain(
-      "types-branch-not-declarations",
-    );
-  });
-
   it("reports a require branch whose file require() cannot load", () => {
     // Judged by Node's own parser rather than by a pattern, so these are the forms that really
     // throw: ESM syntax, and — on every Node version — top-level await.
