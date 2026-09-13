@@ -7,8 +7,10 @@
  *     bun scripts/mutate.ts frontier     only the rows whose name contains "frontier"
  *     bun scripts/mutate.ts --dry-run    plant nothing; report which patterns still match
  *
- * Nothing runs this automatically and nothing should: it is one full suite run per row, which is
- * minutes, and it answers a question asked when a guard is WRITTEN rather than on every commit.
+ * Nothing runs this automatically and nothing should: it is at least one suite run per row, and it
+ * answers a question asked when a guard is WRITTEN rather than on every commit. Run `--dry-run`
+ * after any rename — it reports pattern rot in milliseconds, and a row that lost its subject is a
+ * guard nobody is proving.
  *
  * Do nothing else in this tree while it runs. Each row leaves the source damaged for the length of
  * one suite run, so a commit landing in that window fails its hook on a file nobody edited —
@@ -40,14 +42,15 @@
  * `finally` cannot.
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 
 /**
- * A run reaching this bound is a HANG, not a slow machine: the suite passes in ~2s on 5.5 cores, so
- * this leaves roughly an order of magnitude even for a cold cache on one slow core.
+ * A run reaching this bound is a HANG, not a slow machine: the whole suite passes in under 2s and a
+ * single companion file in well under one, so this leaves more than an order of magnitude even for
+ * a cold cache on one slow core.
  *
  * Keep it tight. The rows that reach it are the ones whose mutation removes a resource bound, and
  * those diverge combinatorially rather than merely slowly — every such row pays this in full, so a
@@ -341,7 +344,7 @@ const MUTATIONS: readonly Mutation[] = [
   {
     name: "exports: declarations nothing can reach are left unreachable",
     file: "src/exports.ts",
-    from: /if \(hidden\.length === 0 \|\| typeKey\(keys\[0\] \?\? ""\)\) return value;/,
+    from: /if \(hidden\.length === 0 \|\| isTypesCondition\(keys\[0\] \?\? ""\)\) return value;/,
     to: "return value;",
   },
   {
@@ -701,8 +704,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const)
  * a detail of it. A spawn that never produced a run at all is an instrument failure and throws —
  * reporting it as a verdict would mark every row killed and read as a suite in perfect health.
  */
-function runSuite(): "passed" | "failed" | "stopped" {
-  const run = spawnSync("bun", ["run", "test"], {
+function runSuite(only?: string): "passed" | "failed" | "stopped" {
+  const run = spawnSync("bun", ["run", "test", ...(only === undefined ? [] : [only])], {
     cwd: ROOT,
     timeout: SUITE_TIMEOUT_MS,
     killSignal: "SIGKILL",
@@ -711,6 +714,26 @@ function runSuite(): "passed" | "failed" | "stopped" {
   if (run.signal !== null) return "stopped";
   if (run.status === null) throw run.error ?? new Error("The suite produced no exit status.");
   return run.status === 0 ? "passed" : "failed";
+}
+
+/**
+ * The test file named after the mutated source, when the repository has one.
+ *
+ * Only ever an OPTIMISATION, and sound because the two answers are asymmetric: a RED companion is
+ * already a red suite and decides a kill outright, while a GREEN one decides nothing and must ask
+ * the remaining files. So the verdict set is identical to running everything every time — the only
+ * thing that changes is how long the common case takes, and nearly every row is killed.
+ *
+ * Worth the indirection because the suite's cost is concentrated rather than spread: `cli.test.ts`
+ * drives real pack pipelines and is 1.46s of its 1.74s, so a row in `src/exports.ts` was paying for
+ * the one file it cannot reach, 86 times over. Measured 2.33s -> 0.47s per row.
+ *
+ * Never narrow this to skip the escalation. A kill that only `cli.test.ts` can make would then read
+ * as SURVIVED, which is the reading this whole harness exists to produce honestly.
+ */
+function companionTest(file: string): string | undefined {
+  const name = `test/${path.basename(file, ".ts")}.test.ts`;
+  return existsSync(path.join(ROOT, name)) ? name : undefined;
 }
 
 const VERDICT = {
@@ -747,7 +770,9 @@ for (const mutation of selected) {
   try {
     damaged = { file: target, original };
     writeFileSync(target, mutated);
-    results.push(`${VERDICT[runSuite()]} ${mutation.name}`);
+    const companion = companionTest(mutation.file);
+    const near = companion === undefined ? ("passed" as const) : runSuite(companion);
+    results.push(`${VERDICT[near === "passed" ? runSuite() : near]} ${mutation.name}`);
   } finally {
     restore();
   }
