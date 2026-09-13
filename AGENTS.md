@@ -106,7 +106,17 @@
   heal what can be healed safely, report it as an error, and do not abort). Its warrant is that only
   a type CHECKER activates `types`, so nothing that executes the package can observe either move, and
   the archive decides both: a branch resolving to JavaScript with no declaration beside it is removed,
-  and declarations no key can reach are hoisted to the front. It lives beside `healNode` rather than
+  and declarations no key can reach are hoisted to the front. Every question it asks is answered from
+  the packed names, so DOUBT SUPPRESSES and each guard names the package whose absence damaged it: a
+  target the archive does not carry belongs to `reviewDeclaredFiles`, which names the missing path
+  (`@drizzle-team/brocli` writes `./index.d.cjs` for the `./index.d.cts` it ships); an unrecognised
+  condition ahead is never crossed, the same rule `canonicalOrder` keeps (`zod` leads with
+  `@zod/source` pointing at TypeScript it does not ship, so the archive reads "leads nowhere" while a
+  checker configured with that condition is meant to take it); and a hoist needs the hidden branch to
+  reach declarations that really ship (`svgo@3.3.2` names `./types/lib/svgo-node.d.ts` and ships no
+  `types/`). Measured over 6573 installed published packages, 400 carry a `types` key behind another
+  key and 18 are rewritten — a rule that fired on the rest would be a reordering pass, not judgement.
+  It lives beside `healNode` rather than
   inside it precisely so the equivalence assert keeps having nothing to excuse — that assert is worth
   having only while every rewrite it covers is invisible to every consumer, and one intended exception
   smuggled among them makes it a formality. Do not add a second semantic rewrite without the same

@@ -277,10 +277,12 @@ what makes them the instrument for it.
 The table above counts rules that only cost bytes. The question for a rule that REFUSES a publish is
 different — not how often it fires but whether every package it stops is really broken — and the only
 instrument that answers it is the corpus: drive the real reviewers over every installed package tree,
-then read the manifest of each one refused. Measured over 3633 of them, four rules refuse at all, and
-between them they stop 18 packages: a `require` branch resolving to ES module syntax (9), a
+then read the manifest of each one refused. Measured over 3633 of them, four rules refused at all,
+and between them they stopped 18 packages: a `require` branch resolving to ES module syntax (9), a
 self-reference to an unexposed subpath (4), a `types` branch with no declaration near its target (3),
-and a `bin` entry with no shebang (2). Each was read by hand and is a real defect —
+and a `bin` entry with no shebang (2). The third of those no longer refuses — it is repaired, see the
+next section — which changes nothing about how the others were judged. Each was read by hand and is a
+real defect —
 `@sqlite.org/sqlite-wasm` declares a command whose first line is `import fs from 'fs'`. Expect to
 find fabricated refusals when you run this, not to confirm their absence: every rule above was
 measured this way and every one of them was refusing correct packages.
@@ -289,6 +291,39 @@ Two things follow. Every waste rule here fires on single-digit percentages, so n
 justify risk — which is why each is gated by the equivalence proof rather than by a style argument.
 And dropping a redundant condition saves roughly thirty bytes: the manifest is not where the waste
 is, the shipped files are, by three orders of magnitude.
+
+## The one rewrite that changes what a consumer resolves
+
+Every other rewrite in this tool is proved neutral: the map after resolves as the map before, for
+every consumer that could exist. `repairTypes` does not, and its warrant is narrower than a proof —
+only a type CHECKER activates `types`, so nothing that executes the package can observe either move.
+It removes a `types` branch that resolves to JavaScript with no declaration beside it, and it hoists
+declarations no key can reach to the front. Both report `breaks` and neither aborts: what ships is
+correct, and what the author wrote is not.
+
+That warrant covers the mechanism, not the evidence, and the evidence is the archive. Whether a
+branch "leads to declarations" is a question about packed names, so where the archive cannot answer
+it the repair declines — the asymmetry being that a fabricated refusal stops an author who then
+looks, while a fabricated rewrite ships with nothing downstream reviewing it. Three specimens, each
+of which damaged something before its guard existed:
+
+| specimen | what it writes | why nothing moves |
+| --- | --- | --- |
+| `@drizzle-team/brocli` | `./index.d.cjs` for the `./index.d.cts` it ships | a target the archive lacks is a MISSING FILE, and `reviewDeclaredFiles` names it; deleting the branch would delete that report's subject, and the author needs the typo named |
+| `zod` | `@zod/source` first at every subpath, pointing at TypeScript it does not ship | the archive reads that as "leads nowhere" while a checker configured with the condition is meant to take it; hoisting hands it the built `.d.cts` instead of the source |
+| `svgo@3.3.2` | `./types/lib/svgo-node.d.ts`, with no `types/` in the package | a dead path moved to the front is where every checker then looks first; `svgo@4.0.0` ships those declarations and IS repaired |
+
+Measured over 6573 installed published packages (control: 756 of 756 declared `bin` paths resolve in
+the file map, which is what proves the map is keyed the way the reviewer reads it), 400 carry a
+`types` key behind another key — the entire population this rule can see — and 18 are rewritten. Read
+that ratio, not the count: a rule that fired on most of the 400 would be a reordering pass wearing a
+judgement's clothes. Run both halves before changing anything here. A count of what it touches cannot
+tell a repair from a fabrication, and neither can any test in this repository.
+
+There is one shape left deliberately silent, and it is silent because no answer serves everyone: a
+map where one key ahead of `types` leads to declarations and another does not. `types` first wins for
+EVERY checker, so any position that gives the consumer who has nothing takes from the consumer who
+already has something. Reporting it would be noise on a map nobody can improve.
 
 ## When a key out of canonical order is not a defect
 
