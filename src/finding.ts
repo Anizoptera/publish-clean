@@ -64,12 +64,6 @@ export interface Finding {
 }
 
 /**
- * How bad the defect is — and nothing else. Repairing one does not make it milder: the defect is
- * still in the author's source, and only the published artifact was corrected. Keeping severity
- * independent of what this run did is what stops a repaired breakage from printing as a warning
- * and teaching the reader to skim it.
- */
-/**
  * `3 files`, `1 file` — the count phrase every set-shaped rule needs, written once.
  *
  * Six rules were building this inline and disagreeing: two printed `1 file(s)`, three printed
@@ -84,6 +78,12 @@ export function countOf(count: number, noun: string, plural = `${noun}s`): strin
 
 type Severity = "error" | "warning";
 
+/**
+ * How bad the defect is — and nothing else. Repairing one does not make it milder: the defect is
+ * still in the author's source, and only the published artifact was corrected. Keeping severity
+ * independent of what this run did is what stops a repaired breakage from printing as a warning
+ * and teaching the reader to skim it.
+ */
 function severityOf(finding: Finding, strict: boolean): Severity {
   if (finding.consequence !== "waste") return "error";
   return finding.rulesAbort === true || strict ? "error" : "warning";
