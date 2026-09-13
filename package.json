@@ -1,7 +1,7 @@
 {
   "name": "@anizoptera/publish-clean",
   "version": "0.9.1",
-  "description": "Checks and cleans the exact tarball npm is about to upload, then publishes those same bytes: verified exports and entry points, no secrets, no unresolved workspace specs, no dev noise in package.json. No dependencies, one JS file.",
+  "description": "Cleans and helps to publish npm packages properly with a clean package.json (no unnecessary entries), verified exports, checks for unwanted files, unresolved workspace dependencies and missing entry points.",
   "keywords": [
     "bun",
     "cleanup",
