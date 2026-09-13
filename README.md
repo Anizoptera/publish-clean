@@ -273,6 +273,18 @@ artifact during upload.
 Every finding prints as `publish-clean [severity] rule-id at where`. The id in brackets below is
 that id — search this file for the one in your output.
 
+Two rules cover the whole output:
+
+- **`[warning]` never stops the run.** Wasted bytes, nothing a consumer can trip over. `--strict`
+  turns these into errors.
+- **`[error]` stops the run — unless the finding says it was repaired.** A repair fixed the
+  published tarball, not your source, so it still prints as an error and you still have something
+  to fix. It does not stop the publish, because the artifact going up is correct. `--strict` never
+  changes that.
+
+A leaked credential or a packed `node_modules`/`.git` always stops the run, and no flag waives it.
+Every run ends with a verdict line, so a pass is never silent.
+
 Publication stops when:
 
 - the package is marked `private: true`
