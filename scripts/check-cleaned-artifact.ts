@@ -160,6 +160,10 @@ try {
   assertBannerDeclaresTheArtifact(shipped.toString("utf8"), manifest);
   assertReadmeLinksResolveOffline(artifact);
   run("bunx", ["publint", "run", artifact, "--pack", "false"]);
+  // attw can only answer "This package does not contain types." while this stays a bin-only
+  // package with no `types` key and no importable entry — that verdict is correct here, not a
+  // misconfiguration. Kept rather than deleted because it becomes load-bearing the moment a
+  // types entry is added, and nothing else in this lane would notice it had stopped running.
   run("bunx", ["@arethetypeswrong/cli", tarball]);
 } finally {
   rmSync(root, { recursive: true, force: true });

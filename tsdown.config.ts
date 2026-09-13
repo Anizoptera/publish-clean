@@ -83,7 +83,10 @@ export default defineConfig({
   tsconfig: "./tsconfig.build.json",
 
   // publint reads the manifest against the emitted files, so it needs no plugin beyond
-  // the devDependency of the same name.
+  // the devDependency of the same name. `local-only` is not a CI gap, it is a division of
+  // labour: this run buys fast feedback while building, and every CI lane runs publint against
+  // the CLEANED ARTIFACT through scripts/check-cleaned-artifact.ts — the bytes a consumer
+  // installs, which is the stronger target. Verified: this plugin emits nothing under CI=true.
   //
   // tsdown's `unused` option is deliberately absent. It loads `unplugin-unused`, which
   // tsdown declares as an *optional* peer: nothing installs it, and the build fails at
