@@ -223,6 +223,20 @@ function leaves(node: unknown, out: string[] = []): string[] {
 }
 
 /**
+ * Whether a condition name is one only a type checker activates — the whole warrant for
+ * `repairTypes` being allowed to change what a consumer resolves.
+ *
+ * Asked through `conditionRank` rather than by comparing the name, because `types@<selector>` ranks
+ * WITH `types` (see `conditionRank`) and a checker picks it the same way. A spelling of this test
+ * written from the names in view — `key === "types"`, or a pattern over the literal — silently
+ * exempts every package using the versioned form, and the exemption looks exactly like a package
+ * with nothing to repair. Exported so nothing has to write that second spelling.
+ */
+export function isTypesCondition(key: string): boolean {
+  return conditionRank(key) === conditionRank("types");
+}
+
+/**
  * Repairs a `types` condition no type checker can read declarations through — the ONE rewrite in
  * this file that deliberately changes what a consumer resolves.
  *
@@ -259,20 +273,6 @@ function leaves(node: unknown, out: string[] = []): string[] {
  * correct. `--no-heal` withholds the rewrite and turns both findings fatal, which is the only
  * reading of that flag — the author asked to publish their own bytes unaltered.
  */
-/**
- * Whether a condition name is one only a type checker activates — the whole warrant for
- * `repairTypes` being allowed to change what a consumer resolves.
- *
- * Asked through `conditionRank` rather than by comparing the name, because `types@<selector>` ranks
- * WITH `types` (see `conditionRank`) and a checker picks it the same way. A spelling of this test
- * written from the names in view — `key === "types"`, or a pattern over the literal — silently
- * exempts every package using the versioned form, and the exemption looks exactly like a package
- * with nothing to repair. Exported so nothing has to write that second spelling.
- */
-export function isTypesCondition(key: string): boolean {
-  return conditionRank(key) === conditionRank("types");
-}
-
 function repairTypes(
   node: unknown,
   where: string,
