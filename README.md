@@ -224,6 +224,9 @@ artifact during upload.
 
 ## What it checks
 
+Every finding prints as `publish-clean [severity] rule-id at where`. The id in brackets below is
+that id — search this file for the one in your output.
+
 Publication stops when:
 
 - the package is marked `private: true`
@@ -231,60 +234,81 @@ Publication stops when:
   version control has no commit to differ from, so it warns and continues instead
 - the package has no non-empty `files` array (`--skip-file-check` to allow it)
 - the tarball contains a recognised test, CI, lockfile or `tsconfig` path
-  (`--allow-suspicious` to allow it)
-- a filename matches the protected rules for environment files, npm credentials, Git
-  internals, `node_modules` or key files; these checks cannot be disabled
+  (`--allow-suspicious` to allow it) [`suspicious-file`]
+- a filename matches the protected rules for environment files, npm credentials [`secret-file`],
+  or Git internals and `node_modules` [`internal-file`]; these checks cannot be disabled
 - a dependency is still written as `catalog:`, `workspace:`, `link:` or `portal:`, or a local
-  dependency points outside the shipped files
+  dependency points outside the shipped files [`monorepo-only-spec`]
 - a declared entry point cannot resolve against the shipped files; checks account for
-  extension lookup, conditions and fallbacks, and allow unmatched `sideEffects` globs
+  extension lookup, conditions and fallbacks. A declared path no consumer can resolve — an object
+  `browser`, `sideEffects`, an internal `#` import, a `*` pattern matching no packed file — reports
+  and continues instead [`declared-path-inert`], and `--strict` refuses it
 - rewriting the manifest changed anything else in the tarball
 - GitHub trusted publishing or provenance is enabled, but the `repository` in your manifest
   is not the repository the workflow is running in
-- a `require` condition resolves to an ES module
+- a `require` condition resolves to an ES module [`require-branch-is-esm`]. Node can require one
+  only from 20.19 and 22.12 onward, a consumer can switch that off, and top-level await fails on
+  every version. Point `require` at a CommonJS build, or add a `module-sync` branch
 - a condition sits out of canonical order where reordering it would change what somebody resolves,
   and a consumer really loses its target — a runtime-specific build shadowed by a generic one. The
-  tool will not guess here, so it reports and stops instead
-- two packed names differ only in letter case or Unicode form. They become ONE file on macOS and
-  Windows, so the install reports success with a file missing. Invisible on the machine that packed
-  it
-- a packed name Windows cannot create: a reserved device name such as `aux.js` in any path
-  component, a character such as `:` or `?`, a trailing dot or space. Declare `"os": ["!win32"]` if
-  the package genuinely does not run there and this stops applying. A path component over 255 bytes
-  is refused regardless, because no filesystem accepts one
-- a `bin` file has no shebang, or its shebang ends in CR. The installed command is a symlink the
-  kernel resolves through that line, and npm reads the same line to pick the interpreter for its
-  Windows shim. A `bin` file holding a NUL byte is exempt: compiled binaries are executed directly
-- a relative import resolves only after folding letter case, so it works on macOS and fails on Linux
-- the package imports itself by name through a subpath its `exports` does not expose, which
-  resolves for nobody — and looks fine in your own repository, where it resolves by path
-- the tarball holds a file nothing in the package reaches — no entry point, no import from a
-  reached file, no script. Declare the ones that are deliberate:
-  `"publish-clean": { "allowUnreferenced": ["assets"] }`, which matches whole subtrees. This
-  check only runs when `exports` closes the package; without that field every shipped path is
-  importable, so nothing is dead.
+  tool will not guess here, so it reports and stops instead [`exports-condition-order-unsafe`]
+- two packed names differ only in letter case or Unicode form [`packed-name-collision`]. They
+  collapse onto one path on macOS and Windows, which ignore both by default. Two files means one
+  silently overwrites the other and the install still reports success; a file colliding with a
+  directory means the install fails outright. Only a case-sensitive filesystem can produce the
+  pair, which is why the author never sees it
+- a packed name Windows cannot create [`packed-name-unportable`]: a path component named after a
+  DOS device (`aux`, `con`, `nul`, `com1`…, with or without an extension), a character such as `:`
+  or `?`, a trailing dot or space. Declare `"os": ["!win32"]` if the package genuinely does not run
+  there and this stops applying. A path component over 255 bytes is refused regardless, because no
+  filesystem accepts one
+- a `bin` file has no shebang [`bin-no-shebang`], or its shebang ends in CR
+  [`shebang-carriage-return`]. An installer symlinks the file and the command is executed directly,
+  so without that first line Linux and macOS fail with `exec format error` and npm has no
+  interpreter for its Windows shim. A trailing CR is invisible in an editor and makes the kernel
+  look for an interpreter literally named `node\r`. A `bin` file holding a NUL byte in its first
+  512 bytes is exempt — it is a compiled binary
+- a shipped file imports another by the wrong letter case [`import-case-mismatch`], so it works on
+  the author's macOS and fails on a consumer's Linux
+- the package imports itself by name through a subpath its `exports` does not expose
+  [`self-import-not-exported`], which resolves for nobody — and looks fine in your own repository,
+  where it resolves by path
+- the tarball holds a file nothing in the package reaches [`unreferenced-file`] — no entry point,
+  no import from a reached file, no script. Declare the ones that are deliberate:
+  `"publish-clean": { "allowUnreferenced": ["assets"] }`, matched as a prefix, so naming a directory
+  covers everything under it. This check only runs when the package has an `exports` field, because
+  that is what makes unlisted paths unimportable — without it every shipped file is reachable and
+  none is dead.
 
-File guards check paths, not file contents. They cannot detect a credential embedded
-in an otherwise allowed source file. See [the rules](https://github.com/Anizoptera/publish-clean/blob/main/src/artifact.ts).
+A malformed registry URL [`registry-not-a-url`], or one carrying a password
+[`registry-credentials`], also stops the run. Treat such a password as compromised: it is in your
+`package.json` and was about to be published inside the tarball's manifest.
+
+File guards match paths, not file contents. A credential hardcoded inside an otherwise allowed
+source file is published and nothing here reports it.
 
 ## What it repairs
 
 An `exports` map is order-sensitive: a consumer activates a whole set of conditions at once and
 takes the first key in that set, so the order you wrote picks the winner. `publish-clean`
 flattens the map into the resolution it produces for every possible consumer, and rewrites it
-only when the result is provably identical — dropping a `node` branch that repeats `default`,
-collapsing `{"default": "./x.js"}`, ordering keys the measured constraints force. Every repair is
+only when the result is provably identical — dropping a `node` branch that repeats `default`
+[`exports-inert-condition`], collapsing `{"default": "./x.js"}` [`exports-redundant-default`], and
+putting keys that real resolvers require in a fixed order into it [`exports-condition-order`].
+A branch no consumer reaches [`exports-unreachable-branch`], a consumer no branch serves
+[`exports-unresolvable`] and a condition name no known runtime or bundler activates
+[`exports-unknown-condition`] are reported, never guessed at. Every repair is
 reported, lands only in the published manifest, and never touches your source. `--no-heal`, or
 `"publish-clean": { "heal": false }`, reports without rewriting.
 
 `types` is the one exception, and the only rewrite here that changes what somebody resolves. Only
 a type checker activates it, so nothing that runs your package can tell the difference:
 
-- a `types` branch pointing at JavaScript with no declaration file beside it is **removed**. It
-  promised an API the package does not carry, and a checker was reading that JavaScript as your
-  declarations and typing everything `any`.
-- declarations hidden behind a key that leads a checker nowhere are **moved to the front**, where
-  every checker looks first.
+- a `types` branch pointing at JavaScript with no declaration file beside it is **removed**
+  [`types-branch-not-declarations`]. It promised an API the package does not carry, and a checker
+  was reading that JavaScript as your declarations and typing everything `any`.
+- declarations hidden behind a key that leads a checker nowhere are **moved to the front**
+  [`types-branch-unreachable`], where every checker looks first.
 
 Both print as errors — fix your source — and neither stops the publish, because the published
 artifact is correct. `--no-heal` withholds both rewrites, and then both stop it.
@@ -293,8 +317,9 @@ Anything the archive cannot settle is left exactly as you wrote it: a `types` ta
 does not ship is a missing file and keeps that report, and nothing is moved across a condition this
 tool does not recognise, since a private name may be meant for a consumer configured to take it.
 
-Still reported and left alone: anything inside a fallback array (Bun resolves those differently
-from Node and Deno) and any map too large to enumerate. [`docs/exports.md`](https://github.com/Anizoptera/publish-clean/blob/main/docs/exports.md) has
+Still reported and left alone: anything inside a fallback array [`exports-fallback-array`] — Bun
+resolves those differently from Node and Deno, so no rewrite is safe for everyone — and any map too
+large to enumerate [`exports-too-complex`]. [`docs/exports.md`](https://github.com/Anizoptera/publish-clean/blob/main/docs/exports.md) has
 the measured condition sets behind these rules.
 
 ## What the cleaned manifest keeps
@@ -314,7 +339,8 @@ any helper script. Otherwise the development-only scripts block is removed.
 Unknown fields are kept and reported:
 
 ```
-publish-clean: these manifest fields are not recognised and are retained as-is:
+publish-clean [warning] unrecognized-field at 1 manifest field
+These manifest fields are not recognised and are retained as-is:
   "someToolConfig"
 Strip the ones consumers do not read, and acknowledge the ones they do:
   "publish-clean": { "devFields": ["someToolConfig"] }
@@ -323,7 +349,8 @@ Strip the ones consumers do not read, and acknowledge the ones they do:
 
 Unknown fields stay because removing an unfamiliar field can break a consumer's build.
 Use `devFields` to remove a field you know is development-only, or `keepFields` to suppress
-its report. Inspect the result with `--dry-run`.
+its report. `--strict` promotes this warning to an error like any other. Inspect the result
+with `--dry-run`.
 
 ## Options and config
 
