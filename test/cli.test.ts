@@ -41,10 +41,18 @@ function runCli(
   cwd: string,
   env?: Record<string, string>,
 ): Promise<{ status: null | number; stderr: string; stdout: string }> {
+  // Windows matches environment names case-INSENSITIVELY, so `{ ...process.env, name: value }` can
+  // carry two keys differing only in case and the INHERITED one wins. `bun run` exports
+  // `npm_config_user_agent`, so an override of it silently did nothing on Windows alone. Drop every
+  // inherited spelling of an overridden name first.
+  const overridden = new Set(Object.keys(env ?? {}).map((key) => key.toUpperCase()));
+  const inherited = Object.entries(process.env).filter(
+    ([key]) => !overridden.has(key.toUpperCase()),
+  );
   return new Promise((resolve, reject) => {
     const child = spawn("node", [CLI, ...args], {
       cwd,
-      env: { ...process.env, ...env },
+      env: { ...Object.fromEntries(inherited), ...env },
       timeout: CLI_TIMEOUT_MS,
       killSignal: "SIGKILL",
     });
@@ -110,10 +118,13 @@ function readTarballFile(tarball: string, file: string): string {
 function listTarball(tarball: string): string[] {
   const result = spawnSync("tar", ["tzf", tarball], { encoding: "utf8" });
   if (result.status !== 0) throw new Error(result.stderr);
-  return result.stdout
-    .split("\n")
-    .filter((line) => line.length > 0 && !line.endsWith("/"))
-    .map((line) => line.replace(/^package\//, ""));
+  return (
+    result.stdout
+      // Windows `tar` ends every line with CRLF, and a lone "\n" split leaves the "\r" on each name.
+      .split(/\r?\n/)
+      .filter((line) => line.length > 0 && !line.endsWith("/"))
+      .map((line) => line.replace(/^package\//, ""))
+  );
 }
 
 // Concurrent because each case is an independent process against its own temp directory,
@@ -754,22 +765,29 @@ it.concurrent("names an unusable --tarball-out instead of failing as a stack", a
     { name: "@scope/tarball-out", version: "1.0.0", files: ["index.js"], main: "index.js" },
     { "index.js": "module.exports = 1;\n" },
   );
+  // A directory under a REGULAR FILE, which no platform can create. `/nonexistent/nope` looked
+  // uncreatable but is merely drive-relative on Windows, so the run legitimately succeeded there
+  // and the case proved nothing. The fixture's own file is the blocker, so nothing extra is written.
+  const blocked = path.join(fx.dir, "index.js", "nope");
   try {
-    const result = await runCli(["verify", ".", "--tarball-out", "/nonexistent/nope"], fx.dir);
+    const result = await runCli(["verify", ".", "--tarball-out", blocked], fx.dir);
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      "Unable to create the --tarball-out directory /nonexistent/nope",
-    );
+    expect(result.stderr).toContain(`Unable to create the --tarball-out directory ${blocked}`);
     expect(result.stderr).not.toContain("node:internal");
     // The errno must still print — the sentence above cannot carry it. WHICH errno is the kernel's
-    // choice: `mkdir /nonexistent` gives ENOENT on macOS, EACCES for a non-root Linux user. Pinning
-    // one name tests the runner, not this tool.
+    // choice and varies by platform (ENOTDIR, ENOENT, EACCES all reach here). Pinning one name
+    // tests the runner, not this tool.
     expect(result.stderr).toMatch(/Caused by: E[A-Z]+:/);
 
     // Same ruling, other end of the run: a temp directory that cannot be created is the
     // environment's fault, and leaving it bare put an `mkdtemp` stack where a reader looks for a
     // defect in this tool. A full disk on a CI runner arrives here.
-    const noTemp = await runCli(["verify", "."], fx.dir, { TMPDIR: "/nonexistent/nope" });
+    // All three names, because `os.tmpdir()` reads TMPDIR on POSIX and TEMP then TMP on Windows.
+    const noTemp = await runCli(["verify", "."], fx.dir, {
+      TMPDIR: blocked,
+      TEMP: blocked,
+      TMP: blocked,
+    });
     expect(noTemp.status).toBe(1);
     expect(noTemp.stderr).toContain("Unable to create a temporary directory");
     expect(noTemp.stderr).not.toContain("node:internal");

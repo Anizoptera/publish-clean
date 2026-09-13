@@ -112,11 +112,14 @@ it("resolves every shape the way Node does, under every measured condition set",
       ...TARGETS.map((name) => writeFile(path.join(pkg, name), "")),
       // Two probes, because the module system is what activates `import` or `require`; no flag
       // can set them, so the consumer has to genuinely be one or the other.
+      // Both reduce Node's answer to a bare filename, and must split on EITHER separator: Windows
+      // resolves to `C:\...\pkg\default.js`, so splitting on "/" alone returns the whole path and
+      // every subpath then mismatches — reading as Node disagreeing with us, which it does not.
       writeFile(
         path.join(root, "probe.mjs"),
         `const out = {};
          for (const sub of process.argv.slice(2)) {
-           try { out[sub] = import.meta.resolve("pkg" + sub.slice(1)).split("/").pop(); }
+           try { out[sub] = import.meta.resolve("pkg" + sub.slice(1)).split(/[\\/]/).pop(); }
            catch { out[sub] = "unresolved"; }
          }
          console.log(JSON.stringify(out));`,
@@ -125,7 +128,7 @@ it("resolves every shape the way Node does, under every measured condition set",
         path.join(root, "probe.cjs"),
         `const out = {};
          for (const sub of process.argv.slice(2)) {
-           try { out[sub] = require.resolve("pkg" + sub.slice(1)).split("/").pop(); }
+           try { out[sub] = require.resolve("pkg" + sub.slice(1)).split(/[\\/]/).pop(); }
            catch { out[sub] = "unresolved"; }
          }
          console.log(JSON.stringify(out));`,
