@@ -10,6 +10,37 @@ verified `exports`, checks for unwanted files, unresolved workspace dependencies
 [![Runtime deps](https://img.shields.io/badge/runtime_deps-0-2ea44f)](package.json)
 [![License](https://img.shields.io/github/license/Anizoptera/publish-clean)](LICENSE)
 
+**TL;DR** — pack once, clean and check *that* tarball, upload *those* bytes. Nothing is ever
+repacked, so what was verified is exactly what the registry stores and what provenance signs.
+
+```text
+pnpm pack ──▶ rewrite package.json inside the tarball ──▶ re-read that file from disk ──▶ check it
+                                                                                           │
+                    exit 1 ◀── anything unrepaired that leaks or breaks a consumer ◀────────┤
+                                                                                           │
+           npm publish <that exact file> ◀── everything else, repaired or just reported ◀───┘
+```
+
+```sh
+pnpm exec publish-clean verify                             # every check, uploads nothing
+pnpm exec publish-clean --dry-run                          # checks, prints file list and manifest
+pnpm exec publish-clean -- --provenance --access public    # check, then publish those bytes
+```
+
+| What you get | How |
+| --- | --- |
+| [Broken packages stop here](#what-it-checks) | Declared entry points that resolve to nothing, `exports` conditions in an order that loses a consumer its target, `require` branches resolving to ESM, names two filesystems read as one file, `bin` without a shebang, `workspace:`/`catalog:` specs left unresolved. |
+| [Secrets never get out](#a-packed-secret-is-already-leaked) | `.env`, `.npmrc`, `.pem`/`.key`/keystores and SSH keys abort the run. No flag waives it, and they are not silently stripped: a stripped secret has still leaked, and you need to rotate it. |
+| [No dead weight](#dead-weight-ships-forever) | `devDependencies`, `files`, `packageManager`, workspace and catalog config, and tool config blocks (`jest`, `eslint`, `prettier`, `turbo`, …) leave the published manifest. So does the whole `scripts` block, unless it holds an install or `prepare` hook consumers actually run. Packed files nothing references are reported. |
+| [Checked bytes = published bytes](#what-this-buys-for-provenance) | The manifest is rewritten inside pnpm's own tarball and that file is uploaded. A pipeline that repacks after checking signs bytes nothing verified. |
+| [Rules measured, not guessed](#rules-are-measured-not-guessed) | Every rule and every tolerance was measured against thousands of installed published packages first. Equality alone on declared paths refused 373 of 5192; a fixed `exports` order refused 97 of 3674. |
+| [Nothing new to trust](#install) | One JavaScript file, zero runtime dependencies — it sits on the path that handles your registry token. |
+| [Usable without publishing](#checking-every-pull-request) | `verify` gates pull requests and works on `private: true` packages. Exit 1 on failure, findings on stderr. |
+
+The rules it holds itself to: repair only what needs no guessing, and never in your source tree.
+Report everything in one run and abort at the end, never at the first defect. Never abort on
+something it already repaired. One opt-out flag per judgement call; none for a leak.
+
 ## Why
 
 Publishing is the one step you cannot take back. npm lets you unpublish within 72 hours only if no
@@ -32,20 +63,16 @@ The defects that reach consumers are the ones your own machine cannot show you:
 Green the whole way down. Nothing in the normal chain fails, so the first report comes from a
 stranger, against a version you can no longer replace.
 
-`publish-clean` packs your package, checks the tarball before it goes up, repairs what it can prove
-safe, and refuses the rest. **What it checked is what it uploads**: the same file, byte for byte,
-never a repack. One run reports everything; it stops at the end, not at the first defect.
-
 ### A packed secret is already leaked
 
 The worst case is not a broken package. It is a `.env` or an `.npmrc` inside the tarball. By the
 time anything notices, the key exists outside your machine: it was written into an archive, and if
 the upload went through, into a registry that hands it to anyone who asks.
 
-`publish-clean` refuses those outright. No flag waives it and `--strict` has nothing to add. It also
-will not quietly strip the file for you, which is the part people expect and should not want: a
-stripped secret has still leaked, and an artifact that looks clean is how a leak goes unrotated. The
-report tells you to rotate the credential first, then narrow `files`.
+`publish-clean` refuses those outright. No flag waives it and `--strict` has nothing to add. It will
+not strip the file for you either, though that is what most people expect: a stripped secret has
+still leaked, and a clean-looking artifact is how it goes unrotated. The report says to rotate the
+credential first, then narrow `files`.
 
 ### Dead weight ships forever
 
