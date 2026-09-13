@@ -298,8 +298,8 @@
   `check.yml` with no token permissions; `publish` requires its success and owns the
   publishing credentials. EVERY platform lane and the dependency audit live in that one shared
   workflow, so a standalone green job cannot hide another platform's failure. Each platform runs
-  the WHOLE suite; a case that truly cannot run on one skips ITSELF in the test file, with the
-  reason, never by filtering filenames in YAML.
+  the WHOLE suite; a case that cannot run on one skips ITSELF in the test file, with the reason,
+  never by filtering filenames in YAML.
   Tests run fixture scripts and fake executables: never grant them `id-token: write`, which
   also changes CLI behavior through `ACTIONS_ID_TOKEN_REQUEST_URL`. Local `preversion` is
   fast feedback, not publication authority. Keep caller and callee concurrency groups distinct.

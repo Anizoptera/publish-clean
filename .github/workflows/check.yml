@@ -105,16 +105,12 @@ jobs:
       - run: bun run test:built
       - run: bun run cleaned-artifact:check
 
-  # macOS is where this package is developed, so without this lane the one platform it is written
-  # on is the one platform CI never checks — "it works on my machine" as the release gate.
+  # The development platform, so without this lane it is the one OS nothing gates.
+  # Only lane with a BSD userland: the test helpers shell out to `tar`, and bsdtar is not GNU tar.
+  # Only lane running the POSIX-only cases — which Windows skips — on a case-insensitive filesystem.
   #
-  # It is also the only lane with a BSD userland: the test helpers shell out to `tar`, and bsdtar
-  # is not GNU tar (it already differs from Windows tar by line ending). And it is the only lane
-  # that runs the POSIX-only cases — which Windows skips — against a case-INSENSITIVE filesystem,
-  # which matters for a tool whose rules are about names two filesystems read as one file.
-  #
-  # Runs only what an operating system can change: build, suite, self-application. Formatting,
-  # types and the doc rules read the same bytes everywhere, so repeating them here buys nothing.
+  # Build, suite and self-application only. Formatting, types and the doc rules read the same bytes
+  # on every OS, so running them again here proves nothing.
   macos:
     runs-on: macos-latest
     timeout-minutes: 5
@@ -131,8 +127,8 @@ jobs:
           package-manager-cache: false
       - run: bun install --frozen-lockfile
       - run: bun run build
-      # `bun run` puts node_modules/.bin on PATH, so the packer resolves without a PATH step of
-      # its own — unlike the Windows lane, which invokes the built CLI directly.
+      # `bun run` puts node_modules/.bin on PATH, so pnpm resolves. The Windows lane needs its own
+      # PATH step because it invokes the built CLI directly.
       - run: bun run test:built
       - run: bun run cleaned-artifact:check
 
@@ -141,12 +137,10 @@ jobs:
   # branch cannot be proved by any test on Linux or macOS, and an unverified branch claiming
   # a supported platform is worse than declaring the platform unsupported.
   #
-  # Runs the WHOLE suite, not a hand-picked subset. Most of it is platform-neutral, and the value
-  # is in the parts that are not — those are exactly where Windows breaks. A case that genuinely
-  # cannot run here skips ITSELF (`itPosix` in test/cli.test.ts, for `#!/bin/sh` shims and POSIX
-  # process groups) instead of being excluded by filename here, so a new test gets Windows
-  # coverage by default and the reason lives beside the test. The dry-run then drives the real
-  # npm/pnpm shims and the whole artifact pipeline.
+  # Runs the WHOLE suite. A case that cannot run here skips itself (`itPosix` in test/cli.test.ts:
+  # `#!/bin/sh` shims, POSIX process groups), never by filename in this file — so a new test is
+  # covered on Windows by default and the reason sits next to it. The dry-run then drives the real
+  # npm/pnpm shims and the artifact pipeline.
   windows:
     runs-on: windows-latest
     timeout-minutes: 5

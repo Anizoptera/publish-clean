@@ -25,12 +25,11 @@ import { ROW_BUDGET, rowsOf } from "../src/conditions";
 const run = promisify(execFile);
 
 /**
- * The filename Node resolved to, from either probe's answer.
+ * The filename Node resolved to, from either probe.
  *
- * The two probes answer in different currencies: `import.meta.resolve` yields a `file:` URL,
- * `require.resolve` a native path. On Windows that path is backslash-separated, so any
- * separator-splitting reduction has to be right about both — `path.basename` already is, after
- * the URL is converted. "unresolved" is the probes' own sentinel and passes through.
+ * The probes answer differently: `import.meta.resolve` gives a `file:` URL, `require.resolve` a
+ * native path — backslash-separated on Windows. `path.basename` handles both once the URL is
+ * converted; splitting on a separator does not. "unresolved" is the probes' sentinel.
  */
 function basenameOf(answer: string): string {
   if (answer === "unresolved") return answer;
@@ -126,9 +125,9 @@ it("resolves every shape the way Node does, under every measured condition set",
       ...TARGETS.map((name) => writeFile(path.join(pkg, name), "")),
       // Two probes, because the module system is what activates `import` or `require`; no flag
       // can set them, so the consumer has to genuinely be one or the other.
-      // Both return Node's answer WHOLE. Reducing it to a filename inside this template would put
-      // the pattern through an escaping layer — `\\` here reaches the probe as `\` — which is how a
-      // separator class silently degrades to matching "/" only. `basenameOf` does it in real code.
+      // Both return Node's answer WHOLE. Reducing it here would send the pattern through an
+      // escaping layer — `\\` in this template reaches the probe as `\` — which silently turns a
+      // separator class into "/" only. `basenameOf` does it in real code instead.
       writeFile(
         path.join(root, "probe.mjs"),
         `const out = {};

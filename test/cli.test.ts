@@ -41,10 +41,10 @@ function runCli(
   cwd: string,
   env?: Record<string, string>,
 ): Promise<{ status: null | number; stderr: string; stdout: string }> {
-  // Windows matches environment names case-INSENSITIVELY, so `{ ...process.env, name: value }` can
-  // carry two keys differing only in case and the INHERITED one wins. `bun run` exports
-  // `npm_config_user_agent`, so an override of it silently did nothing on Windows alone. Drop every
-  // inherited spelling of an overridden name first.
+  // Windows matches env names case-INSENSITIVELY. `{ ...process.env, name: value }` can then hold
+  // two keys differing only in case, and the INHERITED one wins — an override silently does nothing
+  // there. `bun run` exports `npm_config_user_agent`, which is exactly such a collision. So drop
+  // every inherited spelling of an overridden name first.
   const overridden = new Set(Object.keys(env ?? {}).map((key) => key.toUpperCase()));
   const inherited = Object.entries(process.env).filter(
     ([key]) => !overridden.has(key.toUpperCase()),
@@ -101,9 +101,9 @@ async function writeShim(file: string, script: string): Promise<void> {
 }
 
 /**
- * Windows cannot execute a `#!/bin/sh` shim, and rewriting these as `.cmd` would test the shim
- * instead of the CLI's reaction to what a tool printed. Skipping loses no Windows coverage: the
- * Windows-specific spawn path is `spawnArgs`, which `test/command.test.ts` drives directly.
+ * Windows cannot execute a `#!/bin/sh` shim. Rewriting them as `.cmd` would test the shim instead
+ * of what the CLI does with a tool's output. Nothing is lost: the Windows spawn path is
+ * `spawnArgs`, and test/command.test.ts drives it directly.
  */
 const itPosix = it.skipIf(process.platform === "win32");
 
@@ -765,9 +765,10 @@ it.concurrent("names an unusable --tarball-out instead of failing as a stack", a
     { name: "@scope/tarball-out", version: "1.0.0", files: ["index.js"], main: "index.js" },
     { "index.js": "module.exports = 1;\n" },
   );
-  // A directory under a REGULAR FILE, which no platform can create. `/nonexistent/nope` looked
-  // uncreatable but is merely drive-relative on Windows, so the run legitimately succeeded there
-  // and the case proved nothing. The fixture's own file is the blocker, so nothing extra is written.
+  // A directory under a REGULAR FILE — no platform can create that, and the fixture's own file is
+  // the blocker, so nothing extra is written. An absolute path like "/nonexistent/nope" is NOT an
+  // alternative: Windows reads it as drive-relative and creates it, so the run succeeds and the
+  // case proves nothing.
   const blocked = path.join(fx.dir, "index.js", "nope");
   try {
     const result = await runCli(["verify", ".", "--tarball-out", blocked], fx.dir);
