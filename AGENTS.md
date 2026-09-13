@@ -182,6 +182,21 @@
   nothing reports a desync — which refuses correct packages from code generators, the very
   packages that write imports into templates. Evidence, the measured
   false-positive population and why the rule has no override: `docs/exports.md`.
+- **A branch in `reviewShippedFiles` is judged by what a consumer RECEIVES, and each consumer's own
+  recovery is part of that** — the same law as the declared-path and condition-order bullets, which
+  is why none of these four tolerances is optional. A checker reads a `.ts` target directly and
+  falls back from a `.js` target to the declaration shipped beside it, so `types` is mislabelled
+  only where no declaration exists anywhere near the target; a specifier inside
+  `declare module "pkg/sub"` is matched by NAME and never reaches `exports`, which is how every
+  api-extractor and dts-bundle-generator bundle is written; `module` is activated by no runtime, so
+  a target under it is not what `require()` receives; and a shebang is reached through execve only
+  in a `bin` entry. Measured over 3633 installed published packages, those four refused `xstate`,
+  `react-resizable-panels`, `get-tsconfig`, `@eslint-community/regexpp`, `underscore`, `jotai` and
+  `@mixmark-io/domino`, all of them correct. When measuring this corpus, build the file map with the
+  keys `packageContents` uses — the archive path with no `./` prefix — and PROVE the map is reachable
+  before believing any zero: a map keyed the other way makes every `files.get` miss, so each of these
+  rules silently reports nothing and the run looks healthy. The control is that the package's own
+  declared `bin` paths all resolve in the map.
 - NEVER generalise `import-case-mismatch` to report a specifier that resolves to NOTHING, however
   obviously that reads as the same defect — the scan already computes it and deliberately discards
   it. Measured: reporting it refuses 9.1% of packages carrying `exports`, and 6.5% after excluding
@@ -194,15 +209,16 @@
   target** (`forcedOrderConsequence`, `src/exports.ts`). `TIERS` ranks the keys and `forced` marks
   the ranks a measurement binds, but forcedness is ONE-DIRECTIONAL: it says a consumer activating
   that key must not be handed another key's target, so the forced key WINNING is that constraint
-  satisfied. Three further tolerances each exist because its absence refused a published, working
+  satisfied. Two further tolerances each exist because its absence refused a published, working
   package — the winner's own subtree re-dispatching on the loser, so a consumer activating both
-  meets the loser inside; the two keys carrying the same target, which nothing can tell apart; and
-  a rank inversion whose loser is not forced, which is the author's call about specificity. Losing
+  meets the loser inside, and the two keys carrying the same target, which nothing can tell apart.
+  A rank inversion whose loser is not forced was always silent and stays so: which of two keys is
+  more specific is the author's call. Losing
   `types`, or losing `module` to `import`, costs no consumer another runtime's build — a checker
   reaching the JS target reads the `.d.ts` beside it, and both keys yield ESM — so those REPORT as
   `waste` and `--strict` refuses them, the shape `exports-unresolvable` was ruled into. Measured
-  over 3674 installed published packages, the unconditional rule refused 97 and those five
-  corrections leave 14, every one a forced runtime name losing to a generic environment key with
+  over 3674 installed published packages, the unconditional rule refused 97 and those corrections
+  leave 14, every one a forced runtime name losing to a generic environment key with
   different targets and no re-dispatch. Never restore an arm here without running that corpus and
   reading the condition map of every package it newly refuses: a fabricated refusal and a caught
   defect are indistinguishable from inside this repository, and these four arms each looked exactly

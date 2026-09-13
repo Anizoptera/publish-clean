@@ -274,6 +274,17 @@ names differing only in case cannot coexist in a directory on a folding filesyst
 them describes the filesystem rather than any package. Tarball members have no such limit, which is
 what makes them the instrument for it.
 
+The table above counts rules that only cost bytes. The question for a rule that REFUSES a publish is
+different — not how often it fires but whether every package it stops is really broken — and the only
+instrument that answers it is the corpus: drive the real reviewers over every installed package tree,
+then read the manifest of each one refused. Measured over 3633 of them, four rules refuse at all, and
+between them they stop 18 packages: a `require` branch resolving to ES module syntax (9), a
+self-reference to an unexposed subpath (4), a `types` branch with no declaration near its target (3),
+and a `bin` entry with no shebang (2). Each was read by hand and is a real defect —
+`@sqlite.org/sqlite-wasm` declares a command whose first line is `import fs from 'fs'`. Expect to
+find fabricated refusals when you run this, not to confirm their absence: every rule above was
+measured this way and every one of them was refusing correct packages.
+
 Two things follow. Every waste rule here fires on single-digit percentages, so none of them can
 justify risk — which is why each is gated by the equivalence proof rather than by a style argument.
 And dropping a redundant condition saves roughly thirty bytes: the manifest is not where the waste
@@ -293,12 +304,12 @@ The shapes, each with the specimen that exposed it:
 | the forced key WINS | forcedness binds a key against LOSING, so this is the constraint met | `@aws-sdk/core`, `@smithy/core`, `underscore` — all `module` ahead of `node` |
 | the winner re-dispatches on the loser | a consumer activating both enters the winner and meets the loser inside | `@emotion/styled` — `development` ahead of `edge-light`, handling `edge-light` within it |
 | both keys carry the same target | nothing can tell the two branches apart | `node-fetch-native` — eleven runtime names ahead of `node`, every one the same file |
-| the loser is not forced | which of two keys is more specific is the author's call | `{import: X, node: Y}` |
 | `types` loses, or `module` loses to `import` | a checker reaching the JS target reads the `.d.ts` beside it; `import` and `module` both yield ESM | `@floating-ui/core` — `import` ahead of both `types` and `module` |
 
 The last shape is a real defect and a bad refusal, which is why it reports as `waste` and `--strict`
-refuses over it: 80 of the 103 packages the unconditional rule fired on type-check correctly today
-through TypeScript's adjacent-declaration fallback, and the remaining 23 hand a checker no
+refuses over it: 80 of the 103 names it fired on counting every installed version rather than one
+copy each type-check correctly today through TypeScript's adjacent-declaration fallback, and the
+remaining 23 hand a checker no
 declarations — a smaller loss than `exports-unresolvable`, a consumer resolving nothing at all,
 which this tool already reports as a warning.
 

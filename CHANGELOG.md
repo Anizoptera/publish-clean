@@ -22,10 +22,13 @@ notes: the section for a version is published verbatim when its tag is pushed.
   really loses a target: a runtime-specific build shadowed by a generic one. A misplaced `types`
   is a warning, because a checker reaching the JavaScript target reads the declarations beside it,
   and `--strict` still refuses over it.
-- **Defects that cannot be repaired without guessing are reported.** A `types` condition
-  resolving to something that is not a declaration file, a `require` condition resolving to an ES
+- **Defects that cannot be repaired without guessing are reported.** A `types` condition resolving
+  to something that is not a declaration file and has none beside it either — a checker falls back
+  from a JavaScript target to the declaration shipped next to it, and reads a TypeScript source
+  directly — a `require` condition resolving to an ES
   module, a branch no consumer can reach, a consumer no branch serves, a condition no measured
-  consumer activates, a fallback array, a `bin` shebang ending in CR, and a `bin` entry with no
+  consumer activates, a fallback array, a shebang ending in CR — which refuses the publish only in a
+  `bin` entry, because nothing else is reached through execve — and a `bin` entry with no
   shebang at all — the installed command is a symlink the kernel resolves through that line, and npm
   reads the same line to pick the interpreter for its Windows shim, so the command runs on no
   platform without it. A `bin` file holding a NUL byte is left alone: compiled binaries are executed
