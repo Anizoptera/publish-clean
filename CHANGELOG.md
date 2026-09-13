@@ -3,7 +3,7 @@
 Notable changes per release, newest first. This file is the source of the GitHub Release
 notes: the section for a version is published verbatim when its tag is pushed.
 
-## Unreleased
+## [0.10.0] - 2026-09-13
 
 One run now reports everything wrong with the package and stops at the end, instead of failing at
 the first defect. New checks cover packed names, `bin` shebangs and shipped files nothing reaches.
