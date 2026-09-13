@@ -24,24 +24,34 @@ the first defect. New checks cover packed names, `bin` shebangs and shipped file
 Each one reaches consumers and cannot be repaired without guessing what you meant:
 
 - **A packed name that does not survive extraction.** Two names differing only in letter case or
-  Unicode form become ONE file on macOS and Windows: the install reports success with a file
-  missing. A name Windows cannot create — `aux.js` in any path component, `:` or `?`, a trailing dot
-  or space — fails the install there outright. Neither is visible on the machine that packed it. Set
+  Unicode form collapse onto one path on macOS and Windows, which ignore both by default. Two files
+  means one silently overwrites the other and the install still reports success; a file colliding
+  with a directory means the install fails outright. Only a case-sensitive filesystem can produce
+  such a pair, which is why the author never sees it. Separately, a name Windows cannot create — a
+  path component named after a DOS device (`aux`, `con`, `nul`, `com1`…, with or without an
+  extension), a `:` or `?`, a trailing dot or space — fails every Windows install. Set
   `"os": ["!win32"]` if the package genuinely does not run on Windows and that half stops applying;
   a path component over 255 bytes is refused regardless, because no filesystem accepts one.
-- **A `bin` file with no shebang, or one ending in CR.** The installed command is a symlink the
-  kernel resolves through that line, and npm reads the same line to choose the interpreter for its
-  Windows shim, so the command runs on no platform without it. A `bin` file holding a NUL byte is
-  exempt: compiled binaries are executed directly.
-- **A `require` condition resolving to an ES module.**
-- **A condition order that cannot be corrected without changing what somebody resolves**, where a
-  consumer really loses its target — a runtime-specific build shadowed by a generic one.
+- **A `bin` file with no shebang, or one ending in CR.** An installer symlinks the file and the
+  command is executed directly, so without that first line Linux and macOS fail with `exec format
+  error` and npm has no interpreter to write into its Windows shim. A trailing CR is worse than no
+  shebang and invisible in an editor: the kernel looks for an interpreter literally named `node\r`.
+  A `bin` file holding a NUL byte in its first 512 bytes is exempt — it is a compiled binary.
+- **A `require` condition resolving to an ES module.** Node can require one only from 20.19 and
+  22.12 onward, a consumer can still switch it off, and top-level await fails on every version.
+  Point `require` at a CommonJS build, or add a `module-sync` branch — that condition exists so
+  `require()` and `import` can share one ES module.
+- **A condition order that hands a consumer the wrong target** — a runtime key such as `node`
+  placed after a generic one that points elsewhere, so Node gets the generic build. Only refused
+  when the order cannot be corrected safely; where it can, it is repaired instead (below).
 - **A self-import through a subpath your own `exports` does not expose.** It resolves for nobody,
   and it looks correct in your repository, where the same import resolves by path.
-- **A relative import that resolves only after folding letter case.** Works on macOS, fails on Linux.
+- **A shipped file importing another by the wrong letter case.** Works on the author's macOS,
+  fails on a consumer's Linux.
 - **A shipped file nothing reaches** — no entry point, no import from a reached file, no script.
-  This runs only when `exports` closes the package; without that field every shipped path is
-  importable and nothing is dead. Declare the deliberate ones:
+  It runs only when the package has an `exports` field, because that is what makes unlisted paths
+  unimportable — without it every shipped file is reachable and none is dead. Declare the
+  deliberate ones:
   `"publish-clean": { "allowUnreferenced": ["assets"] }`, matched as a prefix, so naming a
   directory covers everything under it. The message prints the entry for you.
 
@@ -49,8 +59,9 @@ Each one reaches consumers and cannot be repaired without guessing what you mean
 
 `exports` and `imports` are flattened into the resolution they produce for every possible consumer,
 then rewritten only where the result is provably identical: a condition repeating what a later key
-already yields is dropped, `{"default": "./x.js"}` collapses, and keys whose order a measurement
-forces are ordered. Repairs land in the published manifest only and never touch your source.
+already yields is dropped, `{"default": "./x.js"}` collapses to the string, and keys that real
+resolvers require in a fixed order are put in it. Repairs land in the published manifest only and
+never touch your source.
 `--no-heal`, or `"publish-clean": { "heal": false }`, reports without rewriting.
 
 `types` is the exception, and the only rewrite that deliberately changes what somebody resolves.
@@ -63,14 +74,16 @@ Only a type checker activates it, so nothing that runs your package can tell the
   every checker looks first.
 
 Both print as errors and neither stops the publish, because the published artifact is correct.
-`--no-heal` withholds them and then both stop it. Whatever the archive cannot settle is left exactly
+Under `--no-heal` neither repair is applied, and then both defects stop it. Whatever the packed file
+list cannot settle is left exactly
 as written: a `types` target the package does not ship stays a missing-file report naming the path,
 and nothing moves across a condition this tool does not recognise, since a private name may be meant
 for a consumer configured to take it.
 
 Defects that would need a guess are reported and left alone: a branch no consumer reaches, a
-consumer no branch serves, a condition no measured consumer activates, anything inside a fallback
-array (Bun resolves those differently from Node and Deno), and a map too large to enumerate.
+consumer no branch serves, a condition name no known runtime or bundler activates, anything inside
+a fallback array (Bun resolves those differently from Node and Deno, so no rewrite is safe for
+everyone), and a map too large to enumerate.
 
 ### Added
 
@@ -84,9 +97,9 @@ array (Bun resolves those differently from Node and Deno), and a map too large t
 - **The download is 46% smaller**: 63.2 kB to 34.0 kB, and 154.0 kB to 62.7 kB installed.
   `dist/cli.js` is minified with function and class names kept, so a stack trace from an unexpected
   failure still names the function that threw.
-- **One run reports everything.** Checks that used to stop on the spot — a packed credential,
+- **Guards that used to abort on the spot now report instead** — a packed credential,
   `node_modules`, `.git`, a test tree, a lockfile, a registry URL carrying a password, a
-  `workspace:` spec — now report as findings beside the rest. Nothing is weaker for it:
+  `workspace:` spec. They are findings beside the rest now. Nothing is weaker for it:
   `secret-file` and `internal-file` still stop the publish and no flag waives them. A packed
   credential is now also told to **rotate** it, because the key was written into a tarball on the
   build machine whether or not anything was published.
@@ -103,14 +116,15 @@ array (Bun resolves those differently from Node and Deno), and a map too large t
   now promotes them like any other warning; acknowledge them with
   `"publish-clean": { "keepFields": [...] }`, which the message prints for you.
 - **Every run ends by saying what it decided.** `publish-clean: no findings.`, or
-  `publish-clean: N findings above, none of which stops a publish.` A silent pass could not be told apart from a crash.
+  `publish-clean: N findings above, none of which stops a publish.` A silent pass could not be
+  told apart from a crash.
 - **Checking a package no longer needs npm installed.** npm is started at the upload rather than at
   startup, so `verify` and `--dry-run` never start it. A publish still refuses when npm is missing
   or cannot be executed, before anything is uploaded.
 - **A directory outside any Git repository no longer fails the run.** There is no commit there for a
   tree to differ from, so the check reports that it was skipped and the run continues. It used to
-  abort with a raw `git exited with 128`. `--no-git-checks` still means what it says: a repository
-  whose working tree is dirty.
+  abort with a raw `git exited with 128`. `--no-git-checks` is unchanged, and is still the way to
+  publish from a repository with uncommitted changes.
 
 ### Fixed
 

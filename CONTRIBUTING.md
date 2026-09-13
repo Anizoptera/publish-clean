@@ -9,11 +9,13 @@ bun install --frozen-lockfile
 bun run check
 ```
 
-`bun run check` is the required gate. It checks formatting, typechecks, builds, runs the
-Vitest suite against that build, rejects a tracked `dist/`, asserts that Git will actually
-run this repository's commit hook, and runs the
-freshly built CLI on this package itself — asserting the cleaned artifact has no runtime
-dependencies and passing it to `publint` and `@arethetypeswrong/cli`.
+`bun run check` is the required gate. `package.json` lists the steps; read them there.
+
+The last step is the one worth knowing about: it runs the freshly built CLI on this package
+and checks the tarball that comes out. It is the only step that applies the tool to a real,
+working package, so it is the only one that would notice a rule refusing correct packages.
+A fixture cannot: from inside this repository a fabricated refusal and a caught defect look
+the same. That is what the corpus measurements in `AGENTS.md` are for.
 
 Run self-application after the CLI tests: packing this repository runs its `prepare`
 script and rebuilds `dist`. Running both together races the tests against deletion and
