@@ -11,11 +11,7 @@ the first defect. New checks cover packed names, `bin` shebangs and shipped file
 
 ### Upgrade notes
 
-- The `[healed]` severity is gone. A repair no longer changes how bad a defect is, only whether the
-  run stops: a repaired breakage prints `[error]` with the repair stated beside it, and never stops
-  the run. Anything parsing `[healed]` must read the message instead.
-- `--guard-only` still works and now says it is deprecated. Use `verify`, which also accepts a
-  `private: true` package.
+- `--guard-only` still works and now says it is deprecated. Use `verify` instead.
 - The refusals below are new. Run `publish-clean verify` against your package before you upgrade a
   release pipeline.
 
@@ -74,15 +70,13 @@ Only a type checker activates it, so nothing that runs your package can tell the
   every checker looks first.
 
 Both print as errors and neither stops the publish, because the published artifact is correct.
-Under `--no-heal` neither repair is applied, and then both defects stop it. Whatever the packed file
-list cannot settle is left exactly
-as written: a `types` target the package does not ship stays a missing-file report naming the path,
-and nothing moves across a condition this tool does not recognise, since a private name may be meant
-for a consumer configured to take it.
+Under `--no-heal` neither repair is applied, and then both defects stop it. A `types` target the
+package does not ship is not repaired either: it stays a missing-file report naming the path.
 
 Defects that would need a guess are reported and left alone: a branch no consumer reaches, a
-consumer no branch serves, a condition name no known runtime or bundler activates, anything inside
-a fallback array (Bun resolves those differently from Node and Deno, so no rewrite is safe for
+consumer no branch serves, a condition name no known runtime or bundler activates (a private name
+may be meant for a consumer configured to take it, so nothing moves across one), anything inside a
+fallback array (Bun resolves those differently from Node and Deno, so no rewrite is safe for
 everyone), and a map too large to enumerate.
 
 ### Added
@@ -94,9 +88,8 @@ everyone), and a map too large to enumerate.
 
 ### Changed
 
-- **The download is 46% smaller**: 63.2 kB to 34.0 kB, and 154.0 kB to 62.7 kB installed.
-  `dist/cli.js` is minified with function and class names kept, so a stack trace from an unexpected
-  failure still names the function that threw.
+- **`dist/cli.js` is minified**, with function and class names kept, so a stack trace from an
+  unexpected failure still names the function that threw.
 - **Guards that used to abort on the spot now report instead**: a packed credential,
   `node_modules`, `.git`, a test tree, a lockfile, a registry URL carrying a password, a
   `workspace:` spec. They are findings beside the rest now. Nothing is weaker for it:
