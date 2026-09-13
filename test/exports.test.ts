@@ -212,6 +212,9 @@ it("repairs a types branch no checker can read, and leaves every working one alo
   const huge = heal({ exports: { ".": { types: "./t.js", default: branch(13) } } }, true, ["t.js"]);
   expect(huge.rules).toContain("exports-too-complex");
   expect(huge.rules).toContain("types-branch-not-declarations");
+  // The finding says `healed`, so the artifact must really carry the repair. Reporting one and
+  // shipping the other is worse than either alone: it publishes the defect AND the all-clear.
+  expect(Object.keys(subpath(huge) as Record<string, unknown>)).toEqual(["default"]);
 
   // A fallback array freezes the REORDER, because the resolvers disagree about what an array
   // resolves to — but not the removal, whose warrant never touched the row algebra. A guard that
