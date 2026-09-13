@@ -2,7 +2,10 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 /**
- * README.md must name every rule id, CLI flag and config key this tool has.
+ * Every name the shipped documents use must be a name `src/` actually defines.
+ *
+ * README.md must name every rule id, CLI flag and config key this tool has, and CHANGELOG.md's
+ * pending section must promise no flag it does not.
  *
  * README.md ships in the package. It is the reference an agent or maintainer reads straight out of
  * `node_modules`, with no repository and no network, so anything missing from it is missing at the
@@ -48,6 +51,12 @@ function ruleIds(): string[] {
   return ids;
 }
 
+/** Named separately because the changelog rule below judges the same population. */
+const cliFlags = matches(
+  block("options.ts", "const CLI_FLAGS = {", "} as const;"),
+  /^\s*"?([a-z][a-z-]*)"?:\s*\{/gm,
+);
+
 /**
  * Each surface, with the form the README must carry it in. A flag is searched WITH its dashes:
  * `strict` alone appears in ordinary prose, so the bare name would pass on a README that never
@@ -55,14 +64,7 @@ function ruleIds(): string[] {
  */
 const SURFACES = [
   { what: "rule id", names: ruleIds(), form: (name: string) => name },
-  {
-    what: "CLI flag",
-    names: matches(
-      block("options.ts", "const CLI_FLAGS = {", "} as const;"),
-      /^\s*"?([a-z][a-z-]*)"?:\s*\{/gm,
-    ),
-    form: (name: string) => `--${name}`,
-  },
+  { what: "CLI flag", names: cliFlags, form: (name: string) => `--${name}` },
   {
     what: "config key",
     names: matches(block("config.ts", "const CONFIG_KEYS = new Set([", "]);"), /"([a-zA-Z]+)"/g),
@@ -91,4 +93,50 @@ if (missing.length > 0)
       `${missing.join("\n")}\n` +
       `Add each to the prose that already covers its subject — tag a rule's bullet [\`rule-id\`]. ` +
       `Do not start a separate table: that is src/ copied out, and it rots.`,
+  );
+
+/**
+ * `## Unreleased` only. Released sections describe the tool as it stood when they shipped, so a
+ * flag dropped later makes them history rather than errors. An absent section is the normal state
+ * right after a release consumed it.
+ */
+function unreleasedSection(changelog: string): string {
+  const from = changelog.indexOf("\n## Unreleased");
+  if (from === -1) return "";
+  const to = changelog.indexOf("\n## ", from + 1);
+  return to === -1 ? changelog.slice(from) : changelog.slice(from, to);
+}
+
+/**
+ * The pending release notes must not promise a flag this tool does not have.
+ *
+ * That section is published verbatim as the GitHub Release body, so a name that died mid-cycle
+ * reaches consumers as instructions. It runs the opposite direction to the README rule above and
+ * catches what that one cannot: the forward check falls silent as soon as the NEW name appears
+ * somewhere, leaving the dead name in place, reading exactly like documentation.
+ *
+ * Every flag is compared against CLI_FLAGS with no allowance for foreign ones, which holds only
+ * because this section never mentions any: measured 2026-09-13, the README names `--provenance`,
+ * `--access`, `--tag` and `--frozen-lockfile`, all owned by npm or a package manager, and the
+ * changelog names none of them. Should that change, widen the population from a declaration in
+ * `src/`, never by listing names here — a hand-kept list of someone else's flags is the rot this
+ * file exists to stop.
+ */
+const legalFlags = new Set(cliFlags.map((name) => `--${name}`));
+const invented = [
+  ...new Set(
+    matches(
+      unreleasedSection(readFileSync(path.join(ROOT, "CHANGELOG.md"), "utf8")),
+      /(--[a-z][a-z-]+)/g,
+    ),
+  ),
+]
+  .filter((flag) => !legalFlags.has(flag))
+  .sort();
+
+if (invented.length > 0)
+  throw new Error(
+    `CHANGELOG.md "## Unreleased" promises flags this tool does not have:\n` +
+      `${invented.map((flag) => `  ${flag}`).join("\n")}\n` +
+      `That section ships as the GitHub Release body. Use the current name, or drop the claim.`,
   );

@@ -7,8 +7,10 @@
   download size is SETTLED and is NEVER a reason to cut, trim or split it; do not raise the subject.
   The only defect that matters here is being WRONG or STALE. Change a rule ⇒ update the README in the
   same commit. Verify against `src/`, never against the prose already there.
-  `readme:check` enforces this for every RULE ID, CLI flag and config key — a finding prints its
-  rule id, so that id is what a reader arrives holding. Tag the bullet that already explains the
+  `docs:check` enforces this for every RULE ID, CLI flag and config key — a finding prints its
+  rule id, so that id is what a reader arrives holding. It also refuses a flag named in
+  `CHANGELOG.md`'s `## Unreleased` that `src/` does not define: that section ships verbatim as the
+  GitHub Release body, and the README rule cannot see a dead name once the new one is documented. Tag the bullet that already explains the
   rule with ``[`rule-id`]``; never start a separate table, which is just `src/` copied out to rot.
   Its `## Why` section — publish is irreversible, the defect table, the corpus figures — is EVIDENCE
   a reader needs to decide whether to adopt a tool that gates their releases, NOT marketing. Do not
