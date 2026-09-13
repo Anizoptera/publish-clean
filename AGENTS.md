@@ -50,11 +50,9 @@
   publint did find one real gap: a `bin` file with no shebang, which the shebang scan missed because
   it reads only files that already start with `#!`. `bin-no-shebang` covers it. Never delete or weaken
   a working check to agree with anything.
-  Both stay RECOMMENDED to consumers in the README; only this repository's own lane differs.
-  `@arethetypeswrong/cli` does not run in `scripts/check-cleaned-artifact.ts` (Art, 2026-09-13): this
-  package ships a `bin` with no `types` key and no importable entry, so attw's only reachable verdict
-  is "This package does not contain types." Do not re-add it as coverage — restore it if and only if
-  this package starts shipping declarations, which is the one change that makes it say anything else.
+  attw does NOT run in our own lane: this package ships a `bin`, no `types`, no importable entry, so
+  its only possible verdict is "does not contain types". Re-add ONLY if we start shipping
+  declarations. The README still recommends it to consumers — that stays.
 - **This tool checks the package, not the JavaScript in it** (Art, 2026-09-12). In scope: what the
   manifest and the archive bytes answer cheaply — declared paths against packed names, condition-map
   algebra, names a filesystem cannot carry, credentials, secrets, shipped development files, the two

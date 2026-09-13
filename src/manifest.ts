@@ -68,14 +68,14 @@ const DEV_FIELDS = new Set([
 ]);
 
 /**
- * Lifecycle scripts a consumer's installer may run. Finding one keeps the WHOLE block, because it
- * can invoke helpers named anywhere else in it.
+ * Lifecycle scripts a consumer's installer runs. Finding one keeps the WHOLE block — it can call
+ * helpers named anywhere else in it.
  *
- * `prepare` never actually arrives here: measured 2026-09-13, `pnpm pack` strips `prepare`,
- * `prepack`, `postpack`, `prepublishOnly`, `publish` and `postpublish` from the packed manifest
- * and keeps the other four members of this set. It stays listed because this set states what a
- * CONSUMER runs, not what one packer forwards — but a test asserting that a `prepare`-only
- * package keeps its scripts would be asserting something no pnpm tarball can contain.
+ * `prepare` never reaches here. Measured 2026-09-13: `pnpm pack` drops `prepare`, `prepack`,
+ * `postpack`, `prepublishOnly`, `publish` and `postpublish`, and keeps the other four of this set.
+ * That is why this package publishes no `scripts` at all — every entry left was a dev script.
+ * `prepare` stays listed anyway: the set names what a CONSUMER runs, not what one packer forwards.
+ * Do NOT write a test for a `prepare`-only package keeping its scripts; pnpm cannot produce one.
  */
 const CONSUMER_SCRIPTS = new Set(["preinstall", "install", "postinstall", "prepare", "uninstall"]);
 

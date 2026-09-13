@@ -753,9 +753,9 @@ it.concurrent("names an unusable --tarball-out instead of failing as a stack", a
       "Unable to create the --tarball-out directory /nonexistent/nope",
     );
     expect(result.stderr).not.toContain("node:internal");
-    // The errno still prints: it is the one detail the sentence above cannot carry. Which errno
-    // is the kernel's call, not this tool's — `mkdir /nonexistent` is ENOENT on macOS and EACCES
-    // for a non-root Linux user, so pinning one name tests the runner instead of the behaviour.
+    // The errno must still print — the sentence above cannot carry it. WHICH errno is the kernel's
+    // choice: `mkdir /nonexistent` gives ENOENT on macOS, EACCES for a non-root Linux user. Pinning
+    // one name tests the runner, not this tool.
     expect(result.stderr).toMatch(/Caused by: E[A-Z]+:/);
 
     // Same ruling, other end of the run: a temp directory that cannot be created is the

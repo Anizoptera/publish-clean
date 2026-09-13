@@ -137,7 +137,7 @@ function run(command: string, args: readonly string[]): string {
 const tested = readFileSync("dist/cli.js");
 
 // The CLI keeps no temp tree, so this script names its own and deletes it.
-// publint reads the extracted package, so the tarball is unpacked here rather than handed over.
+// publint reads the extracted package, so the tarball is unpacked here.
 const root = mkdtempSync(path.join(tmpdir(), "publish-clean-check-"));
 try {
   run(process.execPath, ["dist/cli.js", "--dry-run", "--no-git-checks", "--tarball-out", root]);
