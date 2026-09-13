@@ -19,9 +19,23 @@ import path from "node:path";
 import { expect, it } from "vitest";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { ROW_BUDGET, rowsOf } from "../src/conditions";
 
 const run = promisify(execFile);
+
+/**
+ * The filename Node resolved to, from either probe's answer.
+ *
+ * The two probes answer in different currencies: `import.meta.resolve` yields a `file:` URL,
+ * `require.resolve` a native path. On Windows that path is backslash-separated, so any
+ * separator-splitting reduction has to be right about both — `path.basename` already is, after
+ * the URL is converted. "unresolved" is the probes' own sentinel and passes through.
+ */
+function basenameOf(answer: string): string {
+  if (answer === "unresolved") return answer;
+  return path.basename(answer.startsWith("file:") ? fileURLToPath(answer) : answer);
+}
 
 /** Targets are never loaded — resolution is the whole question — so the files may be empty. */
 const TARGETS = [
@@ -112,14 +126,14 @@ it("resolves every shape the way Node does, under every measured condition set",
       ...TARGETS.map((name) => writeFile(path.join(pkg, name), "")),
       // Two probes, because the module system is what activates `import` or `require`; no flag
       // can set them, so the consumer has to genuinely be one or the other.
-      // Both reduce Node's answer to a bare filename, and must split on EITHER separator: Windows
-      // resolves to `C:\...\pkg\default.js`, so splitting on "/" alone returns the whole path and
-      // every subpath then mismatches — reading as Node disagreeing with us, which it does not.
+      // Both return Node's answer WHOLE. Reducing it to a filename inside this template would put
+      // the pattern through an escaping layer — `\\` here reaches the probe as `\` — which is how a
+      // separator class silently degrades to matching "/" only. `basenameOf` does it in real code.
       writeFile(
         path.join(root, "probe.mjs"),
         `const out = {};
          for (const sub of process.argv.slice(2)) {
-           try { out[sub] = import.meta.resolve("pkg" + sub.slice(1)).split(/[\\/]/).pop(); }
+           try { out[sub] = import.meta.resolve("pkg" + sub.slice(1)); }
            catch { out[sub] = "unresolved"; }
          }
          console.log(JSON.stringify(out));`,
@@ -128,7 +142,7 @@ it("resolves every shape the way Node does, under every measured condition set",
         path.join(root, "probe.cjs"),
         `const out = {};
          for (const sub of process.argv.slice(2)) {
-           try { out[sub] = require.resolve("pkg" + sub.slice(1)).split(/[\\/]/).pop(); }
+           try { out[sub] = require.resolve("pkg" + sub.slice(1)); }
            catch { out[sub] = "unresolved"; }
          }
          console.log(JSON.stringify(out));`,
@@ -143,7 +157,10 @@ it("resolves every shape the way Node does, under every measured condition set",
         const { stdout } = await run(process.execPath, [...conditions, probe, ...subpaths], {
           cwd: root,
         });
-        return JSON.parse(stdout) as Record<string, string>;
+        const resolved = JSON.parse(stdout) as Record<string, string>;
+        return Object.fromEntries(
+          Object.entries(resolved).map(([sub, answer]) => [sub, basenameOf(answer)] as const),
+        );
       }),
     );
 
