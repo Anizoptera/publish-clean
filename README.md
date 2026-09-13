@@ -311,7 +311,7 @@ a type checker activates it, so nothing that runs your package can tell the diff
   [`types-branch-unreachable`], where every checker looks first.
 
 Both print as errors — fix your source — and neither stops the publish, because the published
-artifact is correct. `--no-heal` withholds both rewrites, and then both stop it.
+artifact is correct. Under `--no-heal` neither rewrite is applied, and then both defects stop it.
 
 Anything the archive cannot settle is left exactly as you wrote it: a `types` target the package
 does not ship is a missing file and keeps that report, and nothing is moved across a condition this
@@ -389,7 +389,7 @@ boolean flags enable their setting. Pass per-release npm options, such as dist-t
 | `--no-git-checks`    | `noGitChecks`     | Allow publishing from a dirty working tree.                                                |
 | -                    | `devFields`       | Extra manifest fields to strip.                                                            |
 | -                    | `keepFields`      | Fields that belong in the published package, so stop reporting them.                       |
-| -                    | `allowUnreferenced` | Shipped paths nothing imports on purpose. Prefixes match whole subtrees.                 |
+| -                    | `allowUnreferenced` | Shipped paths nothing imports, on purpose. Matched as a prefix, so a directory name covers everything under it. |
 | -                    | [`validateArtifact`](#validate-the-final-artifact) | Run your checks on the cleaned tarball before copying or publishing it. |
 | `-h`, `--help`       | -                 | Print usage, every flag, and the config keys.                                              |
 | `-v`, `--version`    | -                 | Print the installed version.                                                               |
