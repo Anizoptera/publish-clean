@@ -198,6 +198,42 @@ it("repairs a types branch no checker can read, and leaves every working one alo
   expect(kept("./src/index.ts")).toEqual({ types: "./src/index.ts" });
   expect(kept("./schema.json")).toEqual({ types: "./schema.json" });
 
+  // A map past ROW_BUDGET cannot be enumerated, so every proof-backed rewrite is withheld — but the
+  // `types` repair never depended on that proof, and a package too large to reason about is the
+  // last one whose broken branch should pass in silence.
+  // A DIFFERENT condition at each level, because repeating one collapses instead of multiplying:
+  // once `node` is decided at the top, every nested `node` is decided with it and the map stays
+  // small. Distinct names keep every combination live, which is what passes the budget.
+  let leaf = 0;
+  const branch = (level: number): unknown =>
+    level === 0
+      ? `./x${leaf++}.js`
+      : { [`cond${level}`]: branch(level - 1), default: branch(level - 1) };
+  const huge = heal({ exports: { ".": { types: "./t.js", default: branch(13) } } }, true, ["t.js"]);
+  expect(huge.rules).toContain("exports-too-complex");
+  expect(huge.rules).toContain("types-branch-not-declarations");
+
+  // A fallback array freezes the REORDER, because the resolvers disagree about what an array
+  // resolves to — but not the removal, whose warrant never touched the row algebra. A guard that
+  // went quiet here would be missing on exactly the maps nothing else can reason about.
+  const array = heal(
+    { exports: { ".": { types: "./t.js", browser: ["./b.js", "./c.js"], default: "./d.js" } } },
+    true,
+    ["t.js"],
+  );
+  expect(array.rules).toContain("types-branch-not-declarations");
+  expect(subpath(array)).toEqual({ browser: ["./b.js", "./c.js"], default: "./d.js" });
+
+  // The reorder stays frozen even when the array is what a checker would reach: a member of one is
+  // a target some resolver really takes, and this tool cannot say which — so it moves nothing here
+  // rather than judge whether those declarations are already reachable.
+  const viaArray = heal(
+    { exports: { ".": { browser: ["./b.d.ts"], types: "./t.d.ts", default: "./d.js" } } },
+    true,
+    [],
+  );
+  expect(viaArray.rules).not.toContain("types-branch-unreachable");
+
   // Stranded behind `default`, the key is no consumer's to reach, which makes it provably inert —
   // so the neutral rewrites delete it and collapse what is left. Hoisting it instead would make it
   // live, and leave the reachability finding claiming it is dead: one key, two contradictory

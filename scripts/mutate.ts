@@ -345,6 +345,18 @@ const MUTATIONS: readonly Mutation[] = [
     to: "return value;",
   },
   {
+    name: "exports: keys are reordered around a fallback array",
+    file: "src/exports.ts",
+    from: /if \(containsArray\(value\)\) return value;/,
+    to: "",
+  },
+  {
+    name: "exports: a types branch in a map too large to enumerate stops being reported",
+    file: "src/exports.ts",
+    from: /if \(!reportReachability\(node, where, findings\)\) return heal \? repaired : withheld\(\);/,
+    to: "if (!reportReachability(node, where, findings)) return node;",
+  },
+  {
     name: "exports: a key stranded behind default is hoisted instead of being reported dead",
     file: "src/exports.ts",
     from: /if \(ahead\.includes\("default"\)\) return value;/,
@@ -387,7 +399,7 @@ const MUTATIONS: readonly Mutation[] = [
   {
     name: "budget: an unenumerable map is healed anyway",
     file: "src/exports.ts",
-    from: /if \(!reportReachability\(node, where, findings\)\) return node;/,
+    from: /if \(!reportReachability\(node, where, findings\)\) return heal \? repaired : withheld\(\);/,
     to: "reportReachability(node, where, findings);",
   },
 

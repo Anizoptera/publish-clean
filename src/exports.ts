@@ -210,8 +210,12 @@ function without(node: JsonObject, omit: string): JsonObject {
   );
 }
 
-/** Every string a consumer could resolve through this node. Arrays cannot occur: a node holding one
- * anywhere below is frozen whole before the repair pass reaches it. */
+/**
+ * Every string a consumer could resolve through this node. Its one caller has already refused any
+ * node holding a fallback array, so an array cannot appear below — were that guard ever relaxed,
+ * this walk would have to grow an array branch, because a member of one is a target some resolver
+ * really takes and skipping it reports "nothing here declares anything" about a branch that does.
+ */
 function leaves(node: unknown, out: string[] = []): string[] {
   if (typeof node === "string") out.push(node);
   else if (isObject(node)) for (const value of Object.values(node)) leaves(value, out);
@@ -267,6 +271,10 @@ function repairTypes(
   const hoist = (value: JsonObject, keys: readonly string[], at: string): JsonObject => {
     const hidden = keys.filter(typeKey);
     if (hidden.length === 0 || typeKey(keys[0] ?? "")) return value;
+    // Reordering around a fallback array is the one move this file never makes, because the
+    // resolvers disagree about what an array resolves to and the author cannot check the diff
+    // against a rule nobody agrees on. Removing a dead branch is unaffected and still happens.
+    if (containsArray(value)) return value;
     const ahead = keys.slice(0, keys.indexOf(hidden[0] ?? ""));
     // A key stranded behind `default` is `reportReachability`'s, which has already named it — the
     // same split `forcedOrderConsequence` keeps. Hoisting it too would leave the run holding two
@@ -324,7 +332,7 @@ function repairTypes(
     return hoist(changed ? rebuilt : value, keys, at);
   };
 
-  return containsArray(node) ? node : visit(node, where, false);
+  return visit(node, where, false);
 }
 
 /**
@@ -602,29 +610,38 @@ export function reviewExports(
   const { files, heal } = options;
   const findings: Finding[] = [];
   const analyse = (node: unknown, where: string): unknown => {
-    // A map whose outcomes cannot be enumerated is frozen whole, exactly as one containing a
-    // fallback array is: every rewrite below is authorised by that enumeration, so without it
-    // there is no proof to rewrite under. `exports-too-complex` has already told the author the
-    // map ships as written, and healing it anyway would then fail the equivalence assert below —
-    // reporting a defect in this tool for a package that is merely large.
-    if (!reportReachability(node, where, findings)) return node;
     const first = findings.length;
+    /** The author's own bytes, with every finding since `first` corrected to stop claiming a repair
+     * the published artifact does not carry. An unrepaired breakage is then what `isFatal` stops. */
+    const withheld = (): unknown => {
+      for (let index = first; index < findings.length; index++) {
+        const finding = findings[index];
+        if (finding?.healed) findings[index] = { ...finding, healed: false };
+      }
+      return node;
+    };
     // The one deliberate semantic change, taken BEFORE the neutral rewrites so they see the map a
     // consumer will actually resolve — a removed branch can leave the rest in canonical order, and
     // a hoisted one can make another key provably inert.
+    //
+    // Ahead of the enumeration gate too, and that ordering is load-bearing: this check ran on every
+    // map before it moved here, and its warrant is that only a checker activates `types`, which
+    // owes nothing to the row algebra. Running it after the gate would leave a fatal rule silent on
+    // exactly the maps too large to reason about — a guard whose absence is invisible.
     const repaired = repairTypes(node, where, findings, files) ?? {};
+    // A map whose outcomes cannot be enumerated is frozen against the rewrites BELOW: each of those
+    // is authorised by that enumeration, so without it there is no proof to act under.
+    // `exports-too-complex` has already told the author the map ships as written, and healing it
+    // anyway would then fail the equivalence assert — reporting a defect in this tool for a package
+    // that is merely large.
+    if (!reportReachability(node, where, findings)) return heal ? repaired : withheld();
     const healed = healNode(repaired, where, findings);
     if (!equivalent(repaired, healed))
       throw new Error(
         `publish-clean defect: repairing ${where} changed what a consumer resolves. This is a ` +
           `bug in publish-clean, not in your package; publish with --no-heal meanwhile.`,
       );
-    if (heal) return healed;
-    for (let index = first; index < findings.length; index++) {
-      const finding = findings[index];
-      if (finding?.healed) findings[index] = { ...finding, healed: false };
-    }
-    return node;
+    return heal ? healed : withheld();
   };
 
   let result: JsonObject = pkg;
