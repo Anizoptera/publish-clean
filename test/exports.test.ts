@@ -122,7 +122,20 @@ it("never treats a fallback array as interchangeable with anything but itself", 
 });
 
 /** `ships` is the archive's packed names, which only the `types` repairs consult. */
-function heal(pkg: Record<string, unknown>, enabled = true, ships: readonly string[] = []) {
+/**
+ * `ships` is the archive's packed names, and `repairTypes` is its only reader: every question it
+ * asks about a `types` branch is answered from there, so an empty archive silently answers "leads
+ * nowhere" to all of them and the repair goes inert. A fixture that forgets it then asserts nothing
+ * while still passing — which is how two mutation rows survived once, their guards deleted with no
+ * test noticing, because the case that was meant to reach them stopped short one guard earlier.
+ *
+ * So a fixture naming a `types` key must say what the archive carries. The name test over-matches
+ * deliberately (a `types` key nested where nothing reads it still demands one): the cost is an
+ * argument a fixture did not strictly need, and the alternative is this failure again, unsignalled.
+ */
+function heal(pkg: Record<string, unknown>, enabled = true, ships?: readonly string[]) {
+  if (ships === undefined && /"typ(es|ings)"\s*:/.test(JSON.stringify(pkg)))
+    throw new Error("fixture names a types key: pass the archive it is resolved against");
   const { manifest, findings } = reviewExports(pkg, { files: new Set(ships), heal: enabled });
   return { findings, result: manifest, rules: findings.map((finding) => finding.rule) };
 }
@@ -234,15 +247,20 @@ it("repairs a types branch no checker can read, and leaves every working one alo
   expect(array.rules).toContain("types-branch-not-declarations");
   expect(subpath(array)).toEqual({ browser: ["./b.js", "./c.js"], default: "./d.js" });
 
-  // The reorder stays frozen even when the array is what a checker would reach: a member of one is
-  // a target some resolver really takes, and this tool cannot say which — so it moves nothing here
-  // rather than judge whether those declarations are already reachable.
+  // Freezing the reorder is the array's OWN doing, not a side effect of some other guard declining:
+  // here every target ships, the keys ahead lead a checker nowhere, and `types` really does reach
+  // declarations — so this map satisfies every condition for a hoist and is left alone regardless.
   const viaArray = heal(
-    { exports: { ".": { browser: ["./b.d.ts"], types: "./t.d.ts", default: "./d.js" } } },
+    { exports: { ".": { browser: ["./b.js", "./c.js"], types: "./t.d.ts", default: "./d.js" } } },
     true,
-    [],
+    ["b.js", "c.js", "t.d.ts", "d.js"],
   );
   expect(viaArray.rules).not.toContain("types-branch-unreachable");
+  expect(Object.keys(subpath(viaArray) as Record<string, unknown>)).toEqual([
+    "browser",
+    "types",
+    "default",
+  ]);
 
   // Declarations nobody built are not made reachable: the `svgo` installed here names
   // `./types/lib/svgo-node.d.ts` and ships no `types/` at all, and putting a dead path where every
@@ -271,7 +289,10 @@ it("repairs a types branch no checker can read, and leaves every working one alo
   // so the neutral rewrites delete it and collapse what is left. Hoisting it instead would make it
   // live, and leave the reachability finding claiming it is dead: one key, two contradictory
   // reports, and a rewrite nobody asked for in place of a repair that needs no warrant at all.
-  const stranded = heal({ exports: { ".": { default: "./d.js", types: "./t.d.ts" } } });
+  const stranded = heal({ exports: { ".": { default: "./d.js", types: "./t.d.ts" } } }, true, [
+    "d.js",
+    "t.d.ts",
+  ]);
   expect(subpath(stranded)).toEqual("./d.js");
   expect(stranded.rules).not.toContain("types-branch-unreachable");
 });
@@ -433,7 +454,11 @@ it("names a condition no measured consumer activates, without touching it", () =
   // The control: every name the tool does rank must stay silent, or the report is noise on
   // ordinary manifests rather than a signal about an unrecognised one.
   expect(
-    heal({ exports: { ".": { types: "./d.ts", import: "./m.js", require: "./c.js" } } }).rules,
+    heal({ exports: { ".": { types: "./d.ts", import: "./m.js", require: "./c.js" } } }, true, [
+      "d.ts",
+      "m.js",
+      "c.js",
+    ]).rules,
   ).not.toContain("exports-unknown-condition");
 });
 
