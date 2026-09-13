@@ -250,10 +250,9 @@ function leaves(node: unknown, out: string[] = []): string[] {
  * rule fired on across 3674 installed published names type-check correctly today through exactly
  * that fallback.
  *
- * The hoist may move `types` across a condition this tool does not recognise, which `canonicalOrder`
- * refuses to do. The reason that refusal exists is the DIFF — an author cannot review a move this
- * tool cannot explain — and here it can: the finding names every key the move passed, and each was
- * checked to lead a checker nowhere.
+ * "Leads nowhere" is read from the ARCHIVE, which is why an unrecognised condition ahead stops the
+ * move rather than licensing it: a private name's target may be absent precisely because it is not
+ * meant for the published tree, and the archive cannot tell that from a mistake.
  *
  * Both report `breaks`, because a consumer getting the wrong API or none is a breakage, and both
  * print `[error]` however mild the word "types" sounds. Neither aborts: the published artifact is
@@ -280,8 +279,16 @@ function repairTypes(
     // same split `forcedOrderConsequence` keeps. Hoisting it too would leave the run holding two
     // findings about one key, one of them saying it is dead after this made it live.
     if (ahead.includes("default")) return value;
+    // An unrecognised condition ahead is never moved across, the same rule `canonicalOrder` keeps:
+    // this tool cannot know who activates a private name or what they should get. `zod` puts
+    // `@zod/source` first at every subpath, pointing at TypeScript this package does not even ship —
+    // so the archive says "no declarations there" while a checker configured with that condition is
+    // meant to take it, and hoisting would hand it the built `.d.cts` instead of the source.
+    if (ahead.some((key) => !isKnown(key))) return value;
     const reached = (key: string): boolean =>
       leaves(value[key]).some((target) => checkerFinds(names, target) === "declarations");
+    // Nothing to make reachable unless the branch really leads to declarations the archive carries.
+    if (!hidden.some(reached)) return value;
     if (ahead.some(reached)) return value;
     findings.push({
       rule: "types-branch-unreachable",

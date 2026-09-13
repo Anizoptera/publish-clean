@@ -82,9 +82,10 @@ export const SCRIPT = /\.[cm]?[jt]sx?$/;
  * hides it needs `declarations`, and for that purpose `other` groups with `javascript`: a `.wasm` or
  * `.json` target hides a `types` key exactly as a `.js` one does.
  *
- * `other` is never rewritten. A non-script target under `types` may well be an author error, but it
- * has no corpus measurement behind it, and this answer authorises a change to a published manifest —
- * a fabricated rewrite is worse than a fabricated refusal, because nothing downstream reviews it.
+ * `other` is never rewritten, and two different targets earn it: one this rule has no measurement
+ * for (a non-script file under `types`), and one that belongs to another rule (a target the archive
+ * does not carry). Both matter because this answer authorises a change to a published manifest — a
+ * fabricated rewrite is worse than a fabricated refusal, since nothing downstream reviews it.
  *
  * Two ways a target that is not itself a declaration file still qualifies, and between them they
  * account for every package the extension test alone refused across 3674 installed published names.
@@ -105,9 +106,18 @@ export function checkerFinds(
   packed: ReadonlySet<string>,
   target: string,
 ): "declarations" | "javascript" | "other" {
-  if (DECLARATION.test(target)) return "declarations";
   if (!SCRIPT.test(target)) return "other";
-  if (/\.[cm]?tsx?$/.test(target)) return "declarations";
+  // Existence is asked FIRST, of declarations too: a target the archive does not carry is a MISSING
+  // FILE, which `reviewDeclaredFiles` names with the path it could not find, and no rewrite may be
+  // built on it. Answering `javascript` would delete that report's subject — `@drizzle-team/brocli`
+  // writes `./index.d.cjs` for the `./index.d.cts` it ships, and the author needs the typo named.
+  // Answering `declarations` would let a branch be hoisted to the front for declarations nobody
+  // built — the `svgo` installed here names `./types/lib/svgo-node.d.ts` and ships no `types/` at
+  // all, so the move would put a dead path where every checker looks first.
+  const self = normalizeDeclaredPath(target);
+  if (self === null || !packed.has(self)) return "other";
+  // A declaration file, or a TypeScript source the checker reads directly.
+  if (DECLARATION.test(target) || /\.[cm]?tsx?$/.test(target)) return "declarations";
   const base = target.replace(SCRIPT, "");
   const beside = [".d.ts", ".d.mts", ".d.cts"].some((suffix) => {
     const name = normalizeDeclaredPath(base + suffix);
