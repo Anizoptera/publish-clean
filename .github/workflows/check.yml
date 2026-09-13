@@ -49,6 +49,43 @@ jobs:
       # Keep network-dependent advisory lookup out of the ordinary local feedback loop.
       - run: bun audit
 
+  # `engines.node` promises consumers a floor that nothing else here can check. `.tool-versions`
+  # pins one Node for developers and every other lane, so without this job the floor is only ever
+  # asserted.
+  #
+  # Do not replace this with a types pin. Making `@types/node` match the floor looks like it would
+  # turn the compiler into the gate, and does not: measured 2026-09-13, `@types/node@22.20.2`
+  # declares `process.execve` (`process.d.ts:1976`), which no Node before v23.11.0 has. The types
+  # major tracks the DefinitelyTyped line, never a runtime API surface, so it cannot answer this
+  # question and a pin would only cost contributors newer types for nothing.
+  #
+  # Runs the shipped CLI rather than the repository checks: formatting and types do not execute,
+  # so only build, suite and self-application can meet an API this floor lacks.
+  #
+  # What it covers is exactly what `engines` promises and no more. Vitest is hosted by Bun, so
+  # this proves `dist/cli.js` runs on the floor — the tests spawn it under `node` — not that the
+  # sources run on it when some other runtime imports them. Consumers only ever execute the CLI.
+  node-floor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .tool-versions
+      # The lowest Node this package claims to support. Resolves to the newest 22.x, which clears
+      # the 22.14.0 trusted-publishing guard the provenance tests need.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: bun run test:built
+      - run: bun run cleaned-artifact:check
+
   # Windows is the one platform where this tool's spawning differs, because `pnpm` and `npm`
   # there are `.cmd` shims that `execFile` cannot launch at all (see src/command.ts). That
   # branch cannot be proved by any test on Linux or macOS, and an unverified branch claiming
