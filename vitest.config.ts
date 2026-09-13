@@ -19,5 +19,11 @@ export default defineConfig({
     // bound exists to prevent. Neither is a lane-speed knob: they cap pathological runs and a
     // healthy one never reaches them.
     testTimeout: 60_000,
+    // `fsModuleCache` is deliberately absent, and vitest ADVERTISES it after every run — "transform
+    // took N · 3x% of tracked time, re-done on every run". Tracked time is not wall time: measured
+    // here over six runs each, the median went 1.74s to 1.68s, 3.4%. The suite is dominated by
+    // `cli.test.ts` driving real pack pipelines, which no transform cache touches. Not worth giving
+    // `scripts/mutate.ts` a persistent cache to go stale against, since its whole correctness rests
+    // on the file it just damaged on disk being exactly the file that runs.
   },
 });
