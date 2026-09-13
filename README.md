@@ -14,17 +14,19 @@ verified `exports`, checks for unwanted files, unresolved workspace dependencies
 what was verified is exactly what the registry stores and what provenance signs.
 
 ```text
-pnpm pack ──▶ rewrite package.json inside the tarball ──▶ re-read that file from disk ──▶ check it
-                                                                                           │
-                    exit 1 ◀── anything unrepaired that leaks or breaks a consumer ◀────────┤
-                                                                                           │
-           npm publish <that exact file> ◀── everything else, repaired or just reported ◀───┘
+pnpm pack ──▶ rewrite package.json inside the tarball ──▶ re-read it from disk
+                                                                      │
+                                                                   check it
+                                                                      │
+      exit 1 ◀── unrepaired, and it leaks or breaks a consumer ◀──────┤
+                                                                      │
+      npm publish <that exact file> ◀── repaired, or only reported ◀──┘
 ```
 
 ```sh
-pnpm exec publish-clean verify                             # every check, uploads nothing
-pnpm exec publish-clean --dry-run                          # checks, prints file list and manifest
-pnpm exec publish-clean -- --provenance --access public    # check, then publish those bytes
+pnpm exec publish-clean verify     # all checks, uploads nothing
+pnpm exec publish-clean --dry-run  # checks, prints file list and manifest
+pnpm exec publish-clean -- --provenance --access public   # check, then publish
 ```
 
 | What you get | How |
