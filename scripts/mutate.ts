@@ -45,8 +45,17 @@ import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 
-/** Generous against a cold cache; the suite is ~5s, so anything near this is a hang, not a slow run. */
-const SUITE_TIMEOUT_MS = 120_000;
+/**
+ * A run reaching this bound is a HANG, not a slow machine: the suite passes in ~2s on 5.5 cores, so
+ * this leaves roughly an order of magnitude even for a cold cache on one slow core.
+ *
+ * Keep it tight. The rows that reach it are the ones whose mutation removes a resource bound, and
+ * those diverge combinatorially rather than merely slowly — every such row pays this in full, so a
+ * generous value buys no accuracy and is charged to the whole audit. At 120s a single hung row was
+ * 46% of the entire run. Raise it only if a row's verdict changes, which is the control: the full
+ * run must report the same kills and the same hangs as before, faster.
+ */
+const SUITE_TIMEOUT_MS = 30_000;
 
 interface Mutation {
   readonly name: string;
@@ -320,7 +329,7 @@ const MUTATIONS: readonly Mutation[] = [
   {
     name: "shipped: types branch accepts any script",
     file: "src/shipped.ts",
-    from: /if \(!DECLARATION\.test\(target\) && SCRIPT\.test\(target\)\)/,
+    from: /if \(!DECLARATION\.test\(target\) && SCRIPT\.test\(target\) && !readableAsTypes\(files, target\)\)/,
     to: "if (false)",
   },
   {
@@ -392,6 +401,58 @@ const MUTATIONS: readonly Mutation[] = [
     to: 'else worst ??= "waste";',
   },
 
+  // --- src/shipped.ts: a branch is judged by what a consumer actually receives -------------------
+  // Paired rows again: the first of each pair refuses a package measured to work, the second ships
+  // one measured to be broken, and a reader meeting either alone cannot tell which they hold.
+  {
+    name: "shipped: a carriage return is fatal in a file nothing executes",
+    file: "src/shipped.ts",
+    from: /consequence: executed \? "breaks" : "waste",/,
+    to: 'consequence: "breaks",',
+  },
+  {
+    name: "shipped: a carriage return in a command is waved through",
+    file: "src/shipped.ts",
+    from: /consequence: executed \? "breaks" : "waste",/,
+    to: 'consequence: "waste",',
+  },
+  {
+    name: "shipped: a types branch ignores the declaration beside it",
+    file: "src/shipped.ts",
+    from: / && !readableAsTypes\(files, target\)/,
+    to: "",
+  },
+  {
+    name: "shipped: every types branch counts as readable",
+    file: "src/shipped.ts",
+    from: /if \(\/\\\.\[cm\]\?tsx\?\$\/\.test\(target\)\) return true;/,
+    to: "return true;",
+  },
+  {
+    name: "shipped: an ambient module declaration stops exempting its own name",
+    file: "src/shipped.ts",
+    from: /ambient\.has\(specifier\) \|\| /,
+    to: "",
+  },
+  {
+    name: "shipped: every self-import counts as ambient",
+    file: "src/shipped.ts",
+    from: /if \(ambient\.has\(specifier\) \|\|/,
+    to: "if (true ||",
+  },
+  {
+    name: "shipped: require() is asked what a bundler receives",
+    file: "src/shipped.ts",
+    from: /targetsUnder\(map, "require", requireTargets, "module"\)/,
+    to: 'targetsUnder(map, "require", requireTargets)',
+  },
+  {
+    name: "shipped: nothing is collected as a require target at all",
+    file: "src/shipped.ts",
+    from: /targetsUnder\(map, "require", requireTargets, "module"\)/,
+    to: 'targetsUnder(map, "require", requireTargets, "require")',
+  },
+
   {
     name: "shipped: bin shebang check reads its condition backwards",
     file: "src/shipped.ts",
@@ -410,8 +471,8 @@ const MUTATIONS: readonly Mutation[] = [
   {
     name: "shipped: bin scan stops seeing the bare spelling of a command path",
     file: "src/shipped.ts",
-    from: /collectDeclaredPaths\(pkg\.bin, commands, "every-string"\);/,
-    to: 'collectDeclaredPaths(pkg.bin, commands, "relative-only");',
+    from: /collectDeclaredPaths\(pkg\.bin, declaredCommands, "every-string"\);/,
+    to: 'collectDeclaredPaths(pkg.bin, declaredCommands, "relative-only");',
   },
 
   // --- src/declared.ts: the two directions a declared path can be read wrong --------------------
