@@ -46,8 +46,10 @@ export default defineConfig({
   fixedExtension: false,
   // Minified. The shipped file is not an audit surface — a devDependency, public sources, and
   // `--provenance` binding the tarball's sha512 to the commit that built it — so every transform
-  // that preserves behaviour is taken, and only those. Measured 2026-09-12 on real `pnpm pack`
-  // output: 59.6 kB tarball to 33.7 kB, 138.5 kB installed to 58.2 kB.
+  // that preserves behaviour is taken, and only those. Measured 2026-09-13 on real `pnpm pack`
+  // output: 63.2 kB tarball to 34.0 kB, 154.0 kB installed to 62.7 kB. Re-measure by setting
+  // `minify: false`, packing, and restoring — the pair rots with every commit, and the CHANGELOG
+  // bullet quoting it is a public claim.
   //
   // Two switches stay off because they break THIS tool, and both read as free wins off the option
   // list. `dropConsole` would delete every line it prints; all output here is `console.*`.

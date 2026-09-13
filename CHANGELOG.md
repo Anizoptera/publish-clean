@@ -29,6 +29,10 @@ notes: the section for a version is published verbatim when its tag is pushed.
   print as errors and neither stops the publish; `--no-heal` withholds the rewrite and then both
   refuse. A branch a checker can already read is never touched — it falls back from a JavaScript
   target to the declaration shipped next to it, and reads a TypeScript source directly.
+  Every decision is read from the archive, so anything it cannot answer is left exactly as you
+  wrote it: a target the package does not actually ship is a missing file, reported as one with the
+  path it could not find rather than quietly deleted; and nothing is moved across a condition this
+  tool does not recognise, because a private name may be meant for a consumer configured to take it.
 - **Defects that cannot be repaired without guessing are reported.** A `require` condition resolving to an ES
   module, a branch no consumer can reach, a consumer no branch serves, a condition no measured
   consumer activates, a fallback array, a shebang ending in CR — which refuses the publish only in a
@@ -55,8 +59,8 @@ notes: the section for a version is published verbatim when its tag is pushed.
 
 ### Changed
 
-- **The published package is 43% smaller.** `dist/cli.js` is now minified, taking the download
-  from 59.6 kB to 33.7 kB and the installed file from 138.5 kB to 58.2 kB. Function and class
+- **The published package is 46% smaller.** `dist/cli.js` is now minified, taking the download
+  from 63.2 kB to 34.0 kB and the installed file from 154.0 kB to 62.7 kB. Function and class
   names are deliberately kept, so a stack trace from an unexpected failure still names the
   function that threw and stays usable in a bug report. Behaviour is unchanged; the transforms
   that could have altered it are off.
