@@ -1,6 +1,6 @@
 {
   "name": "@anizoptera/publish-clean",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "description": "Cleans and helps to publish npm packages properly with a clean package.json (no unnecessary entries), verified exports, checks for unwanted files, unresolved workspace dependencies and missing entry points.",
   "keywords": [
     "bun",
