@@ -105,6 +105,37 @@ jobs:
       - run: bun run test:built
       - run: bun run cleaned-artifact:check
 
+  # macOS is where this package is developed, so without this lane the one platform it is written
+  # on is the one platform CI never checks — "it works on my machine" as the release gate.
+  #
+  # It is also the only lane with a BSD userland: the test helpers shell out to `tar`, and bsdtar
+  # is not GNU tar (it already differs from Windows tar by line ending). And it is the only lane
+  # that runs the POSIX-only cases — which Windows skips — against a case-INSENSITIVE filesystem,
+  # which matters for a tool whose rules are about names two filesystems read as one file.
+  #
+  # Runs only what an operating system can change: build, suite, self-application. Formatting,
+  # types and the doc rules read the same bytes everywhere, so repeating them here buys nothing.
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .tool-versions
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .tool-versions
+          package-manager-cache: false
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      # `bun run` puts node_modules/.bin on PATH, so the packer resolves without a PATH step of
+      # its own — unlike the Windows lane, which invokes the built CLI directly.
+      - run: bun run test:built
+      - run: bun run cleaned-artifact:check
+
   # Windows is the one platform where this tool's spawning differs, because `pnpm` and `npm`
   # there are `.cmd` shims that `execFile` cannot launch at all (see src/command.ts). That
   # branch cannot be proved by any test on Linux or macOS, and an unverified branch claiming
