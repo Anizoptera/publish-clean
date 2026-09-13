@@ -60,6 +60,12 @@ export function spawnArgs(
  * upstream: pnpm/pnpm#14502 keeps it shebang-less so pnpm 11 can install pnpm 12, and requires
  * that wrapper installs allow lifecycle scripts.
  *
+ * `EACCES` is the same complaint with a different repair, and it is not exotic: a global install
+ * may write its entry point without the execute bit — measured 2026-09-13, `bun install -g pnpm`
+ * leaves `pnpm.mjs` at 0644 — and `execvp` then finds the file and refuses it. The shell hides
+ * this, because `command -v` reports only executables, so the tool looks absent while the spawn
+ * says otherwise. Left bare it reaches the reader as `spawn pnpm EACCES`, which names neither.
+ *
  * pnpm added a fallback that runs the placeholder through Node.js, but it only rescues callers
  * that go through a shell or a bin shim — a direct spawn cannot use it. This tool spawns
  * directly on purpose, because a shell would take the arguments a caller wrote after `--`, so
@@ -73,6 +79,11 @@ export function spawnArgs(
 export function failureReason(failure: Error | undefined, exit: string): string {
   const code = isObject(failure) ? failure.code : undefined;
   if (code === "ENOENT") return "is not available in PATH";
+  if (code === "EACCES")
+    return (
+      "is on PATH but carries no execute permission. Restore it with `chmod +x`, or reinstall " +
+      "the tool"
+    );
   if (code === "ENOEXEC")
     return (
       "is on PATH but cannot be executed: the file is a script with no shebang line, or a " +

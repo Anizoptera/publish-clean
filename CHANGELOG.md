@@ -141,8 +141,9 @@ everyone), and a map too large to enumerate.
   flags that exist; a missing `package.json` is no longer reported as a syntax error; an unwritable
   `TMPDIR`, a full disk and an unusable `--tarball-out` each say what failed and where; an
   unreadable manifest names the file, which pnpm 12 does not; and a pnpm binary that is present but
-  not executable says so and says to allow pnpm's install script. A stack trace now means a defect
-  in this tool, which is the one case where the frames are the report.
+  not executable says which of the two reasons it is, because the repairs differ: a placeholder
+  left by an installer that skipped build scripts, or a file with no execute permission. A stack
+  trace now means a defect in this tool, which is the one case where the frames are the report.
 
 ## [0.9.1] - 2026-09-08
 

@@ -18,7 +18,7 @@ import { failureReason, run, spawnArgs } from "../src/command";
  * produced on Linux at all: glibc retries such a file under `/bin/sh`, so only macOS surfaces it.
  */
 describe("spawn failure diagnosis", () => {
-  const failed = (code: string): Error => Object.assign(new Error("spawn ENOEXEC"), { code });
+  const failed = (code: string): Error => Object.assign(new Error(`spawn ${code}`), { code });
 
   it("tells a reader whose tool is present and unrunnable what to do about it", () => {
     // The state every other check calls healthy: on PATH, executable bit set, kernel refuses it.
@@ -33,8 +33,19 @@ describe("spawn failure diagnosis", () => {
     expect(failureReason(failed("ENOENT"), "exited with 1")).toMatch(/not available in PATH/);
   });
 
+  it("separates a tool it may not execute from one the kernel cannot", () => {
+    // Reached by `bun install -g pnpm`, which writes pnpm.mjs at 0644: execvp finds the file and
+    // refuses it, while `command -v` stays silent because it lists only executables. Both halves
+    // of the repair are the point — the bit, or a reinstall; `spawn pnpm EACCES` offers neither.
+    const reason = failureReason(failed("EACCES"), "exited with 1");
+    expect(reason).toMatch(/no execute permission/);
+    expect(reason).toMatch(/chmod \+x/);
+  });
+
   it("never swallows a failure it does not recognise", () => {
-    expect(failureReason(failed("EACCES"), "exited with 1")).toBe("spawn ENOEXEC");
+    // A code with no repair to teach must arrive verbatim: inventing advice for an exhausted file
+    // table would send the reader after a permission bit that is not the problem.
+    expect(failureReason(failed("EMFILE"), "exited with 1")).toBe("spawn EMFILE");
     expect(failureReason(undefined, "exited with 1")).toBe("exited with 1");
   });
 });
