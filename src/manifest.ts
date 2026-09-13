@@ -67,6 +67,16 @@ const DEV_FIELDS = new Set([
   "turbo",
 ]);
 
+/**
+ * Lifecycle scripts a consumer's installer may run. Finding one keeps the WHOLE block, because it
+ * can invoke helpers named anywhere else in it.
+ *
+ * `prepare` never actually arrives here: measured 2026-09-13, `pnpm pack` strips `prepare`,
+ * `prepack`, `postpack`, `prepublishOnly`, `publish` and `postpublish` from the packed manifest
+ * and keeps the other four members of this set. It stays listed because this set states what a
+ * CONSUMER runs, not what one packer forwards — but a test asserting that a `prepare`-only
+ * package keeps its scripts would be asserting something no pnpm tarball can contain.
+ */
 const CONSUMER_SCRIPTS = new Set(["preinstall", "install", "postinstall", "prepare", "uninstall"]);
 
 const DEP_FIELDS = [
