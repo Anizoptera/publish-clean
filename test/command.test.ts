@@ -4,9 +4,8 @@
  * reach it, and no other platform may pay for the rule.
  */
 import { describe, expect, it } from "vitest";
-import { watch } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, writeFile, readFile, realpath, rm } from "node:fs/promises";
+import { access, mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -83,13 +82,25 @@ describe("spawn arguments", () => {
 });
 
 it("settles a cancelled real child before returning on this platform", async () => {
-  // Windows temp paths may use 8.3 aliases, which libuv cannot safely watch (libuv#5010).
-  const root = await realpath(await mkdtemp(path.join(tmpdir(), "publish-clean-process-")));
+  const root = await mkdtemp(path.join(tmpdir(), "publish-clean-process-"));
   const controller = new AbortController();
   const reason = new Error("test cancellation");
-  const watcher = watch(root, (_event, name) => {
-    if (name === "ready") controller.abort(reason);
-  });
+  // Readiness is polled, not watched: macOS delivers `fs.watch` renames late or coalesced under
+  // load, and a missed event let the timeout below settle the call instead of the cancellation.
+  const ready = (async () => {
+    while (!controller.signal.aborted) {
+      if (
+        await access(path.join(root, "ready")).then(
+          () => true,
+          () => false,
+        )
+      ) {
+        controller.abort(reason);
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  })();
   let result: Promise<unknown> | undefined;
   try {
     await writeFile(
@@ -103,7 +114,9 @@ setInterval(() => {}, 1000);
     );
     result = run(process.execPath, [path.join(root, "child.cjs")], root, {
       signal: controller.signal,
-      timeout: 3000,
+      // A runaway guard only, far above a loaded machine's child startup, so the cancellation is
+      // the one thing that can settle this call.
+      timeout: 60_000,
     }).catch((error: unknown) => error);
     expect(await result).toBe(reason);
     const pid = Number(await readFile(path.join(root, "ready"), "utf8"));
@@ -111,7 +124,7 @@ setInterval(() => {}, 1000);
   } finally {
     controller.abort(reason);
     await result;
-    watcher.close();
+    await ready;
     await rm(root, { recursive: true, force: true });
   }
 });
