@@ -218,6 +218,26 @@ const MUTATIONS: readonly Mutation[] = [
     to: "const rule = active.findLast(",
   },
   {
+    // Agent tools write their state inside a shipped `src/`, where a `files` entry packs it.
+    name: "packed editor or agent state ships unrefused",
+    file: "src/artifact.ts",
+    from: /\n  \/\(\?:\^\|\\\/\)\\\.\(\?:idea\|[^\n]*\n/,
+    to: "\n",
+  },
+  {
+    name: "packed editor or agent state: aider history ships unrefused",
+    file: "src/artifact.ts",
+    from: /\n  \/\(\?:\^\|\\\/\)\\\.aider[^\n]*\n/,
+    to: "\n",
+  },
+  {
+    // Without the boundary the rule matches prefixes and refuses a Claude Code plugin's manifest.
+    name: "packed editor or agent state matched by prefix",
+    file: "src/artifact.ts",
+    from: /\|agents\?\|omc\)\(\?:\\\/\|\$\)/,
+    to: "|agents?|omc)",
+  },
+  {
     // Reporting rather than throwing is only sound while the finding stays fatal; drop this one
     // field and a package ships its own test tree with a warning nobody reads.
     name: "a shipped development file becomes a warning",
