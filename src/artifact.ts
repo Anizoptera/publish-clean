@@ -34,8 +34,20 @@ const SECRET_PATTERNS = [
   /(?:^|\/)id_(?:rsa|dsa|ecdsa|ed25519)$/i,
 ];
 
-/** Build-machine internals. No credential of their own, so the only repair is to stop packing. */
-const INTERNAL_PATTERNS = [/(?:^|\/)node_modules(?:\/|$)/i, /(?:^|\/)\.git(?:\/|$)/i];
+/**
+ * Build-machine internals. No credential of their own, so the only repair is to stop packing.
+ *
+ * Editor and coding-agent state counts as internal like `.git`: settings, workspace layouts,
+ * session transcripts and memory describe the author's machine and work, can quote private code
+ * or paths, and no consumer runs them. A whole directory name is matched, so a shipped manifest
+ * such as `.claude-plugin/plugin.json` is not one. `.aider*` also names files (`.aider.chat.history.md`).
+ */
+const INTERNAL_PATTERNS = [
+  /(?:^|\/)node_modules(?:\/|$)/i,
+  /(?:^|\/)\.git(?:\/|$)/i,
+  /(?:^|\/)\.(?:idea|vscode|cursor|windsurf|junie|claude|codex|gemini|agents?|omc)(?:\/|$)/i,
+  /(?:^|\/)\.aider[^/]*(?:\/|$)/i,
+];
 
 const SUSPICIOUS_PATTERNS = [
   /(?:^|\/)(?:test|tests|__tests__|__snapshots__|coverage)(?:\/|$)/,
@@ -90,8 +102,10 @@ const PACKED_CONTENT_RULES: readonly {
       `These belong to the machine that built the package, not to the package:\n` +
       `${files.map((file) => `  ${file}`).join("\n")}\n` +
       `A packed .git carries every committed blob and your remote URLs; a packed node_modules ` +
-      `installs a second, unresolvable copy of your dependency tree over the consumer's own. ` +
-      `Narrow the "files" array in your package.json.`,
+      `installs a second, unresolvable copy of your dependency tree over the consumer's own; ` +
+      `editor and coding-agent state (.idea, .vscode, .claude, .codex and the like) carries your ` +
+      `settings, sessions and memory. Narrow the "files" array in your package.json, or exclude ` +
+      `the directory with a "!" entry when it sits inside a shipped folder.`,
   },
   {
     rule: "suspicious-file",

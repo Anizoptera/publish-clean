@@ -27,6 +27,14 @@ describe.concurrent("critical file patterns", () => {
     "config/deploy.key",
     ".git/config",
     "node_modules/left-pad/index.js",
+    // Editor and agent state, nested as it is when a tool writes it inside a shipped `src/`.
+    "src/.omc/state/hud-state.json",
+    ".claude/settings.local.json",
+    "lib/.codex/session.jsonl",
+    ".idea/workspace.xml",
+    ".vscode/settings.json",
+    ".junie/guidelines.md",
+    ".aider.chat.history.md",
   ];
 
   for (const secret of secrets) {
@@ -34,6 +42,14 @@ describe.concurrent("critical file patterns", () => {
       expect(refuses(["index.js", secret])).toBe(true);
     });
   }
+
+  // The agent-state rule matches directory names, not prefixes: a Claude Code plugin ships its
+  // manifest in `.claude-plugin/`, and a VS Code extension's `.vscodeignore` is no editor state.
+  it("allows names that only start like editor or agent state", () => {
+    expect(
+      refuses(["index.js", ".claude-plugin/plugin.json", ".vscodeignore", "src/agents.js"]),
+    ).toBe(false);
+  });
 
   // A guard that stopped at the first offender passed every single-file case above, and an
   // author who deletes the one name it printed would publish the rest.

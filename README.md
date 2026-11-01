@@ -398,7 +398,9 @@ Publication stops when:
 - the tarball contains a recognised test, CI, lockfile or `tsconfig` path
   (`--allow-suspicious` to allow it) [`suspicious-file`]
 - a filename matches the protected rules for environment files, npm credentials [`secret-file`],
-  or Git internals and `node_modules` [`internal-file`]; these checks cannot be disabled
+  or Git internals, `node_modules`, and editor or coding-agent state (`.idea`, `.vscode`,
+  `.cursor`, `.windsurf`, `.junie`, `.claude`, `.codex`, `.gemini`, `.agent`, `.agents`, `.omc`,
+  `.aider*`) at any depth [`internal-file`]; these checks cannot be disabled
 - a dependency is still written as `catalog:`, `workspace:`, `link:` or `portal:`, or a local
   dependency points outside the shipped files [`monorepo-only-spec`]
 - a declared entry point cannot resolve against the shipped files; checks account for

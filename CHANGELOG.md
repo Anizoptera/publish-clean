@@ -3,6 +3,12 @@
 Notable changes per release, newest first. This file is the source of the GitHub Release
 notes: the section for a version is published verbatim when its tag is pushed.
 
+## Unreleased
+
+### New refusals
+
+- **Editor and coding-agent state.** A packed `.idea`, `.vscode`, `.cursor`, `.windsurf`, `.junie`, `.claude`, `.codex`, `.gemini`, `.agent`, `.agents` or `.omc` directory, or `.aider*` file, at any depth, is refused like `.git` [`internal-file`]: it holds the author's settings, sessions and memory, which can quote private code or paths. These tools write such directories inside a shipped folder (`src/`), where a `files` entry for that folder packs them unnoticed; exclude them with a `"!"` entry. `.claude-plugin/` and `.vscodeignore` are not matched.
+
 ## [0.10.0] - 2026-09-13
 
 One run now reports everything wrong with the package and stops at the end, instead of failing at
