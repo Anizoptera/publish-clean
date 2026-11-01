@@ -40,7 +40,7 @@ describe("release preconditions", () => {
       "sha512-3a81oZNherrMQXNJriBBMRLm+k6JqX6iCp7u5ktV05ohkpkqJ0/BqDa6PCOj/uu9RU1EI2Q86A4qmslPpUyknw==";
     expect(() => assertRegistryArtifact(Buffer.from("abc"), integrity)).not.toThrow();
     expect(() => assertRegistryArtifact(Buffer.from("abd"), integrity)).toThrow(/differs/);
-    expect(() => assertRegistryArtifact(Buffer.from("abc"), null)).toThrow(/differs/);
+    expect(() => assertRegistryArtifact(Buffer.from("abc"), null)).toThrow(/does not serve/);
   });
 });
 

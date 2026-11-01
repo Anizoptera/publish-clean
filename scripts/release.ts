@@ -73,7 +73,9 @@ export async function registryIntegrity(url: string): Promise<string | null> {
 
 export function assertRegistryArtifact(bytes: Buffer, expected: string | null): void {
   const actual = `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
-  if (expected === null || !expected.split(/\s+/).includes(actual))
+  if (expected === null)
+    throw new Error("Registry does not serve this version; re-run the workflow once it does.");
+  if (!expected.split(/\s+/).includes(actual))
     throw new Error(
       "Candidate tarball differs from registry dist.integrity; do not attest or replace release assets.",
     );
