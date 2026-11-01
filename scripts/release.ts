@@ -123,8 +123,20 @@ async function main() {
   if (tarballs.length !== 1 || !tarball) throw new Error("Expected exactly one release tarball.");
   assertRegistryArtifact(
     await readFile(path.join(out, tarball)),
-    existing ?? (await registryIntegrity(url)),
+    existing ?? (await publishedIntegrity(url)),
   );
+}
+
+// npm acknowledges a publish before the version endpoint serves it ("may take a few minutes
+// to become available"), so one read straight after publishing can 404 and fail a good release.
+// Poll until it appears; the deadline only bounds a registry that never catches up.
+async function publishedIntegrity(url: string, deadlineMs = 15 * 60_000): Promise<string | null> {
+  const end = Date.now() + deadlineMs;
+  for (;;) {
+    const integrity = await registryIntegrity(url);
+    if (integrity !== null || Date.now() >= end) return integrity;
+    await new Promise((resolve) => setTimeout(resolve, 10_000));
+  }
 }
 
 if (import.meta.main) await main();
