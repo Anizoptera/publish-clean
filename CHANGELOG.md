@@ -3,7 +3,13 @@
 Notable changes per release, newest first. This file is the source of the GitHub Release
 notes: the section for a version is published verbatim when its tag is pushed.
 
-## Unreleased
+## [0.11.0] - 2026-11-01
+
+Editor and coding-agent state can no longer reach the registry: it is refused like a packed `.git`.
+
+### Upgrade notes
+
+- The refusal below is new and cannot be waived. Run `publish-clean verify` against your package before you upgrade a release pipeline.
 
 ### New refusals
 
