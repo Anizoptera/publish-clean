@@ -21,7 +21,7 @@
   pnpm bundling, but this tool still refuses bundled `node_modules`; changing packers or linkers
   does not waive that policy.
 - Pack exactly ONCE. The published artifact is pnpm's tarball with its `package/package.json` member
-  rewritten in place (`src/tarball.ts`), never a repack of the cleaned directory. Packing again hands
+  (and any `renameFiles` member names) rewritten in place (`src/tarball.ts`), never a repack of the cleaned directory. Packing again hands
   the file set to a second packer that re-derives it from `files` — the very field being stripped — so
   it falls back to `.gitignore`/`.npmignore` and silently drops entries pnpm selected. Rewriting also
   inherits pnpm's normalisation (uid/gid 0, fixed mtime and file modes) that a plain `tar` invocation
@@ -102,6 +102,13 @@
   forever. The manifest is the ONLY surface authorised for this — file selection belongs to `pnpm pack`,
   and no other file's contents are ever altered. Unrecognised fields ship and are reported, never dropped
   silently: dropping a key some consumer resolves breaks a stranger's build with no signal here.
+  The one exception is `renameFiles`, which changes member NAMES the author lists and nothing else:
+  pnpm still selects every file, contents, mode and mtime stay pnpm's bytes, and `assertPreservedArchive`
+  holds a renamed member to every header byte outside name, prefix and checksum. It exists because a
+  package whose root is its repository root cannot prepack-copy a consumer file onto a name its own
+  maintainer file already holds (`AGENTS.consumer.md` shipping as `AGENTS.md`). Name-based guards judge
+  a renamed file under BOTH names, so a rename cannot waive `secret-file` or `internal-file`; do not
+  narrow that to the new name. Never widen it into adding, dropping or editing files.
 - Never reorder or remove anything inside `exports` or `imports` without a proof that resolution is
   unchanged. A consumer activates many conditions at once — webpack activates six — and takes the
   first key of the package's object that is in its set, so the order written here picks the winner

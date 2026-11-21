@@ -18,6 +18,7 @@ const CONFIG_KEYS = new Set([
   "keepFields",
   "noGitChecks",
   "registry",
+  "renameFiles",
   "skipFileCheck",
   "validateArtifact",
 ]);
@@ -39,6 +40,7 @@ export function packageConfig(pkg: JsonObject): JsonObject {
   stringList(config, "devFields");
   stringList(config, "keepFields");
   stringList(config, "allowUnreferenced");
+  renamedFiles(config);
   if (config.validateArtifact !== undefined) {
     const argv = stringList(config, "validateArtifact");
     if (!argv[0]?.trim() || argv.some((argument) => argument.includes("\0")))
@@ -104,4 +106,63 @@ export function keptFields(config: JsonObject): readonly string[] {
  */
 export function allowedUnreferenced(config: JsonObject): readonly string[] {
   return stringList(config, "allowUnreferenced");
+}
+
+/**
+ * Packed files the author ships under another name: `{ "AGENTS.consumer.md": "AGENTS.md" }`.
+ *
+ * Exists for a package whose root is its repository root, where the name a consumer must find is
+ * already taken by a file that must not ship — maintainer agent rules in `AGENTS.md` beside the
+ * consumer copy. A `prepack` copy cannot help there, because the destination already exists in the
+ * tree pnpm packs. Paths are written as pnpm packs them, relative to the package root, so the name
+ * the author types is the name a finding prints.
+ *
+ * Every shape whose meaning a rename could not state unambiguously is refused here, before the pack:
+ * an absolute, `.`/`..` or backslash path could land a member outside `package/`; the manifest is the
+ * one member this tool rewrites; two sources sharing a target would ship one file where the author
+ * listed two; and a target that is also a source makes the result depend on the order renames run.
+ */
+export function renamedFiles(config: JsonObject): ReadonlyMap<string, string> {
+  const value = config.renameFiles;
+  if (value === undefined) return new Map();
+  if (!isObject(value) || Object.values(value).some((target) => typeof target !== "string"))
+    throw new PublishCleanError(
+      'publish-clean.renameFiles must be an object mapping a packed path to its published path, e.g. { "AGENTS.consumer.md": "AGENTS.md" }.',
+    );
+  const renames = new Map(Object.entries(value as Record<string, string>));
+  const problems: string[] = [];
+  const targets = new Map<string, string>();
+  for (const [source, target] of renames) {
+    for (const name of [source, target])
+      if (!isPackagePath(name))
+        problems.push(
+          `${JSON.stringify(name)} is not a relative file path inside the package (no leading "/" or "./", no "." or ".." segments, no "\\", no trailing "/").`,
+        );
+      else if (name === "package.json")
+        problems.push("package.json cannot be renamed: it is the manifest this tool rewrites.");
+    if (source === target) problems.push(`${JSON.stringify(source)} is renamed to itself.`);
+    const earlier = targets.get(target);
+    if (earlier !== undefined)
+      problems.push(
+        `${JSON.stringify(earlier)} and ${JSON.stringify(source)} are both renamed to ${JSON.stringify(target)}.`,
+      );
+    targets.set(target, source);
+    if (source !== target && renames.has(target))
+      problems.push(
+        `${JSON.stringify(target)} is both a rename target and a rename source, so the result would depend on the order renames run.`,
+      );
+  }
+  if (problems.length > 0)
+    throw new PublishCleanError(`publish-clean.renameFiles:\n${[...new Set(problems)].join("\n")}`);
+  return renames;
+}
+
+function isPackagePath(name: string): boolean {
+  const parts = name.split("/");
+  return (
+    name.length > 0 &&
+    !name.includes("\\") &&
+    !name.includes("\0") &&
+    parts.every((part) => part !== "" && part !== "." && part !== "..")
+  );
 }

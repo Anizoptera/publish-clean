@@ -3,6 +3,12 @@
 Notable changes per release, newest first. This file is the source of the GitHub Release
 notes: the section for a version is published verbatim when its tag is pushed.
 
+## Unreleased
+
+### New
+
+- **Ship a file under another name** with `"publish-clean": { "renameFiles": { "AGENTS.consumer.md": "AGENTS.md" } }`. This is for a package whose root is its repository root, where the name consumers need is already taken by a file that must not ship, so a `prepack` copy cannot work. pnpm still selects the files; only the member's name in the tarball changes, never its contents. Every check judges the file under its new name, and the credential, build-machine and development-file guards under its packed name too, so a rename cannot carry a secret past them. A rename that cannot apply stops the run: a source pnpm did not pack [`rename-source-missing`], a target the tarball already carries [`rename-target-exists`], or a name a tar header cannot hold [`rename-unsupported`].
+
 ## [0.11.0] - 2026-11-01
 
 Editor and coding-agent state can no longer reach the registry: it is refused like a packed `.git`.

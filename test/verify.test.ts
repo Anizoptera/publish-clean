@@ -6,11 +6,13 @@
  * unit test against an in-memory manifest cannot distinguish "the rule is right" from "the rule
  * never ran".
  */
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, it } from "vitest";
+
+import { packageContents, readArchive } from "../src/tarball";
 
 const CLI = path.resolve("dist/cli.js");
 
@@ -331,4 +333,83 @@ it.concurrent("reports a types branch that does not resolve to declarations", as
   );
   expect(harmless.status).toBe(0);
   expect(harmless.published?.exports).toEqual({ ".": "./index.js" });
+});
+
+it.concurrent("ships a packed file under the name renameFiles gives it", async () => {
+  // The consumer this exists for: a package whose root is its repository root keeps maintainer
+  // rules in AGENTS.md, which must not ship, and consumer rules in AGENTS.consumer.md, which must
+  // ship AS AGENTS.md. pnpm still selects the files; only the member's name changes.
+  const pkg = {
+    ...SOUND,
+    files: ["index.js", "AGENTS.consumer.md"],
+    "publish-clean": { renameFiles: { "AGENTS.consumer.md": "AGENTS.md" } },
+  };
+  const fx = await fixture(pkg, {
+    ...INDEX,
+    "AGENTS.md": "maintainer rules\n",
+    "AGENTS.consumer.md": "consumer rules\n",
+  });
+  try {
+    const out = path.join(fx.root, "out");
+    const result = await runCli(["--dry-run", "--no-git-checks", "--tarball-out", out], fx.dir);
+    expect(result.stderr).toContain("publish-clean: no findings");
+    expect(result.status).toBe(0);
+    const [tarball] = await readdir(out);
+    const shipped = packageContents(readArchive(await readFile(path.join(out, String(tarball)))));
+    expect([...shipped.keys()].sort()).toEqual(["AGENTS.md", "index.js", "package.json"]);
+    expect(shipped.get("AGENTS.md")?.toString()).toBe("consumer rules\n");
+    // The configuration block is the author's tooling, never the consumer's.
+    expect(JSON.parse(String(shipped.get("package.json")))).not.toHaveProperty("publish-clean");
+  } finally {
+    await rm(fx.root, { recursive: true, force: true });
+  }
+});
+
+it.concurrent("refuses a rename it cannot apply, and still reports everything else", async () => {
+  const renaming = (renameFiles: Record<string, string>, files: string[]) => ({
+    ...SOUND,
+    files: ["index.js", ...files],
+    someToolConfig: {},
+    "publish-clean": { renameFiles },
+  });
+  const sources = { ...INDEX, "AGENTS.md": "a\n", "AGENTS.consumer.md": "c\n" };
+
+  // pnpm did not pack the source, so nothing would ship under the new name.
+  const missing = await check(renaming({ "AGENTS.consumer.md": "AGENTS.md" }, []), sources, [
+    "--dry-run",
+  ]);
+  expect(missing.status).not.toBe(0);
+  expect(missing.stderr).toContain("[error] rename-source-missing");
+  expect(missing.stderr).toContain("unrecognized-field");
+
+  // Two members would claim one path.
+  const occupied = await check(
+    renaming({ "AGENTS.consumer.md": "AGENTS.md" }, ["AGENTS.md", "AGENTS.consumer.md"]),
+    sources,
+    ["--dry-run"],
+  );
+  expect(occupied.status).not.toBe(0);
+  expect(occupied.stderr).toContain("[error] rename-target-exists");
+
+  // A name no ustar header can hold: one 200-byte component has no "/" to split at.
+  const long = await check(
+    renaming({ "AGENTS.consumer.md": `${"a".repeat(200)}.md` }, ["AGENTS.consumer.md"]),
+    sources,
+    ["--dry-run"],
+  );
+  expect(long.status).not.toBe(0);
+  expect(long.stderr).toContain("[error] rename-unsupported");
+});
+
+it.concurrent("judges a renamed file under its packed name too", async () => {
+  // Otherwise renameFiles would carry a key past the secret scan under an innocent name.
+  const pkg = {
+    ...SOUND,
+    files: ["index.js", "keys"],
+    "publish-clean": { renameFiles: { "keys/id.pem": "keys/id.txt" } },
+  };
+  const result = await check(pkg, { ...INDEX, "keys/id.pem": "-----BEGIN-----\n" }, ["--dry-run"]);
+  expect(result.status).not.toBe(0);
+  expect(result.stderr).toContain("[error] secret-file");
+  expect(result.stderr).toContain("keys/id.pem");
 });

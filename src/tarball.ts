@@ -1,10 +1,16 @@
-/** Read effective archive paths and rewrite only the manifest, preserving every other raw entry. */
+/**
+ * Read effective archive paths and rewrite only the manifest and the names of members the author
+ * asked to rename, preserving every other raw entry and every member's contents.
+ */
 import { gunzipSync, gzipSync } from "node:zlib";
 
 import { PublishCleanError } from "./error";
 
 const BLOCK = 512;
 const NAME_LEN = 100;
+const PREFIX_OFFSET = 345;
+const PREFIX_LEN = 155;
+const MAGIC_OFFSET = 257;
 const SIZE_OFFSET = 124;
 const CHECKSUM_OFFSET = 148;
 const TYPE_OFFSET = 156;
@@ -45,6 +51,10 @@ function field(block: Buffer, offset: number, length: number): string {
   const bytes = block.subarray(offset, offset + length);
   const nul = bytes.indexOf(0);
   return UTF8.decode(nul < 0 ? bytes : bytes.subarray(0, nul));
+}
+
+function isUstar(header: Buffer): boolean {
+  return field(header, MAGIC_OFFSET, 6) === "ustar";
 }
 
 function entrySize(block: Buffer): number {
@@ -129,12 +139,91 @@ function gnuLongName(body: Buffer): string {
 function reheader(original: Buffer, size: number): Buffer {
   const header = Buffer.from(original);
   header.write(size.toString(8).padStart(11, "0") + "\0", SIZE_OFFSET, 12, "ascii");
+  return seal(header);
+}
+
+/** Recomputes the checksum of a header this file has edited, in place. */
+function seal(header: Buffer): Buffer {
   // The checksum is defined over the header with its own field read as eight spaces.
   header.write(" ".repeat(8), CHECKSUM_OFFSET, 8, "ascii");
   let sum = 0;
   for (const byte of header) sum += byte;
   header.write(sum.toString(8).padStart(6, "0") + "\0 ", CHECKSUM_OFFSET, 8, "ascii");
   return header;
+}
+
+/**
+ * Why a packed file cannot be published under another name, or null when it can.
+ *
+ * - `missing` — no regular-file member of that name exists in the archive.
+ * - `not-file` — the member is a directory, link or device, which a rename of FILE names must not
+ *   move: a renamed directory would leave its children behind under the old prefix.
+ * - `extended-name` — the member's name lives in a PAX or GNU long-name header before it. Renaming
+ *   would mean authoring that header too, a second encoding to get right for a case no packer
+ *   produces for a short name; the author can shorten the source path instead.
+ * - `too-long` — the new name does not fit the ustar name and prefix fields, for the same reason.
+ */
+export type RenameRefusal = "extended-name" | "missing" | "not-file" | "too-long";
+
+function memberIndex(archive: TarArchive, source: string): number {
+  return archive.entries.findIndex(
+    (entry) => entry.name === `package/${source}` && !METADATA_TYPES.has(entry.type),
+  );
+}
+
+export function renameRefusal(
+  archive: TarArchive,
+  source: string,
+  target: string,
+): null | RenameRefusal {
+  const index = memberIndex(archive, source);
+  const entry = archive.entries[index];
+  if (!entry) return "missing";
+  if (entry.type !== "0" && entry.type !== "") return "not-file";
+  const before = archive.entries[index - 1];
+  if (
+    before?.type === GNU_LONG_NAME_TYPE ||
+    (before?.type === "x" && paxFields(before.body).has("path"))
+  )
+    return "extended-name";
+  return renamedHeader(entry.header, `package/${target}`) ? null : "too-long";
+}
+
+/**
+ * The member's header carrying `name` instead, or null when ustar cannot hold it. Only the name,
+ * prefix and checksum fields change, so size, mode, owner and mtime stay exactly what pnpm wrote.
+ * A name over 100 bytes splits at a `/` into the 155-byte prefix, which only a ustar header has.
+ */
+function renamedHeader(original: Buffer, name: string): Buffer | null {
+  const bytes = Buffer.from(name, "utf8");
+  let split = -1;
+  if (bytes.length > NAME_LEN) {
+    if (!isUstar(original)) return null;
+    for (let at = bytes.indexOf(0x2f); at !== -1; at = bytes.indexOf(0x2f, at + 1))
+      if (at <= PREFIX_LEN && bytes.length - at - 1 <= NAME_LEN && bytes.length - at - 1 > 0) {
+        split = at;
+        break;
+      }
+    if (split === -1) return null;
+  }
+  const header = Buffer.from(original);
+  header.fill(0, 0, NAME_LEN);
+  if (isUstar(original)) header.fill(0, PREFIX_OFFSET, PREFIX_OFFSET + PREFIX_LEN);
+  if (split === -1) bytes.copy(header, 0);
+  else {
+    bytes.copy(header, PREFIX_OFFSET, 0, split);
+    bytes.copy(header, 0, split + 1);
+  }
+  return seal(header);
+}
+
+/** True for a header byte that a rename is allowed to change: name, checksum or ustar prefix. */
+function isNameByte(index: number): boolean {
+  return (
+    index < NAME_LEN ||
+    (index >= CHECKSUM_OFFSET && index < CHECKSUM_OFFSET + 8) ||
+    (index >= PREFIX_OFFSET && index < PREFIX_OFFSET + PREFIX_LEN)
+  );
 }
 
 /**
@@ -165,7 +254,7 @@ export function readArchive(gzipped: Buffer): TarArchive {
       break;
     }
     const type = field(header, TYPE_OFFSET, 1);
-    const prefix = field(header, 257, 6) === "ustar" ? field(header, 345, 155) : "";
+    const prefix = isUstar(header) ? field(header, PREFIX_OFFSET, PREFIX_LEN) : "";
     const rawName = [prefix, field(header, 0, NAME_LEN)].filter(Boolean).join("/");
     assertChecksum(header, rawName);
     const extended = PAX_TYPES.has(type);
@@ -240,19 +329,35 @@ export function readArchive(gzipped: Buffer): TarArchive {
   return { entries, tail };
 }
 
-/** Check the final readback against the packed bytes, including entry order and metadata. */
-export function assertPreservedArchive(before: TarArchive, after: TarArchive): void {
+/**
+ * Check the final readback against the packed bytes, including entry order and metadata.
+ *
+ * A renamed member is held to everything but its name: same position, type and body, and a header
+ * differing only in the name, prefix and checksum bytes. That comparison is written byte by byte
+ * rather than by calling `renamedHeader` again, so a defect in the rename cannot vouch for itself.
+ */
+export function assertPreservedArchive(
+  before: TarArchive,
+  after: TarArchive,
+  renames: ReadonlyMap<string, string> = new Map(),
+): void {
   if (before.entries.length !== after.entries.length || !before.tail.equals(after.tail))
     throw new PublishCleanError("Rewriting the manifest changed the archive structure.");
   for (const [index, original] of before.entries.entries()) {
     const result = after.entries[index];
+    const installed = !METADATA_TYPES.has(original.type);
+    const target = installed ? renames.get(original.name.slice("package/".length)) : undefined;
     if (
       !result ||
-      original.name !== result.name ||
       original.type !== result.type ||
-      (original.name === MANIFEST_PATH && !METADATA_TYPES.has(original.type)
-        ? !reheader(original.header, result.body.length).equals(result.header)
-        : !original.raw.equals(result.raw))
+      (target === undefined
+        ? original.name !== result.name ||
+          (original.name === MANIFEST_PATH && installed
+            ? !reheader(original.header, result.body.length).equals(result.header)
+            : !original.raw.equals(result.raw))
+        : result.name !== `package/${target}` ||
+          !original.raw.subarray(BLOCK).equals(result.raw.subarray(BLOCK)) ||
+          original.header.some((byte, at) => !isNameByte(at) && byte !== result.header[at]))
     )
       throw new PublishCleanError(
         `Rewriting the manifest changed archive entry ${JSON.stringify(original.name)}.`,
@@ -313,19 +418,40 @@ export function manifestText(archive: TarArchive): string {
   return manifestEntry(archive).body.toString("utf8");
 }
 
-/** Returns the gzipped tarball with `package/package.json` replaced by `manifest`. */
-export function replaceManifest(archive: TarArchive, manifest: string): Buffer {
+/**
+ * Returns the gzipped tarball with `package/package.json` replaced by `manifest` and each member
+ * named in `renames` (packed path → published path, both without `package/`) carrying its new
+ * name over its unchanged bytes. The caller filters `renames` through `renameRefusal` first, so a
+ * refusal here is a defect in that filtering, never in the package.
+ */
+export function replaceManifest(
+  archive: TarArchive,
+  manifest: string,
+  renames: ReadonlyMap<string, string> = new Map(),
+): Buffer {
   const target = manifestEntry(archive);
   const body = Buffer.from(manifest, "utf8");
-  const parts = archive.entries.map((entry) =>
-    entry === target
-      ? Buffer.concat([
-          reheader(entry.header, body.length),
-          body,
-          Buffer.alloc(BLOCK * Math.ceil(body.length / BLOCK) - body.length),
-        ])
-      : entry.raw,
-  );
+  const headers = new Map<TarEntry, Buffer>();
+  for (const [source, renamed] of renames) {
+    const refusal = renameRefusal(archive, source, renamed);
+    const entry = archive.entries[memberIndex(archive, source)];
+    const header = entry && !refusal && renamedHeader(entry.header, `package/${renamed}`);
+    if (!entry || !header)
+      throw new PublishCleanError(
+        `Cannot rename ${source} to ${renamed}: ${refusal ?? "unknown"}.`,
+      );
+    headers.set(entry, header);
+  }
+  const parts = archive.entries.map((entry) => {
+    if (entry === target)
+      return Buffer.concat([
+        reheader(entry.header, body.length),
+        body,
+        Buffer.alloc(BLOCK * Math.ceil(body.length / BLOCK) - body.length),
+      ]);
+    const header = headers.get(entry);
+    return header ? Buffer.concat([header, entry.raw.subarray(BLOCK)]) : entry.raw;
+  });
   parts.push(archive.tail);
   // Compression belongs to the executing runtime; release repair must compare the actual digest.
   return gzipSync(Buffer.concat(parts), { level: 9 });

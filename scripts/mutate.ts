@@ -694,6 +694,43 @@ const MUTATIONS: readonly Mutation[] = [
     from: /\)\)\n {4}console\.error\(/,
     to: '))\n    git("config", "--unset", "core.hooksPath"), console.error(',
   },
+  // --- renameFiles: names change, nothing else does --------------------------------------------
+  {
+    name: "rename: a target already in the archive is overwritten",
+    file: "src/rename.ts",
+    from: /if \(occupied\.length > 0\) \{/,
+    to: "if (occupied.length < 0) {",
+  },
+  {
+    name: "rename: a renamed file escapes the scan under its packed name",
+    file: "src/cli.ts",
+    from: /\.\.\.reviewPackedContent\(\[\.\.\.finalFiles, \.\.\.renamedSources\], allowSuspicious\),/,
+    to: "...reviewPackedContent(finalFiles, allowSuspicious),",
+  },
+  {
+    name: "rename: a renamed member may change any header byte",
+    file: "src/tarball.ts",
+    from: /original\.header\.some\(\(byte, at\) => !isNameByte\(at\) && byte !== result\.header\[at\]\)/,
+    to: "false",
+  },
+  {
+    name: "rename: a renamed member may change its bytes",
+    file: "src/tarball.ts",
+    from: /!original\.raw\.subarray\(BLOCK\)\.equals\(result\.raw\.subarray\(BLOCK\)\) \|\|/,
+    to: "",
+  },
+  {
+    name: "rename: two sources may share a target",
+    file: "src/config.ts",
+    from: /if \(earlier !== undefined\)/,
+    to: "if (earlier === null)",
+  },
+  {
+    name: "rename: a target may also be a source",
+    file: "src/config.ts",
+    from: /if \(source !== target && renames\.has\(target\)\)/,
+    to: "if (false)",
+  },
 ];
 
 /**

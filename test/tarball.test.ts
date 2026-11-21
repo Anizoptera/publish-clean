@@ -11,8 +11,10 @@ import { describe, expect, it } from "vitest";
 import {
   assertPreservedArchive,
   manifestText,
+  packageContents,
   packageFiles,
   readArchive,
+  renameRefusal,
   replaceManifest,
 } from "../src/tarball";
 
@@ -24,15 +26,23 @@ interface Entry {
   type?: string;
   prefix?: string;
   size?: number;
+  mode?: string;
 }
 
 /** Builds a minimal ustar archive, computing the header checksum the way readers verify it. */
 function archive(entries: readonly Entry[]): Buffer {
   const blocks: Buffer[] = [];
-  for (const { name, body, type = "0", prefix = "", size = Buffer.byteLength(body) } of entries) {
+  for (const {
+    name,
+    body,
+    type = "0",
+    prefix = "",
+    size = Buffer.byteLength(body),
+    mode = "0000644",
+  } of entries) {
     const header = Buffer.alloc(BLOCK);
     header.write(name, 0, 100, "utf8");
-    header.write("0000644\0", 100, 8, "ascii");
+    header.write(`${mode}\0`, 100, 8, "ascii");
     header.write(size.toString(8).padStart(11, "0") + "\0", 124, 12, "ascii");
     header.write(" ".repeat(8), 148, 8, "ascii");
     header.write(type, 156, 1, "ascii");
@@ -374,5 +384,80 @@ describe("effective archive entries", () => {
       expect(() => assertPreservedArchive(original, readArchive(archive(changed)))).toThrow(
         /changed/,
       );
+  });
+});
+
+describe("member renaming", () => {
+  const source = () =>
+    readArchive(
+      archive([
+        { name: MANIFEST, body: "{}" },
+        { name: "package/AGENTS.consumer.md", body: "consumer\n" },
+        { name: "package/lib", body: "", type: "5" },
+        { name: "PaxHeader", body: pax("path", `package/${"d".repeat(120)}.md`), type: "x" },
+        { name: "package/short.md", body: "long\n" },
+      ]),
+    );
+
+  it("changes only the name, prefix and checksum of the renamed member", () => {
+    const before = source();
+    const renames = new Map([["AGENTS.consumer.md", "AGENTS.md"]]);
+    const after = readArchive(replaceManifest(before, "{}", renames));
+    expect(packageFiles(after)).toContain("AGENTS.md");
+    expect(packageFiles(after)).not.toContain("AGENTS.consumer.md");
+    expect(() => assertPreservedArchive(before, after, renames)).not.toThrow();
+    // Without the map the same archive is a changed file set, which is what proves the map is
+    // the only thing excusing it.
+    expect(() => assertPreservedArchive(before, after)).toThrow(/changed archive entry/);
+  });
+
+  it("splits a name over 100 bytes into the ustar prefix", () => {
+    const before = source();
+    const target = `${"p".repeat(90)}/${"n".repeat(90)}.md`;
+    const renames = new Map([["AGENTS.consumer.md", target]]);
+    const after = readArchive(replaceManifest(before, "{}", renames));
+    expect(packageContents(after).get(target)?.toString()).toBe("consumer\n");
+    expect(() => assertPreservedArchive(before, after, renames)).not.toThrow();
+  });
+
+  it("reports what it cannot rename instead of guessing", () => {
+    const before = source();
+    expect(renameRefusal(before, "absent.md", "x.md")).toBe("missing");
+    expect(renameRefusal(before, "lib", "x")).toBe("not-file");
+    expect(renameRefusal(before, `${"d".repeat(120)}.md`, "x.md")).toBe("extended-name");
+    expect(renameRefusal(before, "AGENTS.consumer.md", "a".repeat(200))).toBe("too-long");
+    expect(renameRefusal(before, "AGENTS.consumer.md", "AGENTS.md")).toBeNull();
+    expect(() => replaceManifest(before, "{}", new Map([["absent.md", "x.md"]]))).toThrow(
+      /missing/,
+    );
+  });
+
+  it("refuses a renamed member whose bytes changed", () => {
+    const before = source();
+    const renames = new Map([["AGENTS.consumer.md", "AGENTS.md"]]);
+    const renamedAs = (member: Entry) =>
+      readArchive(
+        archive([
+          { name: MANIFEST, body: "{}" },
+          member,
+          { name: "package/lib", body: "", type: "5" },
+          { name: "PaxHeader", body: pax("path", `package/${"d".repeat(120)}.md`), type: "x" },
+          { name: "package/short.md", body: "long\n" },
+        ]),
+      );
+    // The control: the same builder with nothing changed but the name passes.
+    const honest = renamedAs({ name: "package/AGENTS.md", body: "consumer\n" });
+    expect(() => assertPreservedArchive(before, honest, renames)).not.toThrow();
+    // Same size, other contents.
+    const tampered = renamedAs({ name: "package/AGENTS.md", body: "tampered\n" });
+    expect(() => assertPreservedArchive(before, tampered, renames)).toThrow(/AGENTS\.consumer/);
+    // Same contents, a header field outside the name: an executable bit nobody asked for.
+    const chmodded = renamedAs({ name: "package/AGENTS.md", body: "consumer\n", mode: "0000755" });
+    expect(() => assertPreservedArchive(before, chmodded, renames)).toThrow(/AGENTS\.consumer/);
+    // Right bytes, wrong name.
+    const misnamed = readArchive(
+      replaceManifest(before, "{}", new Map([["AGENTS.consumer.md", "B.md"]])),
+    );
+    expect(() => assertPreservedArchive(before, misnamed, renames)).toThrow(/AGENTS\.consumer/);
   });
 });

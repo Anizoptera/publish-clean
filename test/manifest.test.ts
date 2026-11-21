@@ -3,7 +3,7 @@
  * the CLI reaches these; what it cannot afford is breadth, because every case there costs two
  * package managers and a tarball. The evasions that matter are cheap here.
  */
-import { customDevFields, keptFields, packageConfig } from "../src/config";
+import { customDevFields, keptFields, packageConfig, renamedFiles } from "../src/config";
 import { describe, expect, it } from "vitest";
 
 import { isFatal } from "../src/finding";
@@ -348,4 +348,29 @@ it("preserves literal validator arguments including empty optional arguments", (
   expect(packageConfig({ "publish-clean": { validateArtifact: argv } }).validateArtifact).toEqual(
     argv,
   );
+});
+
+it.each([
+  ["AGENTS.consumer.md"],
+  [{ a: 1 }],
+  [{ "/abs": "x" }],
+  [{ "../up": "x" }],
+  [{ "./a": "x" }],
+  [{ a: "dir/" }],
+  [{ "a\\b": "x" }],
+  [{ a: "package.json" }],
+  [{ a: "a" }],
+  [{ a: "x", b: "x" }],
+  [{ a: "b", b: "c" }],
+])("rejects an unusable renameFiles map: %j", (renameFiles) => {
+  expect(() => packageConfig({ "publish-clean": { renameFiles } })).toThrow("renameFiles");
+});
+it("reads renameFiles as packed path to published path", () => {
+  const config = packageConfig({
+    "publish-clean": { renameFiles: { "AGENTS.consumer.md": "AGENTS.md", "x/a.md": "y/b.md" } },
+  });
+  expect([...renamedFiles(config)]).toEqual([
+    ["AGENTS.consumer.md", "AGENTS.md"],
+    ["x/a.md", "y/b.md"],
+  ]);
 });

@@ -92,6 +92,8 @@ Manifest configuration, under a "publish-clean" key in package.json:
   allowUnreferenced string[] Shipped files nothing imports on purpose: a binary a loader finds by
                         path, a directory read at run time. Matched as a prefix, so naming a
                         directory covers everything under it.
+  renameFiles  object    Packed path to published path, e.g. {"AGENTS.consumer.md": "AGENTS.md"}.
+                        pnpm still selects the file; only its name in the tarball changes.
   noGitChecks  boolean   Default for --no-git-checks.
   skipFileCheck boolean  Default for --skip-file-check.
   allowSuspicious boolean Default for --allow-suspicious.

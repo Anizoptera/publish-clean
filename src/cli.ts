@@ -13,12 +13,19 @@ import { fileURLToPath } from "node:url";
 import { assertSameEntries, forbiddenPackedFiles, reviewPackedContent } from "./artifact";
 import { reviewDeclaredFiles } from "./declared";
 import { requireTool, run } from "./command";
-import { allowedUnreferenced, customDevFields, keptFields, packageConfig } from "./config";
+import {
+  allowedUnreferenced,
+  customDevFields,
+  keptFields,
+  packageConfig,
+  renamedFiles,
+} from "./config";
 import { reviewExports } from "./exports";
 import { countOf, formatFindings, publishRefusal } from "./finding";
 import { reviewSelfReferences, reviewShippedFiles, reviewUnreferencedFiles } from "./shipped";
 import { HELP, parseOptions } from "./options";
 import { reviewPackedNames } from "./packed-names";
+import { reviewRenames } from "./rename";
 import { PublishCleanError } from "./error";
 import { isObject, stringifyJson } from "./json";
 import type { JsonObject } from "./json";
@@ -280,6 +287,7 @@ async function packAndClean(
   const extraDevFields = customDevFields(config);
   const keepFields = keptFields(config);
   const allowUnreferenced = allowedUnreferenced(config);
+  const renames = renamedFiles(config);
 
   // Gathered, then refused once. Three independent reasons the source cannot be packed, and a
   // package that is private AND dirty AND declares no `files` is the ordinary first run of this
@@ -321,17 +329,24 @@ async function packAndClean(
     // The packed manifest is what every check judges, because pnpm has already applied any
     // `publishConfig.exports` override by this point — so this value, not the source one, is
     // what consumers will resolve against.
-    // `exports` is repaired against the names pnpm packed, which `assertSameEntries` below proves
-    // the rewrite leaves untouched — only the manifest member's bytes change.
+    // `exports` is repaired against the names that will ship — pnpm's, with the author's
+    // `renameFiles` applied — which `assertSameEntries` below proves the rewrite produced: only the
+    // manifest member's bytes and the renamed members' names change.
     const packedNames = packageFiles(packed);
+    const renamed = reviewRenames(packed, renames);
+    const expectedNames = packedNames.map((file) => renamed.applied.get(file) ?? file).sort();
     const review = reviewExports(withRegistry(stripManifest(packedPkg, extraDevFields), registry), {
-      files: new Set(packedNames),
+      files: new Set(expectedNames),
       heal: opts.heal && config.heal !== false,
     });
-    const findings = [...review.findings, ...reviewUnrecognizedFields(review.manifest, keepFields)];
+    const findings = [
+      ...renamed.findings,
+      ...review.findings,
+      ...reviewUnrecognizedFields(review.manifest, keepFields),
+    ];
     const cleanedText = stringifyJson(review.manifest);
 
-    await writeFile(finalTarball, replaceManifest(packed, cleanedText));
+    await writeFile(finalTarball, replaceManifest(packed, cleanedText, renamed.applied));
 
     // Every guard reads the artifact that gets uploaded, and nothing else — decoded again
     // from the file just written, never from the buffer that produced it. Validating the
@@ -340,16 +355,20 @@ async function packAndClean(
     const finalBytes = await readFile(finalTarball);
     const published = readArchive(finalBytes);
     const finalFiles = packageFiles(published);
-    assertSameEntries(packedNames, finalFiles);
-    assertPreservedArchive(packed, published);
+    assertSameEntries(expectedNames, finalFiles);
+    assertPreservedArchive(packed, published, renamed.applied);
     // Everything that collects findings runs inside the `finally`, so a guard that STOPS the run
     // cannot also silence what was already found. Without it, a package carrying a leaked key and
     // a broken entry point reports only the entry point: the key is found first and the abort
     // below it throws past the one line that would have printed it.
     const shippedPkg = manifestOf(published, "the published tarball");
     try {
+      // A renamed file is judged under BOTH names. Its new name is what consumers install; its packed
+      // name is what the author's tree holds, and judging only the new one would let `renameFiles`
+      // carry a `.env` past the secret scan under an innocent name — a waiver nobody asked for.
+      const renamedSources = [...renamed.applied.keys()];
       findings.push(
-        ...reviewPackedContent(finalFiles, allowSuspicious),
+        ...reviewPackedContent([...finalFiles, ...renamedSources], allowSuspicious),
         ...reviewRegistryDestinations(shippedPkg),
         ...reviewMonorepoProtocols(shippedPkg, finalFiles),
       );
@@ -377,7 +396,11 @@ async function packAndClean(
       // package REACHES. Those answer "is this shipped file used", which is not a question about a
       // file that must not ship at all — and asking it produces a second, contradictory repair for
       // the same name.
-      const forbidden = forbiddenPackedFiles(finalFiles, allowSuspicious);
+      const forbidden = new Set(
+        [...forbiddenPackedFiles([...finalFiles, ...renamedSources], allowSuspicious)].map(
+          (file) => renamed.applied.get(file) ?? file,
+        ),
+      );
       const contents = new Map(
         [...packageContents(published)].filter(([file]) => !forbidden.has(file)),
       );

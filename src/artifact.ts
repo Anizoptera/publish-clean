@@ -189,10 +189,11 @@ export function reviewPackedContent(files: readonly string[], allowSuspicious: b
 }
 
 /**
- * Refuses a rewritten tarball whose file set is not the packed one, entry for entry.
+ * Refuses a rewritten tarball whose file set is not the expected one, entry for entry: the packed
+ * names with the author's `renameFiles` applied.
  *
- * Replacing a member is supposed to change one member, and the rewriter copies every other
- * entry as opaque bytes — so this can only fail through a defect in that code, which is exactly
+ * Replacing a member is supposed to change one member's bytes and the listed members' names, and
+ * the rewriter copies every other entry as opaque bytes — so this can only fail through a defect in that code, which is exactly
  * why it is worth asserting on the step that cannot be taken back. Nothing else would notice a
  * dropped file: the leak checks only ask what is present, and a package missing a file installs
  * fine and then fails at import, on a version the registry keeps forever.

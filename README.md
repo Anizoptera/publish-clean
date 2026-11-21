@@ -324,7 +324,7 @@ publish-clean packages/my-lib -- --access public --tag next
 ```mermaid
 flowchart TD
   A[Your package directory] -->|pnpm pack| B[Tarball, file set chosen by pnpm]
-  B --> C[Rewrite only package.json inside]
+  B --> C[Rewrite only package.json inside, and the names renameFiles lists]
   C --> D[Final tarball]
   D --> E{Checks, all reading this tarball}
   E -->|any fails| F[Exit non-zero, publish nothing]
@@ -407,7 +407,8 @@ Publication stops when:
   extension lookup, conditions and fallbacks. A declared path no consumer can resolve — an object
   `browser`, `sideEffects`, an internal `#` import, a `*` pattern matching no packed file — reports
   and continues instead [`declared-path-inert`], and `--strict` refuses it
-- rewriting the manifest changed anything else in the tarball
+- rewriting the manifest changed anything else in the tarball, beyond the names
+  [`renameFiles`](#ship-a-file-under-another-name) asked for
 - GitHub trusted publishing or provenance is enabled, but the `repository` in your manifest
   is not the repository the workflow is running in
 - a `require` condition resolves to an ES module [`require-branch-is-esm`]. Node can require one
@@ -554,6 +555,7 @@ boolean flags enable their setting. Pass per-release npm options, such as dist-t
 | -                    | `devFields`       | Extra manifest fields to strip.                                                            |
 | -                    | `keepFields`      | Fields that belong in the published package, so stop reporting them.                       |
 | -                    | `allowUnreferenced` | Shipped paths nothing imports, on purpose. Matched as a prefix, so a directory name covers everything under it. |
+| -                    | [`renameFiles`](#ship-a-file-under-another-name) | Ship a packed file under another name, e.g. `{ "AGENTS.consumer.md": "AGENTS.md" }`. |
 | -                    | [`validateArtifact`](#validate-the-final-artifact) | Run your checks on the cleaned tarball before copying or publishing it. |
 | `-h`, `--help`       | -                 | Print usage, every flag, and the config keys.                                              |
 | `-v`, `--version`    | -                 | Print the installed version.                                                               |
@@ -606,6 +608,27 @@ Exit with code 0 to pass or a nonzero code to reject the package. A failed launc
 Your script runs with your permissions. Keep it read-only and wait for its child processes to finish; publish-clean does not sandbox it or protect other project files.
 
 Check the supplied tarball. Packing again checks different bytes; calling publish-clean from the script runs the same hook again.
+
+### Ship a file under another name
+
+Use `renameFiles` when a file must reach consumers under a name your package root already uses for something that must not ship. The usual case is a package whose root is its repository root: `AGENTS.md` holds the maintainer's agent rules, and the consumer's agent instructions live in `AGENTS.consumer.md` but must install as `AGENTS.md`. A `prepack` copy cannot do this, because the target already exists in the tree pnpm packs.
+
+```json
+{
+  "files": ["dist", "AGENTS.consumer.md"],
+  "publish-clean": {
+    "renameFiles": { "AGENTS.consumer.md": "AGENTS.md" }
+  }
+}
+```
+
+pnpm still decides what is packed, so list the source in `files`, and leave the target out. Paths are relative to the package root, as pnpm packs them. Only the member's name in the tarball changes: its contents, mode and timestamp stay exactly as pnpm wrote them, and nothing in your source tree is touched. Every check judges the renamed file under its new name, which is what consumers install, and the credential, build-machine and development-file guards also judge it under its packed name, so a rename cannot carry a `.env` or a test file past them. The config is removed from the published manifest.
+
+A map that cannot work is refused before packing: a path that is absolute, starts with `./`, contains `.` or `..` segments or a backslash, renames `package.json`, renames a file to itself, gives two sources one target, or uses a target that is also a source. After packing, the run stops when:
+
+- the source is not in the packed tarball, so nothing would ship under the new name [`rename-source-missing`]. Add it to `files`, or fix the path
+- the tarball already carries the target, or a file or directory overlapping it [`rename-target-exists`]: two members on one path leave the installed file to whichever the extractor writes last
+- the rename cannot be written [`rename-unsupported`]: the source is a directory rather than a file, pnpm stored its name in a long-name header, or the target does not fit a tar header (100 bytes, or up to 155 more split at a `/`)
 
 ## What it does not do
 
